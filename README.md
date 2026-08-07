@@ -7,7 +7,7 @@ detection, document expiry, and a real-time Socket.IO gateway.
 
 > **Status — verified green (2026-08-07):**
 > - `npm run build` → **5/5 packages compile** (strict `tsc -b`, `noUncheckedIndexedAccess`).
-> - `npm run test` → **209 tests passing** across 31 suites (shared 43, db 6, worker 28, ws 17, api 115).
+> - `npm run test` → **217 tests passing** across 32 suites (shared 43, db 6, worker 28, ws 17, api 123); the suite exits **clean with no open-handle warnings**.
 > - `npm run contract` → OpenAPI↔zod and DDL↔`db.ts` checks wired per package.
 
 ---
@@ -188,14 +188,50 @@ EscalationTimer); trailer (Trailer, TrailerAssignment); media (MediaObject).
 
 ---
 
-## 5. Auth & security
+## 5. Auth, security & observability
 
+### Authentication & sessions
 - HS256 JWT access tokens (15 min) + refresh tokens (7 d); **current + previous key** for a 24 h
   rotation overlap (`JWT_SECRET` / `JWT_SECRET_PREVIOUS`, `JWT_KID`).
 - MFA/TOTP with AES-GCM-encrypted shared secret (`MFA_ENCRYPTION_KEY`); recovery codes.
 - Device PIN + revocation + offline support (`DeviceService`).
 - Permission **union** resolution (`PermissionService`); `requirePermission` middleware.
 - Login throttling (`LOGIN_MAX_FAILURES`, `LOGIN_LOCKOUT_MINUTES`).
+- argon2id password hashing; 10-session cap per user; idempotency (`Idempotency-Key`) on every
+  state-changing route (D4/C5.1).
+
+### Edge / abuse protection (security.md S-1 / S-3)
+Enforced in `packages/api/src/security/*`, gated by `SECURITY_ENFORCE` (`always` | `production` |
+`off`; default `production` → only when `NODE_ENV=production`). `always` is used by the test suite so
+the controls are always exercised. Health probes are excluded.
+
+- **Rate limiting** (`rateLimit.ts`): per-IP, per-scope sliding/fixed-window counters — global,
+  `auth`, `media`, and `telemetry` scopes, each with its own per-minute cap (`RATE_LIMIT_*_PER_MINUTE`).
+  Redis-backed in production, in-memory fallback when Redis is unavailable (degrades open, never blocks).
+- **IP auto-blocking** (`ipBlock.ts`): counts abusive responses (`401`/`403`/`429`) per IP in a sliding
+  window; once `IP_BLOCK_THRESHOLD` is exceeded the IP is blocked (`403 IP_BLOCKED`) for
+  `IP_BLOCK_TTL_SECONDS`. Manual blocklist supported.
+- **Telemetry webhook HMAC (S-1)** (`webhookAuth.ts`): when `WEBHOOK_SECRET` is set, the public
+  `POST /api/v1/telemetry/webhook` requires an `X-Signature` HMAC-SHA256 over the raw body plus an
+  `X-Timestamp` within a ±5 min skew window; mismatch → `401`. Without a secret it is a pass-through
+  and logs a warning (never silently "secure").
+- **Safe JSON body parsing** (`bodyParser.ts`): enforces `application/json` content-type, stashes the
+  raw bytes for HMAC verification, rejects prototype-pollution keys (`__proto__`/`constructor`/
+  `prototype`), and rejects payloads nested deeper than 10 levels.
+- **Security headers** (`headers.ts` + `helmet`): `Content-Security-Policy` (`default-src 'none'`),
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, etc.
+- **CORS** via an explicit allow-list (`ALLOWED_ORIGINS`); the `ws` gateway uses `cors:{origin:false}`.
+
+### Observability (C5.7)
+- **Structured JSON logs** via the shared `Logger`; secrets/PII are redacted by the kernel serializer
+  before emission (never logged in clear).
+- **Error reporting → Sentry**: `initErrorReporter(cfg)` (no-op without a DSN) wires `reportError`,
+  which tags every `AppError`/uncaught exception with `error_code`, `requestId`, and `principalId`
+  (no PII). `flushTelemetry()` drains before exit.
+- **In-process metrics** (`Metrics` + `consoleMetricSink`) for request/error counters, emitted as
+  structured log lines (CloudWatch in AWS).
+- **`requestId` correlation**: generated per request and threaded into `AppError` and the RFC7807
+  `instance`, so a single operation is traceable across API → outbox → worker.
 
 ---
 
@@ -212,25 +248,33 @@ from the platform secret store. `system_config` holds only tunable thresholds. K
 
 All env is schema-validated (`zod`) in each package's `config/env.ts`; an invalid config throws at boot.
 
+**Edge/abuse-protection env** (api): `SECURITY_ENFORCE` (`always`/`production`/`off`), `TRUST_PROXY`,
+`WEBHOOK_SECRET` (telemetry HMAC), `ALLOWED_ORIGINS` (CORS allow-list),
+`RATE_LIMIT_GLOBAL_PER_MINUTE` / `RATE_LIMIT_AUTH_PER_MINUTE` / `RATE_LIMIT_MEDIA_PER_MINUTE` /
+`RATE_LIMIT_TELEMETRY_PER_MINUTE`, and `IP_BLOCK_THRESHOLD` / `IP_BLOCK_WINDOW_SECONDS` /
+`IP_BLOCK_TTL_SECONDS`.
+
 ---
 
 ## 7. Testing
 
 | Command | What it runs |
 |---|---|
-| `npm run test` | turbo `jest` across all packages — **209 passing** |
+| `npm run test` | turbo `jest` across all packages — **217 passing (32 suites)** |
 | `npm run build` | `tsc -b` strict build of all packages |
 | `npm run typecheck` | `tsc -b --noEmit` |
 | `npm run contract` | OpenAPI↔zod + DDL↔`db.ts` generation/checks |
 | `npm run db:validate` | apply `db/schema` + `db/seed` to the `:5444` cluster |
+| `npm run db:validate:bash` | same, via `db/validate.sh` |
 | `npm run db:types` | regenerate `shared/src/types/db.ts` from the live schema |
+| `npm run db:types:check` | verify generated `db.ts` matches the live schema (no write) |
 | `cd packages/api && npx jest` | per-package tests |
 
 Unit tests use `Result` + **fake repositories** (no live DB). Coverage targets ≥ 80 % on services.
 
-> **Known minor caveat:** a few suites (worker/ingest, ws) leave an active timer/interval that jest
-> force-exits ("worker process failed to exit gracefully"). Tests still pass; harmless teardown
-> warning, not a failure.
+> **Clean teardown:** each package runs jest with `maxWorkers: 1` (single process). Turbo still runs
+> the five packages in parallel, but as five processes instead of dozens of worker children, so the
+> suite exits gracefully with **no open-handle warnings** — and without CPU saturation.
 
 ---
 
