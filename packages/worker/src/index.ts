@@ -12,6 +12,7 @@ import { IngestConsumer } from "./ingest/consumer";
 import { BackfillPoller } from "./ingest/backfill";
 import { createOutboxRelay, registerHandlers, type RelayInfra } from "./outbox/relay";
 import { buildSchedule, JobScheduler } from "./jobs/scheduler";
+import { EnvMediaPresigner } from "./media/presigner";
 import type { VisionAdapter } from "./jobs/ocr";
 import type { CsvParser, StatementLine } from "./jobs/reconciliation";
 
@@ -97,7 +98,8 @@ async function main(): Promise<void> {
   registerHandlers(relay, relayInfra);
   relay.start();
 
-  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, NoopVision, infra.publisher));
+  const presigner = new EnvMediaPresigner(e);
+  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, NoopVision, infra.publisher, presigner));
   scheduler.start();
 
   await new Promise<void>(() => {});

@@ -57,3 +57,64 @@ export class OnCallRepository {
     return res.rows.length > 0;
   }
 }
+
+export interface DriverContext {
+  vehicleId: string | null;
+  shiftId: string | null;
+}
+
+export interface DriverShiftState {
+  shiftId: string;
+  state: string | null;
+  vehicleId: string | null;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+}
+
+/** Driver-scoped projections for the driver realtime surface (07 §3/§5, D-3). */
+export class DriverRepository {
+  constructor(private readonly client: DbClient) {}
+
+  /**
+   * The driver's currently-open (or pending-closeout) assignment — the scope the gateway joins the
+   * `driver:shift` / `driver:vehicle` rooms from. Returns nulls when the driver has no active shift.
+   */
+  async activeContext(userId: string): Promise<DriverContext> {
+    const res = await this.client.query<{ vehicle_id: string | null; shift_id: string | null }>(
+      `SELECT vehicle_id, shift_id
+         FROM app.v_shift_verification_inbox
+        WHERE driver_id = $1
+          AND state IN ('OPEN', 'PENDING_CLOSEOUT')
+        ORDER BY clock_in_at DESC
+        LIMIT 1`,
+      [userId],
+    );
+    const row = res.rows[0];
+    return { vehicleId: row?.vehicle_id ?? null, shiftId: row?.shift_id ?? null };
+  }
+
+  /** The driver's own vehicle display state — emitted on (re)connect and on change (07 §5). */
+  async vehicleState(vehicleId: string): Promise<VehicleDisplayStateViewRow | null> {
+    const res = await this.client.query<VehicleDisplayStateViewRow>(
+      `SELECT * FROM app.v_vehicle_display_state WHERE vehicle_id = $1`,
+      [vehicleId],
+    );
+    return res.rows[0] ?? null;
+  }
+
+  /** The driver's active shift summary (clock-in/out, state) for the `driver:shift` snapshot. */
+  async shiftState(shiftId: string): Promise<DriverShiftState | null> {
+    const res = await this.client.query<DriverShiftState>(
+      `SELECT shift_id,
+              state,
+              vehicle_id,
+              clock_in_at,
+              clock_out_at
+         FROM app.v_shift_verification_inbox
+        WHERE shift_id = $1
+        LIMIT 1`,
+      [shiftId],
+    );
+    return res.rows[0] ?? null;
+  }
+}

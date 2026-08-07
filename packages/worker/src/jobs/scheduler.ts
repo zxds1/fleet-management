@@ -22,6 +22,7 @@ import { PartitionMaintJob } from "./partition-maint";
 import { RetentionJob } from "./retention";
 import { OcrJob } from "./ocr";
 import { quietHoursEAT, fcmTransport, smsTransport, emailTransport } from "./transports";
+import { EnvMediaPresigner, type MediaPresigner } from "../media/presigner";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -38,6 +39,7 @@ export function buildSchedule(
   env: Env,
   vision: VisionAdapter,
   publisher?: EventPublisher,
+  presigner?: MediaPresigner,
 ): ScheduledJob[] {
   const transports: Partial<Record<"PUSH" | "SMS" | "EMAIL", NotificationTransport>> = {
     PUSH: fcmTransport(env),
@@ -131,8 +133,9 @@ export function buildSchedule(
       name: "retention",
       intervalMs: DAY,
       run: async () => {
-        // Dry-run by default; flip to wet in production after sign-off (D6).
-        await new RetentionJob(pool, config).run(false);
+        // Dry-run by default; flip to wet in production after sign-off (D6). Media deletion runs
+        // only when wet AND a presigner is configured (creds present).
+        await new RetentionJob(pool, config, presigner).run(false);
       },
     },
   ];

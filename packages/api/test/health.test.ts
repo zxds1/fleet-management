@@ -55,6 +55,7 @@ describe("health probes (09 §2)", () => {
     const presigner: MediaPresigner = {
       presignPut: async () => ({ url: "x", method: "PUT", expiresInSeconds: 1 }),
       ping: async () => true,
+      deleteObject: async () => undefined,
     };
     const res = await readiness(p, presigner);
     expect(res.status).toBe("ok");

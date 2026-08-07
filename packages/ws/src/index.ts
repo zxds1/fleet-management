@@ -12,7 +12,7 @@ import { loadEnv, type Env } from "./config/env";
 import { createRedis, type RedisBundle } from "./config/redis";
 import { verifyAccessToken, principalFromClaims } from "./security/tokens";
 import { AccountStatusRepository } from "./repositories/identity";
-import { NotificationRepository, OnCallRepository, VehicleStateRepository } from "./repositories/views";
+import { DriverRepository, NotificationRepository, OnCallRepository, VehicleStateRepository } from "./repositories/views";
 import { RedisEventBus, MemoryEventBus, type EventBus } from "./pubsub";
 import { attachGateway, type GatewayDeps } from "./gateway";
 
@@ -39,6 +39,7 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
   const vehicleRepo = new VehicleStateRepository(readClient);
   const notifRepo = new NotificationRepository(readClient);
   const onCallRepo = new OnCallRepository(readClient);
+  const driverRepo = new DriverRepository(readClient);
 
   const bus: EventBus = environment.REDIS_ENABLED ? new RedisEventBus(environment.REDIS_URL) : new MemoryEventBus();
 
@@ -51,6 +52,9 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
     vehicleSnapshot: () => vehicleRepo.snapshot(),
     notificationsFor: (userId) => notifRepo.unread(userId),
     isAccidentOnCall: (userId) => onCallRepo.isAccidentOnCall(userId),
+    driverContext: (userId) => driverRepo.activeContext(userId),
+    driverVehicleState: (vehicleId) => driverRepo.vehicleState(vehicleId),
+    driverShiftState: (shiftId) => driverRepo.shiftState(shiftId),
     bus,
   };
 

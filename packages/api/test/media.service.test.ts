@@ -40,6 +40,7 @@ function makeService(overrides: { retentionDays?: number } = {}) {
   const presigner: MediaPresigner = {
     presignPut: (bucket, key) => ({ url: `https://${bucket}.s3.af-south-1.amazonaws.com/${key}`, method: "PUT", expiresInSeconds: 60 }),
     ping: async () => true,
+    deleteObject: async () => undefined,
   };
 
   return { svc: new MediaService(media, config, presigner, env), insertedRows };

@@ -47,9 +47,9 @@ class FakeSocket implements WsSocket {
   }
 }
 
-function tokenFor(sessionId: string, sub = "u1"): string {
+function tokenFor(sessionId: string, sub = "u1", roles: string[] = ["ADMIN"]): string {
   return jwt.sign(
-    { sub, email: "a@b.c", roles: ["ADMIN"], permissions: ["shift:read"], sid: sessionId, locale: "en" },
+    { sub, email: "a@b.c", roles, permissions: ["shift:read"], sid: sessionId, locale: "en" },
     env.JWT_SECRET,
     { algorithm: "HS256", issuer: env.JWT_ISSUER, keyid: env.JWT_KID },
   );
@@ -71,6 +71,9 @@ function baseDeps(overrides: Partial<GatewayDeps> = {}): GatewayDeps {
     vehicleSnapshot: async () => [],
     notificationsFor: async () => [],
     isAccidentOnCall: async () => false,
+    driverContext: async () => ({ vehicleId: null, shiftId: null }),
+    driverVehicleState: async () => null,
+    driverShiftState: async () => null,
     bus: new MemoryEventBus(),
     ...overrides,
   };
@@ -192,5 +195,39 @@ describe("attachGateway wiring", () => {
     expect(middlewareCalls).toHaveLength(1);
     expect(middlewareCalls[0]!.err).toBeInstanceOf(Error);
     expect(middlewareCalls[0]!.err?.message).toBe("UNAUTHENTICATED");
+  });
+});
+
+describe("gateway driver connections (D-3)", () => {
+  it("subscribes a driver to their own per-assignment rooms and sends a driver snapshot", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: tokenFor("s1", "u-driver", ["DRIVER"]) } };
+    const deps = baseDeps({
+      driverContext: async () => ({ vehicleId: "v9", shiftId: "sh9" }),
+      driverVehicleState: async () => ({ vehicle_id: "v9", display_state: "MOVING" }) as never,
+      driverShiftState: async () => ({ shiftId: "sh9", state: "OPEN", vehicleId: "v9", clockInAt: null, clockOutAt: null }) as never,
+    });
+    await handleConnection(socket, deps, createState());
+
+    expect(socket.disconnectCalled).toBe(false);
+    expect(socket.rooms).toContain("ws:driver:shift:sh9");
+    expect(socket.rooms).toContain("ws:driver:vehicle:v9");
+    expect(socket.rooms).toContain("ws:driver:accident:u-driver");
+    // Drivers must NOT join the admin rooms.
+    expect(socket.rooms).not.toContain("map:vehicle-states");
+    expect(socket.rooms).not.toContain("notifications:u-driver");
+
+    const events = socket.emitted.map((e) => e.event);
+    expect(events).toContain("ws:driver:vehicle");
+    expect(events).toContain("ws:driver:shift");
+  });
+
+  it("does not emit admin vehicle/notification snapshots to a driver", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: tokenFor("s1", "u-driver", ["DRIVER"]) } };
+    await handleConnection(socket, baseDeps({ driverContext: async () => ({ vehicleId: null, shiftId: null }) }), createState());
+    const events = socket.emitted.map((e) => e.event);
+    expect(events).not.toContain("map:vehicle-states");
+    expect(events).not.toContain("notifications");
   });
 });

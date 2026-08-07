@@ -80,12 +80,31 @@ export function smsTransport(env: Env): NotificationTransport {
   };
 }
 
-export function emailTransport(_env: Env): NotificationTransport {
+export function emailTransport(env: Env): NotificationTransport {
   return {
     async send(row: NotificationRow): Promise<SendResult> {
-      // Email dispatch is folded into the same provider contract; SMTP wiring is a later step.
-      logger.debug("email: queued (provider pending)", { id: row.id, to: row.recipientAddress });
-      return { status: "SENT", provider: "email-skip" };
+      if (!env.EMAIL_API_URL) {
+        logger.debug("email: no provider configured, skipping", { id: row.id, to: row.recipientAddress });
+        return { status: "SENT", provider: "email-skip" };
+      }
+      try {
+        const res = await fetch(env.EMAIL_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", [env.EMAIL_AUTH_HEADER]: String(env.EMAIL_API_KEY ?? "") },
+          body: JSON.stringify({
+            from: env.EMAIL_FROM,
+            to: row.recipientAddress,
+            subject: row.title,
+            text: row.body,
+            locale: row.locale,
+          }),
+        });
+        return res.ok
+          ? { status: "SENT", provider: "EMAIL" }
+          : { status: "FAILED", failureReason: `EMAIL ${res.status}` };
+      } catch (e) {
+        return { status: "FAILED", failureReason: (e as Error).message };
+      }
     },
   };
 }

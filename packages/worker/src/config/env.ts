@@ -32,6 +32,19 @@ const EnvSchema = z.object({
   AFRICAS_TALKING_API_KEY: z.string().optional(),
   NOTIFICATION_FROM: z.string().default("Fleet"),
 
+  // Media object store (D5, C5.3). Used by the retention job to hard-delete expired objects.
+  // When credentials are absent the retention job runs as a dry-run log (deletes are skipped).
+  AWS_REGION: z.string().default("af-south-1"),
+  AWS_ACCESS_KEY_ID: z.string().optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  AWS_SESSION_TOKEN: z.string().optional(),
+  S3_ENDPOINT: z.string().optional(),
+  S3_FORCE_PATH_STYLE: z
+    .string()
+    .default("false")
+    .transform((v) => v !== "false"),
+  S3_MEDIA_BUCKET: z.string().default("fleet-media"),
+
   // Outbox / scheduler tuning.
   OUTBOX_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
   OUTBOX_BATCH_SIZE: z.coerce.number().int().positive().default(50),
@@ -45,6 +58,14 @@ const EnvSchema = z.object({
   HEALTH_PORT: z.coerce.number().int().positive().default(8082),
   SERVICE_NAME: z.string().default("fleet-worker"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+
+  // Email transport (N9 / A1.8). A generic JSON-POST transactional provider (SES / SendGrid / Mailgun
+  // all accept a JSON body + auth header). When EMAIL_API_URL is absent the sender degrades to a
+  // logged no-op so dev/test never needs a mail provider.
+  EMAIL_API_URL: z.string().optional(),
+  EMAIL_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default("fleet@fleet.internal"),
+  EMAIL_AUTH_HEADER: z.string().default("Authorization"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

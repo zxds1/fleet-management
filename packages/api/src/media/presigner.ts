@@ -6,8 +6,9 @@
 // credentials are absent the presigner degrades to the canonical bucket endpoint (pre-SigV4
 // behaviour) so the contract + unit tests still resolve a URL.
 
-import { S3Client, PutObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, HeadBucketCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { logger } from "@fleet/shared";
 import type { Env } from "../config/env";
 
 export interface PresignedUpload {
@@ -20,6 +21,8 @@ export interface MediaPresigner {
   presignPut(bucket: string, key: string, contentType: string, expiresInSeconds: number): PresignedUpload | Promise<PresignedUpload>;
   /** Liveness probe for the configured S3 endpoint (09 §2 readiness). False when creds are absent. */
   ping(): Promise<boolean>;
+  /** Hard-deletes a media object (SigV4). No-op when creds are absent; throws on S3 failure. */
+  deleteObject(bucket: string, key: string): Promise<void>;
 }
 
 export class EnvMediaPresigner implements MediaPresigner {
@@ -67,5 +70,14 @@ export class EnvMediaPresigner implements MediaPresigner {
     } catch {
       return false;
     }
+  }
+
+  async deleteObject(bucket: string, key: string): Promise<void> {
+    // Real SigV4 DELETE (D5). When creds are absent the caller is responsible for the dry-run log.
+    if (!this.enabled || !this.client) {
+      logger.debug("media: delete skipped (no S3 credentials)", { bucket, key });
+      return;
+    }
+    await this.client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   }
 }
