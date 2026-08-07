@@ -1,0 +1,22 @@
+{
+  "name": "fleet-management",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["packages/*"],
+  "packageManager": "npm@11.17.0",
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "contract": "turbo run contract",
+    "db:validate": "node db/validate.mjs",
+    "db:validate:bash": "cd db && bash ./validate.sh",
+    "db:types": "node scripts/generate-db-types.mjs",
+    "db:types:check": "node scripts/generate-db-types.mjs --check"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

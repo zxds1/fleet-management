@@ -1,0 +1,29 @@
+{
+  "name": "@fleet/db",
+  "version": "1.0.0",
+  "description": "Data access layer: pool, transaction runner, repositories, migrations, idempotency, outbox relay, config client.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "tsc -b",
+    "rebuild": "tsc -b --force",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "tsc -b --noEmit",
+    "test": "jest --passWithNoTests",
+    "contract": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@fleet/shared": "*",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  }
+}

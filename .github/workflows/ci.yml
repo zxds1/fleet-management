@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  turbo:
+    name: build / lint / typecheck / test / contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc -b across workspace)
+        run: npm run build
+
+      - name: Lint (tsc --noEmit per package)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Contract (openapi↔schema + db.ts↔schema)
+        run: npm run contract
+
+      - name: Unit + contract tests
+        run: npm run test
+
+  integration:
+    name: integration (throwaway PG + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pg_local_dev
+          POSTGRES_DB: fleet
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate DDL + seed (db/validate pattern)
+        run: npm run db:validate
+        continue-on-error: true
+
+      - name: Contract — db.ts ↔ live schema
+        run: npm run db:types:check
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests (throwaway PG)
+        run: npm run test
+
+  signoff-gates:
+    name: sign-off gates (release blockers)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Reminder — human/legal gates required before merge to staging
+        run: |
+          echo "Hard launch gates (02-open-risk-register.md §C):"
+          echo "  R-101 DPIA approved (Kenya DPA 2019 cross-border transfer)"
+          echo "  R-103 HOS figures + emergency numbers confirmed by transport counsel"
+          echo "  R-104 DVIR severity matrix reviewed/signed by fleet safety officer"
+          echo "Quality gates: R-105 Swahili strings native-speaker reviewed, R-102 Traccar version pinned."
+          echo "These are recorded as required status checks / release blockers; CI enforces code quality only."

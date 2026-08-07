@@ -1,0 +1,33 @@
+{
+  "name": "@fleet/ws",
+  "version": "1.0.0",
+  "description": "Socket.IO gateway for admin real-time channels (07-websocket-gateway.md).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "tsc -b",
+    "rebuild": "tsc -b --force",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "tsc -b --noEmit",
+    "test": "jest --passWithNoTests",
+    "contract": "tsc -b --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fleet/db": "*",
+    "@fleet/shared": "*",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  }
+}

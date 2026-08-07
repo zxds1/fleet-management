@@ -1,0 +1,302 @@
+# =============================================================================
+# deploy/k8s - Production on AWS EKS (decision A1.10)
+#
+# Scope: workload manifests only. RDS Postgres+PostGIS, ElastiCache (AOF), S3
+# (with Object Lock bucket) and the LoadBalancer/Ingress are provisioned via
+# Terraform/IaC (out of scope of this repository). These manifests assume:
+#   * a Postgres connection string secret (fleet/db, key DATABASE_URL)
+#   * a Redis URL secret (fleet/redis, key REDIS_URL)
+#   * external secrets for FCM / Google Vision / Africa's Talking
+#   * an OIDC/internal CA issuer for mTLS between services (service mesh optional)
+# =============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleet
+  labels:
+    app.kubernetes.io/part-of: fleet-management
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: fleet-quota
+  namespace: fleet
+spec:
+  hard:
+    requests.cpu: "40"
+    requests.memory: 40Gi
+    limits.cpu: "80"
+    limits.memory: 80Gi
+    pods: "60"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fleet-config
+  namespace: fleet
+data:
+  NODE_ENV: "production"
+  TRACCAR_BASE_URL: "http://traccar.fleet.svc.cluster.local:8082"
+  # N2.3: durable Redis Stream forward; HTTP + back-fill poller is the fallback.
+  FORWARD_REDIS_URI: "redis://redis.fleet.svc.cluster.local:6379/0"
+  FORWARD_REDIS_CHANNEL: "traccar:positions"
+  LOG_FORMAT: "json"
+  TZ: "Africa/Nairobi"
+  # SendGrid / SES relay is configured by the IaC layer, not here.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleet-api
+  namespace: fleet
+  annotations:
+    # IAM Roles for Service Accounts: scoped to S3 (incl. Object Lock), KMS, SSM.
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/fleet-api-role"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: fleet
+  labels: { app: fleet-api }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: fleet-api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: fleet-api }
+    spec:
+      serviceAccountName: fleet-api
+      containers:
+        - name: api
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
+          args: ["node", "dist/api/server.js"]
+          ports: [{ containerPort: 4000 }]
+          envFrom:
+            - configMapRef: { name: fleet-config }
+            - secretRef: { name: fleet-secrets }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-redis, key: REDIS_URL }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /livez, port: 4000 }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: fleet
+spec:
+  selector: { app: fleet-api }
+  ports: [{ port: 80, targetPort: 4000 }]
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: fleet
+  labels: { app: fleet-worker }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: fleet-worker }
+  template:
+    metadata:
+      labels: { app: fleet-worker }
+    spec:
+      serviceAccountName: fleet-api
+      containers:
+        - name: worker
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
+          args: ["node", "dist/worker/index.js"]
+          envFrom:
+            - configMapRef: { name: fleet-config }
+            - secretRef: { name: fleet-secrets }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-redis, key: REDIS_URL }
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traccar
+  namespace: fleet
+  labels: { app: traccar }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: traccar }
+  template:
+    metadata:
+      labels: { app: traccar }
+    spec:
+      containers:
+        - name: traccar
+          image: traccar/traccar:latest
+          ports:
+            - { containerPort: 8082, name: web }
+            - { containerPort: 5005, name: tracker }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-traccar-db, key: DATABASE_URL }
+            - name: DATABASE_DRIVER
+              value: "org.postgresql.Driver"
+            - name: DATABASE_USER
+              value: "fleet"
+            # N2.3: durable forward.
+            - name: FORWARD_REDIS_ENABLED
+              value: "true"
+            - name: FORWARD_REDIS_URI
+              value: "redis://redis.fleet.svc.cluster.local:6379/0"
+            - name: FORWARD_REDIS_CHANNEL
+              value: "traccar:positions"
+          readinessProbe:
+            tcpSocket: { port: 8082 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traccar
+  namespace: fleet
+spec:
+  selector: { app: traccar }
+  ports:
+    - { name: web, port: 8082, targetPort: 8082 }
+    - { name: tracker, port: 5005, targetPort: 5005 }
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: fleet
+  labels: { app: redis }
+spec:
+  serviceName: redis
+  replicas: 3
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        # C5.10: AOF so the pending:gps buffer survives restart.
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--cluster-enabled", "no"]
+          ports: [{ containerPort: 6379 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "500m", memory: "1Gi" }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 20Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: fleet
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: fleet
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+    - type: Resource
+      resource:
+        name: memory
+        target: { type: Utilization, averageUtilization: 75 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: fleet
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: fleet-api }
+---
+# Nightly partition maintenance + retention sweep (7.3/D6) and the daily
+# document-expiry scan run inside the worker; this CronJob is a safety net that
+# guarantees partition provisioning even if the worker is down.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: partition-maint
+  namespace: fleet
+spec:
+  schedule: "13 1 * * *"     # 01:13 EAT, after the daily document-expiry run
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: fleet-api
+          restartPolicy: OnFailure
+          containers:
+            - name: partition-maint
+              image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
+              command: ["node", "dist/scripts/partition-maint.js"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+              resources:
+                requests: { cpu: "100m", memory: "256Mi" }
+                limits: { cpu: "250m", memory: "512Mi" }

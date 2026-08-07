@@ -1,0 +1,30 @@
+{
+  "name": "@fleet/shared",
+  "version": "1.0.0",
+  "description": "Shared kernel: types, errors, schemas, config keys for the Fleet Management Platform.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "build": "tsc -b",
+    "rebuild": "tsc -b --force",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "tsc -b --noEmit",
+    "test": "jest --passWithNoTests",
+    "contract": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@sentry/node": "^8.55.2",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  }
+}

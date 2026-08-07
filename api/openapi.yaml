@@ -1,0 +1,804 @@
+openapi: 3.0.3
+info:
+  title: Enterprise Fleet Management Platform API
+  version: 1.0.0-locked
+  description: >-
+    Locked API contract for the Enterprise Fleet Management Platform.
+    This document is generated from docs/architecture/00-locked-decisions.md and
+    the PostgreSQL schema in db/schema. The frontend team binds the externally
+    supplied UI designs to these endpoints (decision A3.6). No UI prescription
+    is contained here.
+
+    Conventions (decisions D1, D4, D7, C5.1):
+      * Base path /api/v1. JSON only.
+      * All timestamps are RFC 3339 in UTC (stored as timestamptz, rendered EAT client-side per A2.3).
+      * Cursor pagination via `cursor` / `limit` query params; cursors are opaque.
+      * Errors use RFC 7807 problem+json with an `error_code` extension member.
+      * Every state-changing request MUST carry `Idempotency-Key: <uuid>` (C5.1).
+  contact:
+    name: Fleet Platform Architecture
+servers:
+  - url: https://api.fleet.internal/api/v1
+    description: Production (AWS af-south-1, decision A1.10)
+
+tags:
+  - name: Auth
+  - name: Shifts
+  - name: Fuel
+  - name: Accidents
+  - name: Inspections
+  - name: Trailer
+  - name: Dashboard
+  - name: Reconciliation
+  - name: Anomalies
+  - name: Documents
+  - name: Media
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    idempotencyKey:
+      type: apiKey
+      in: header
+      name: Idempotency-Key
+
+  parameters:
+    cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+      description: Opaque cursor returned by a previous page.
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    operationalDate:
+      name: operational_date
+      in: query
+      schema: { type: string, format: date }
+      description: Kenyan operational date (A2.3).
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 7807 problem+json.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, example: https://docs.fleet.internal/problems/clockout_pending }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uuid }
+        error_code:
+          type: string
+          description: Stable machine-readable code (see Error Codes).
+          example: CLOCKOUT_PENDING
+        field_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              code: { type: string }
+              message: { type: string }
+
+    CursorPage:
+      type: object
+      required: [data, next_cursor, has_more]
+      properties:
+        data: { type: array, items: {} }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string, example: "1234.50" }
+        currency: { type: string, enum: [KES], default: KES }
+
+    GeoPoint:
+      type: object
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+
+    MediaUploadRequest:
+      type: object
+      required: [owner_kind, retention_class, content_type]
+      properties:
+        owner_kind:
+          type: string
+          enum: [WORK_LOG, INSPECTION_ITEM, FUEL_RECORD, FUEL_PURCHASE, EXPENSE, ACCIDENT_REPORT, ASSET_DOCUMENT, TRAILER_ASSIGNMENT, MAINTENANCE_RECORD, QUARANTINE_EVENT, STATEMENT_IMPORT]
+        retention_class:
+          type: string
+          enum: [WORK_PLAN, INSPECTION, FUEL_RECEIPT, FUEL_DASHBOARD, EXPENSE_RECEIPT, ACCIDENT, ASSET_DOCUMENT, MAINTENANCE, STATEMENT_IMPORT, TRAILER_SWAP]
+        content_type: { type: string, example: image/jpeg }
+        width_px: { type: integer }
+        height_px: { type: integer }
+        client_captured_at: { type: string, format: date-time }
+
+    MediaUploadResponse:
+      type: object
+      required: [media_object_id, upload_url, expires_in_seconds]
+      properties:
+        media_object_id: { type: string, format: uuid }
+        upload_url: { type: string, format: uri }
+        expires_in_seconds: { type: integer, example: 60 }
+        method: { type: string, example: PUT }
+
+    IdempotencyReplay:
+      type: object
+      required: [replayed, original_status]
+      properties:
+        replayed: { type: boolean, example: true }
+        original_status: { type: integer, example: 201 }
+        original_body: { type: object }
+
+  responses:
+    BadRequest:
+      description: Malformed request (RFC7807).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing / expired token.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Forbidden:
+      description: Authenticated but lacking permission.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotFound:
+      description: Resource not found.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Conflict:
+      description: Optimistic / state conflict.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    SemanticViolation:
+      description: Business-rule violation (e.g. odometer decreased, missing closeout evidence).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    RateLimited:
+      description: Too many attempts (offline PIN / SMS rate-limit).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    IdempotencyConflict:
+      description: Idempotency-Key reused with a different body (C5.1).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    ServiceUnavailable:
+      description: Maintenance / downstream outage.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+paths:
+  # ------------------------------------------------------------------ Auth
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate by email + password (+ MFA if enrolled).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                mfa_code: { type: string, description: Required when the user has MFA enrolled (A3.7). }
+                device_id_hash: { type: string, description: Required for driver PIN offline revocation path (B12). }
+      responses:
+        '200':
+          description: Tokens issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  mfa_required: { type: boolean }
+                  roles: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Account suspended (B13).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /auth/mfa/enroll:
+    post:
+      tags: [Auth]
+      summary: Begin TOTP enrolment (Admin / Fleet Manager only, A3.7).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '200':
+          description: Provisioning URI + recovery codes (recovery codes shown once).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provisioning_uri: { type: string, format: uri }
+                  secret_encrypted_preview: { type: string }
+                  recovery_codes: { type: array, items: { type: string } }
+
+  /devices/{deviceId}/pin:
+    put:
+      tags: [Auth]
+      summary: Set / reset the local 4-digit driver PIN on a device (B12, M4).
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin: { type: string, pattern: '^[0-9]{4}$' }
+      responses:
+        '204': { description: PIN hash stored on device. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ------------------------------------------------------------------ Shifts
+  /shifts/clock-in:
+    post:
+      tags: [Shifts]
+      summary: Start a shift (1.1). Requires start odometer photo + gauge (B1).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignment_id, start_odometer_km, start_fuel_gauge, start_media_object_id, consent_version]
+              properties:
+                assignment_id: { type: string, format: uuid }
+                start_odometer_km: { type: integer, minimum: 0 }
+                start_fuel_gauge: { type: string, enum: [EMPTY, QUARTER, HALF, THREE_QUARTER, FULL] }
+                start_media_object_id: { type: string, format: uuid }
+                phone_gps_fallback_enabled: { type: boolean, default: false }
+                consent_version: { type: string, description: Required GPS tracking consent version (C5.5). }
+      responses:
+        '201':
+          description: Shift opened.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shift_id: { type: string, format: uuid }
+                  clock_in_at: { type: string, format: date-time }
+                  disclaimer: { type: string }
+        '409':
+          description: A prior shift is awaiting close-out; the missing artefacts are listed.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: HOS rest block (C3.3) or odometer decreased (C4.2) or consent missing (C5.5).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /shifts/clock-out:
+    post:
+      tags: [Shifts]
+      summary: End the active shift (1.4). Requires end odometer photo + gauge.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shift_id, end_odometer_km, end_fuel_gauge, end_media_object_id]
+              properties:
+                shift_id: { type: string, format: uuid }
+                end_odometer_km: { type: integer, minimum: 0 }
+                end_fuel_gauge: { type: string, enum: [EMPTY, QUARTER, HALF, THREE_QUARTER, FULL] }
+                end_media_object_id: { type: string, format: uuid }
+                debrief_notes: { type: string }
+      responses:
+        '200':
+          description: Shift closed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shift_id: { type: string, format: uuid }
+                  state: { type: string, enum: [OPEN, PENDING_CLOSEOUT, CLOSED] }
+                  shift_duration_seconds: { type: integer }
+                  distance_km: { type: number }
+        '422': { $ref: '#/components/responses/SemanticViolation' }
+
+  /shifts/me/active:
+    get:
+      tags: [Shifts]
+      summary: Get the driver's currently open shift, if any.
+      responses:
+        '200':
+          description: Active shift or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                properties:
+                  shift_id: { type: string, format: uuid }
+                  vehicle_id: { type: string, format: uuid }
+                  trailer_id: { type: string, format: uuid, nullable: true }
+                  clock_in_at: { type: string, format: date-time }
+
+  /shifts/verification-inbox:
+    get:
+      tags: [Shifts]
+      summary: Paged list for the verification inbox (2.7). Fleets Manager / Finance.
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/operationalDate'
+        - name: verification_status
+          in: query
+          schema: { type: string, enum: [PENDING, VERIFIED, FLAGGED] }
+        - name: state
+          in: query
+          schema: { type: string, enum: [OPEN, PENDING_CLOSEOUT, CLOSED] }
+      responses:
+        '200':
+          description: Page of shifts (see app.v_shift_verification_inbox).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /shifts/{shiftId}/verify:
+    post:
+      tags: [Shifts]
+      summary: Verify and lock a shift for payroll (2.7). Idempotent.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [VERIFY, FLAG] }
+                flag_reason: { type: string }
+                corrected_end_odometer_km: { type: integer, description: Only via Unlock-for-correction (B18). }
+      responses:
+        '200': { description: Shift updated. }
+        '409':
+          description: Acknowledge-based unlock required before correction (B18).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  # ------------------------------------------------------------------ Fuel
+  /fuel/refuel:
+    post:
+      tags: [Fuel]
+      summary: Submit a refuel with mandatory before/after gauge photos (B3).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shift_id, vehicle_id, litres, total_cost, odometer_km, fuel_card_last_four, purchased_at, before_fuel_record_id, after_fuel_record_id, receipt_media_object_id]
+              properties:
+                shift_id: { type: string, format: uuid, nullable: true, description: null when Admin back-entry (A1.5). }
+                vehicle_id: { type: string, format: uuid }
+                fuel_card_id: { type: string, format: uuid, nullable: true }
+                fuel_card_last_four: { type: string, pattern: '^[0-9]{4}$' }
+                litres: { type: number, exclusiveMinimum: 0 }
+                total_cost: { $ref: '#/components/schemas/Money' }
+                odometer_km: { type: integer, minimum: 0 }
+                purchased_at: { type: string, format: date-time }
+                before_fuel_record_id: { type: string, format: uuid }
+                after_fuel_record_id: { type: string, format: uuid }
+                receipt_media_object_id: { type: string, format: uuid }
+                supplier_name: { type: string }
+      responses:
+        '201':
+          description: Purchase recorded (pending verification).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fuel_purchase_id: { type: string, format: uuid }
+                  open_anomalies: { type: array, items: { type: string } }
+        '422':
+          description: Missing mandatory gauge pair for a driver entry (B3) — database rejects.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /fuel/purchases/{purchaseId}/verify:
+    post:
+      tags: [Fuel]
+      summary: Verify / reject / adjust a fuel purchase (2.5).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: purchaseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [VERIFY, REJECT, CLEAR_PAYMENT] }
+                adjusted_litres: { type: number, description: Fleets Manager only (C6.1). }
+                rejection_reason: { type: string }
+      responses:
+        '200': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /fuel/reconciliation-inbox:
+    get:
+      tags: [Fuel]
+      summary: Paged fuel reconciliation inbox (2.7).
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: unverified_only
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Page (see app.v_fuel_reconciliation_inbox).
+          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+
+  # ------------------------------------------------------------------ Accidents
+  /accidents/mayday:
+    post:
+      tags: [Accidents]
+      summary: B17 escape hatch — submit GPS + flag, bypass all evidence (critical safety).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position, mayday_reason]
+              properties:
+                shift_id: { type: string, format: uuid, nullable: true, description: null when off-shift (C1.14). }
+                vehicle_id: { type: string, format: uuid, nullable: true }
+                position: { $ref: '#/components/schemas/GeoPoint' }
+                mayday_reason: { type: string }
+      responses:
+        '201':
+          description: Mayday recorded; full escalation fired.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accident_id: { type: string, format: uuid }
+                  escalated_at: { type: string, format: date-time }
+
+  /accidents:
+    post:
+      tags: [Accidents]
+      summary: Create an accident report (3.1). Evidence may follow via PATCH.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shift_id]
+              properties:
+                shift_id: { type: string, format: uuid, nullable: true }
+                vehicle_id: { type: string, format: uuid, nullable: true }
+                trailer_id: { type: string, format: uuid, nullable: true }
+                occurred_at: { type: string, format: date-time }
+                position: { $ref: '#/components/schemas/GeoPoint' }
+                driver_statement: { type: string }
+                witness_name: { type: string }
+                witness_phone: { type: string }
+                third_party_plate: { type: string }
+      responses:
+        '201':
+          description: Accident created.
+          content:
+            application/json:
+              schema: { type: object, properties: { accident_id: { type: string, format: uuid } } }
+
+  /accidents/{accidentId}/media:
+    post:
+      tags: [Accidents]
+      summary: Attach a mandatory scene photo to an accident (3.1).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: accidentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot, media_object_id]
+              properties:
+                slot:
+                  type: string
+                  enum: [FRONT_DAMAGE, REAR_DAMAGE, SIDE_DAMAGE, OTHER_VEHICLE_PLATE, WITNESS, ADDITIONAL, POLICE_ABSTRACT, INSURANCE_DOCUMENT]
+                media_object_id: { type: string, format: uuid }
+      responses:
+        '204': { description: Attached. }
+        '422': { $ref: '#/components/responses/SemanticViolation' }
+
+  /accidents/{accidentId}/telemetry/verify:
+    get:
+      tags: [Accidents]
+      summary: Verify the SHA-256 hash chain of frozen telemetry (C3.4).
+      parameters:
+        - name: accidentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Per-row verification result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  all_valid: { type: boolean }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sequence: { type: integer }
+                        is_valid: { type: boolean }
+
+  # ------------------------------------------------------------------ Inspections
+  /inspections:
+    post:
+      tags: [Inspections]
+      summary: Submit a DVIR (1.1). Failing items require a photo (1.1).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shift_id, template_id, subject, items, previous_defects_reviewed, signature_name]
+              properties:
+                shift_id: { type: string, format: uuid }
+                template_id: { type: string, format: uuid }
+                subject: { type: string, enum: [VEHICLE, TRAILER, TRAILER_SWAP] }
+                vehicle_id: { type: string, format: uuid, nullable: true }
+                trailer_id: { type: string, format: uuid, nullable: true }
+                previous_defects_reviewed: { type: boolean }
+                signature_name: { type: string }
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [template_item_id, result]
+                    properties:
+                      template_item_id: { type: string, format: uuid }
+                      result: { type: string, enum: [PASS, FAIL, NOT_APPLICABLE] }
+                      numeric_value: { type: number, description: Reefer temperature in Celsius (M6). }
+                      notes: { type: string }
+                      photo_media_object_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Inspection recorded.
+          content:
+            application/json:
+              schema: { type: object, properties: { inspection_id: { type: string, format: uuid }, block_shift: { type: boolean } } }
+        '422': { $ref: '#/components/responses/SemanticViolation' }
+
+  # ------------------------------------------------------------------ Trailer
+  /trailer/swap:
+    post:
+      tags: [Trailer]
+      summary: Hook a new trailer / drop to bobtail (1.3, C1.12).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicle_id, hook_media_object_id, hook_inspection_id]
+              properties:
+                shift_id: { type: string, format: uuid }
+                vehicle_id: { type: string, format: uuid }
+                trailer_id: { type: string, format: uuid, nullable: true, description: null = bobtail (C1.12). }
+                new_trailer_plate: { type: string, description: Driver-created external trailer (C1.11). }
+                new_trailer_type: { type: string, enum: [DRY_VAN, REEFER, FLATBED, LOWBOY, TANKER, CURTAIN_SIDE, OTHER] }
+                hook_media_object_id: { type: string, format: uuid }
+                hook_inspection_id: { type: string, format: uuid }
+                drop_media_object_id: { type: string, format: uuid, description: Present when dropping an existing trailer. }
+      responses:
+        '201':
+          description: Assignment updated.
+          content: { application/json: { schema: { type: object, properties: { trailer_assignment_id: { type: string, format: uuid } } } } }
+        '422': { $ref: '#/components/responses/SemanticViolation' }
+
+  # ------------------------------------------------------------------ Dashboard
+  /dashboard/vehicle-states:
+    get:
+      tags: [Dashboard]
+      summary: Live map marker states (N5). Streamed over WebSocket in prod; REST snapshot for polling.
+      responses:
+        '200':
+          description: One entry per vehicle.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vehicles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        vehicle_id: { type: string, format: uuid }
+                        display_state: { type: string, enum: [QUARANTINED, OFFLINE, HOS_ALERT, SPEEDING, MOVING, IDLING, PARKED] }
+                        latitude: { type: number }
+                        longitude: { type: number }
+                        driver_name: { type: string, nullable: true }
+                        next_eligible_clock_in_at: { type: string, format: date-time, nullable: true }
+
+  # ------------------------------------------------------------------ Reconciliation
+  /reconciliation/statements:
+    post:
+      tags: [Reconciliation]
+      summary: Upload a fuel card statement CSV for matching (A1.9).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, period_start, period_end, media_object_id, column_mapping]
+              properties:
+                provider: { type: string }
+                period_start: { type: string, format: date }
+                period_end: { type: string, format: date }
+                media_object_id: { type: string, format: uuid }
+                column_mapping: { type: object, description: Maps CSV columns to date/amount/card_last_four/litres/station. }
+      responses:
+        '201':
+          description: Import queued.
+          content: { application/json: { schema: { type: object, properties: { statement_id: { type: string, format: uuid } } } } }
+
+  # ------------------------------------------------------------------ Anomalies
+  /anomalies:
+    get:
+      tags: [Anomalies]
+      summary: Unified open-anomaly feed (fuel, HOS, accident, maintenance, security).
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: domains
+          in: query
+          schema: { type: array, items: { type: string, enum: [FUEL, HOS, ACCIDENT, MAINTENANCE, SECURITY] } }
+      responses:
+        '200':
+          description: Page (see app.v_open_anomalies).
+          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+
+  # ------------------------------------------------------------------ Documents
+  /documents/expiring:
+    get:
+      tags: [Documents]
+      summary: Documents expiring within the configured window (3.5 / B8).
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - name: within_days
+          in: query
+          schema: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Page of expiring documents.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+
+  # ------------------------------------------------------------------ Media
+  /media/upload-url:
+    post:
+      tags: [Media]
+      summary: Mint a 60-second pre-signed PUT URL (D5). Caller uploads then references media_object_id.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaUploadRequest' }
+      responses:
+        '201':
+          description: Upload ticket.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaUploadResponse' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /telemetry/webhook:
+    post:
+      tags: [Dashboard]
+      summary: Traccar position forwarder (A1.1). Consumed from the Redis Stream, not fire-and-forget HTTP (N2.3).
+      security: []
+      description: >-
+        Public endpoint accepting a Traccar-decoded position. In production this
+        is fronted by the telemetry gateway that writes to a durable Redis Stream
+        and a back-fill poller reconciles gaps (decision N2.3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, lat, lon, timestamp]
+              properties:
+                deviceId: { type: string, description: Traccar deviceId mapped to vehicles.traccar_device_id. }
+                lat: { type: number }
+                lon: { type: number }
+                speed: { type: number }
+                heading: { type: number }
+                ignition: { type: boolean }
+                timestamp: { type: string, format: date-time }
+                attributes: { type: object, description: OBD values (M3) etc. }
+      responses:
+        '202': { description: Accepted into the ingestion stream. }
+        '400': { $ref: '#/components/responses/BadRequest' }
