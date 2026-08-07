@@ -10,6 +10,9 @@ packages/*/tsconfig.tsbuildinfo
 # Turbo
 .turbo/
 
+# Kilo config
+.kilo/
+
 # Logs
 *.log
 npm-debug.log*
