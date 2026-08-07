@@ -59,6 +59,21 @@ const EnvSchema = z.object({
   // Login throttling (02 §9 / M4).
   LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(5),
   LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
+
+  // ── Edge / abuse protection (security.md S-3) ──
+  // "always" = enforce in every NODE_ENV; "production" = only when NODE_ENV=production (default);
+  // "off" = never. Keeps tests/dev from being throttled.
+  SECURITY_ENFORCE: z.enum(["always", "production", "off"]).default("production"),
+  TRUST_PROXY: z.string().default("false").transform((v) => v === "true"),
+  WEBHOOK_SECRET: z.string().optional(), // Traccar webhook HMAC (S-1); unset = unprotected
+  ALLOWED_ORIGINS: z.string().default(""), // comma-separated CORS allow-list
+  RATE_LIMIT_GLOBAL_PER_MINUTE: z.coerce.number().int().positive().default(120),
+  RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_MEDIA_PER_MINUTE: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_TELEMETRY_PER_MINUTE: z.coerce.number().int().positive().default(120),
+  IP_BLOCK_THRESHOLD: z.coerce.number().int().positive().default(100), // abuse hits per window to auto-block
+  IP_BLOCK_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),
+  IP_BLOCK_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

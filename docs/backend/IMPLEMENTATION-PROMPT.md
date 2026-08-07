@@ -28,6 +28,10 @@ checks, and the test suite, and must enforce every cross-cutting invariant below
   `07-websocket-gateway.md`, `08-error-state-model.md`, `09-observability-ci.md` — the remaining subsystems.
 - `docs/backend/data-access-layer.md` — how to use `@fleet/db` (`transaction`, `BaseRepository`,
   `PgIdempotencyService`, `PgOutboxRelay`, `PgConfigClient`).
+- `docs/security.md` — **cross-cutting security spec**: WAF/rate-limit, telemetry-webhook HMAC, input/
+  serialization hardening (prototype-pollution-safe parse, content-type + depth/size limits, ReDoS-safe
+  regex), injection/XSS prevention, media AV scan-on-PUT, secrets/Vault + rotation + gitleaks, SCA/
+  container/SAST/pen-test in CI, monitoring/IR, DPA+ISO27001+SOC2. Enforce every control.
 
 ## 3. What already exists (do NOT rebuild)
 

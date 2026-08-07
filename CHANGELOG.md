@@ -14,6 +14,11 @@ All notable changes to the Fleet Management Platform are documented here. The fo
     MFA enrollment.
   - `IMPLEMENTATION-PROMPT.md` — build brief for `packages/mobile` (phases, structure, invariants,
     DoD, approved deviations, launch gates).
+  - `caching.md` — unified offline-safe caching strategy (encrypted MMKV, per-domain TTLs, socket
+    invalidate+refetch, prefetch, media/map-tile caching).
+  - `security.md` — cross-cutting security spec (WAF/rate-limit, webhook HMAC, input/serialization
+    hardening, injection/XSS prevention, media AV scan, Vault+rotation+gitleaks, SCA/SAST/pen-test,
+    mobile pinning/root-detect/obfuscation, DPA+ISO27001+SOC2).
 - `CHANGELOG.md` (this file).
 
 ### Changed

@@ -12,6 +12,8 @@ declare global {
     interface Request {
       requestId: string;
       principal?: Principal;
+      /** Raw request bytes, stashed by the safe JSON body parser for HMAC verification. */
+      rawBody?: Buffer;
       /** Set by the idempotency middleware for state-changing routes (C5.1). */
       idempotency?: { key: string; requestHash: string; endpoint: string; subject: string };
     }

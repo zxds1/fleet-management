@@ -24,6 +24,12 @@ every cross-cutting invariant below.
 - `docs/apps/flows.md` — **authoritative screen + flow spec**: every screen, elements/buttons, flows,
   navigation map, and the loading/empty/error/offline/pending state matrix. Implement screens to match
   this exactly; it is the contract for "what's in each screen".
+- `docs/apps/caching.md` — **caching strategy**: unified offline-safe, encrypted MMKV persistence,
+  per-domain TTLs, socket→invalidate+refetch, prefetch on launch+reconnect, media/map-tile caching.
+  Implement the client cache exactly per this doc.
+- `docs/security.md` — **cross-cutting security spec** (backend + mobile + CI): WAF/rate-limit, webhook
+  HMAC, input/serialization hardening, injection/XSS prevention, media AV scan, secrets/Vault, SCA/
+  SAST/pen-test, mobile pinning/root-detect, monitoring. Comply with every control (DPA+ISO27001+SOC2).
 - `docs/apps/IMPLEMENTATION-PROMPT.md` — this brief.
 - `docs/apps/screens/` — **screen design images** (provided separately). Read them for visual style,
   spacing, color, and component look. They define *style only*; `flows.md` defines structure/behavior.
@@ -136,6 +142,12 @@ Register `packages/mobile` in the root workspace (`workspaces: ["packages/*"]`) 
 - **i18n (D-10):** all user-facing strings via `i18n` en/sw; no hardcoded copy.
 - **Handlers thin / types shared:** bind to `@fleet/shared` schemas + `openapi.yaml`; never redefine
   shapes locally.
+- **Caching (per `docs/apps/caching.md`):** TanStack Query persisted to **encrypted MMKV**; per-domain
+  TTLs; socket events **invalidate + refetch**; prefetch critical queries on launch + reconnect; cache
+  S3 images + map tiles; never cache tokens/secrets; clear all caches on logout/suspension.
+- **Security (per `docs/security.md`):** mobile hardening is mandatory — **cert pinning**, root/
+  jailbreak refusal, obfuscation, anti-tamper, deep-link validation; treat all input as untrusted;
+  never log secrets; no `eval`/`Function` on user input. Backend/webhook controls are cross-cutting.
 
 ## 7. Tooling commands
 

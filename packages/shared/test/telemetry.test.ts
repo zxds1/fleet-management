@@ -1,5 +1,16 @@
 // packages/shared/test/telemetry.test.ts
 // Covers the Sentry reporter no-op contract (no DSN) and the in-process metrics collector.
+import { jest } from "@jest/globals";
+
+// Mock @sentry/node so the reporter contract is verified without opening a real transport/handle
+// (a live Sentry client leaves a background connection that prevents the jest worker from exiting
+// gracefully) and without depending on outbound network access in sandboxed CI.
+jest.mock("@sentry/node", () => ({
+  init: jest.fn(),
+  captureException: jest.fn(),
+  flush: jest.fn(() => Promise.resolve(true)),
+}));
+
 import {
   initErrorReporter,
   isErrorReporterEnabled,

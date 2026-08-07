@@ -40,6 +40,13 @@
 - `docs/apps/admin.md` — admin tablet screens, live map, escalation console, review queues,
   admin-provisioned MFA enrollment.
 - `docs/apps/IMPLEMENTATION-PROMPT.md` — build brief for `packages/mobile`.
+- `docs/apps/caching.md` — caching strategy (unified offline-safe, encrypted MMKV, per-domain TTLs,
+  socket→invalidate+refetch, prefetch on launch+reconnect, media/map-tile caching); referenced by the
+  implementation prompt §2 + §6.
+- `docs/security.md` — cross-cutting security spec (backend + mobile + CI): WAF/rate-limit, webhook
+  HMAC, input/serialization hardening, injection/XSS prevention, media AV scan-on-PUT, Vault+rotation+
+  gitleaks, SCA/SAST/pen-test, mobile pinning/root-detect/obfuscation, monitoring, DPA+ISO27001+SOC2.
+  Referenced by both `IMPLEMENTATION-PROMPT.md` files.
 - `CHANGELOG.md` created (captures backend 1.0.0 + app design work).
 
 ## 🚧 Mobile Apps — Remaining (implementation not started)

@@ -19,14 +19,37 @@ import { createInsightsRouter } from "../http/routes/insights";
 import { createTelemetryRouter } from "../http/routes/telemetry";
 import { readiness, deepHealth } from "./health";
 import type { Container } from "./container";
+import { safeJson } from "../security/bodyParser";
+import { securityHeaders } from "../security/headers";
+import { corsMiddleware } from "../security/cors";
+import { createRateLimiter } from "../security/rateLimit";
+import { createIpBlocker } from "../security/ipBlock";
+import { webhookAuth } from "../security/webhookAuth";
 
 export function createApp(container: Container): Express {
   const app = express();
   const base = container.env.API_BASE_PATH;
 
   app.use(helmet());
-  app.use(express.json({ limit: "1mb" }));
   app.use(requestContext());
+
+  // Edge / abuse protection (security.md S-3). Enforcement is gated by SECURITY_ENFORCE so tests/dev
+  // are never throttled; it activates in production (or "always"). The webhook HMAC is opt-in via
+  // WEBHOOK_SECRET.
+  const secure = container.env.SECURITY_ENFORCE === "always" || (container.env.SECURITY_ENFORCE === "production" && container.env.NODE_ENV === "production");
+  if (container.env.TRUST_PROXY) app.set("trust proxy", true);
+  app.use(safeJson());
+  app.use(securityHeaders());
+  app.use(corsMiddleware(container.env.ALLOWED_ORIGINS));
+
+  const rateLimiter = createRateLimiter(container.redis.client, secure);
+  const ipBlocker = createIpBlocker(container.redis.client, secure, {
+    threshold: container.env.IP_BLOCK_THRESHOLD,
+    windowMs: container.env.IP_BLOCK_WINDOW_SECONDS * 1000,
+    blockTtlSeconds: container.env.IP_BLOCK_TTL_SECONDS,
+  });
+  app.use(rateLimiter.middleware({ scope: "global", max: container.env.RATE_LIMIT_GLOBAL_PER_MINUTE }));
+  app.use(ipBlocker.middleware());
 
   // Liveness / readiness / deep probes (09 §1/§2). Deep checks inspect replication lag, outbox
   // backlog and last ingest position age; each degrades independently.
@@ -46,6 +69,7 @@ export function createApp(container: Container): Express {
     }),
   );
 
+  app.use(`${base}/auth`, rateLimiter.middleware({ scope: "auth", max: container.env.RATE_LIMIT_AUTH_PER_MINUTE }));
   app.use(`${base}/auth`, createAuthRouter({
     pool: container.pool,
     idempotency: container.idempotency,
@@ -95,6 +119,7 @@ export function createApp(container: Container): Express {
     infra: container.infra,
   }));
 
+  app.use(`${base}/media`, rateLimiter.middleware({ scope: "media", max: container.env.RATE_LIMIT_MEDIA_PER_MINUTE }));
   app.use(`${base}/media`, createMediaRouter({
     pool: container.pool,
     idempotency: container.idempotency,
@@ -108,6 +133,9 @@ export function createApp(container: Container): Express {
   }));
 
   // Public Traccar webhook accept (A1.1) — no auth/idempotency; front of the ingest pipeline.
+  // Hardened: rate-limited + HMAC-verified when WEBHOOK_SECRET is set (security.md S-1).
+  app.use(`${base}/telemetry`, rateLimiter.middleware({ scope: "telemetry", max: container.env.RATE_LIMIT_TELEMETRY_PER_MINUTE }));
+  app.use(`${base}/telemetry`, webhookAuth(container.env.WEBHOOK_SECRET));
   app.use(`${base}/telemetry`, createTelemetryRouter({
     pool: container.pool,
     redis: container.redis.client,

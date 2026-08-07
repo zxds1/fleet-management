@@ -30,7 +30,11 @@ describe("@fleet/api app", () => {
       const body = (await res.json()) as { status: string };
       expect(body.status).toBe("ok");
     } finally {
-      await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => {
+        const s = server as unknown as { closeAllConnections?: () => void };
+        if (typeof s.closeAllConnections === "function") s.closeAllConnections();
+        server.close(() => r());
+      });
     }
   });
 });

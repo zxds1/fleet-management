@@ -76,7 +76,11 @@ describe("POST /api/v1/telemetry/webhook", () => {
       expect(published.course).toBe(90);
       expect(published.attributes.ignition).toBe(true);
     } finally {
-      await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => {
+        const s = server as unknown as { closeAllConnections?: () => void };
+        if (typeof s.closeAllConnections === "function") s.closeAllConnections();
+        server.close(() => r());
+      });
     }
   });
 
@@ -96,7 +100,11 @@ describe("POST /api/v1/telemetry/webhook", () => {
       });
       expect(res.status).toBe(400);
     } finally {
-      await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => {
+        const s = server as unknown as { closeAllConnections?: () => void };
+        if (typeof s.closeAllConnections === "function") s.closeAllConnections();
+        server.close(() => r());
+      });
     }
   });
 
@@ -113,7 +121,11 @@ describe("POST /api/v1/telemetry/webhook", () => {
       });
       expect(res.status).toBe(503);
     } finally {
-      await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => {
+        const s = server as unknown as { closeAllConnections?: () => void };
+        if (typeof s.closeAllConnections === "function") s.closeAllConnections();
+        server.close(() => r());
+      });
     }
   });
 });
