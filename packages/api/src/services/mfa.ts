@@ -34,7 +34,7 @@ export class MfaService {
     if (!user) return err(new Unauthenticated());
     const secret = totp.generateSecret();
     await this.users.stageMfaSecret(userId, this.secretBox.encrypt(secret));
-    return ok({ secret, otpauthUri: totp.provisioningUri(user.email, secret) });
+    return ok({ secret, otpauthUri: totp.provisioningUri(user.email ?? user.phone ?? "", secret) });
   }
 
   async confirm(userId: string, code: string): Promise<Result<ConfirmResult>> {

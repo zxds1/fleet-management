@@ -20,7 +20,7 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
-import { ConsentSchema, LoginSchema, MfaEnrollSchema, SetPinSchema } from "@fleet/shared";
+import { ConsentSchema, LoginSchema, MfaEnrollSchema } from "@fleet/shared";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 import type { IssuedSession } from "../../services/session";
@@ -81,6 +81,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const svc = makeServices(tx.client, infra);
         const login = await svc.auth.login({
           email: input.email,
+          phone: input.phone,
           password: input.password,
           deviceIdHash: input.device_id_hash,
           ipAddress: ip(req),
@@ -292,46 +293,6 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   );
 
   router.post(
-    "/devices/pin",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as Principal;
-        parseBody(SetPinSchema, req); // PIN never leaves the device; the server only flips the flag (B12)
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.device.setPin(principal.userId, principal.deviceIdHash ?? "");
-        if (isErr(result)) return result.error as never;
-        return ok({ status: 200, body: { pin_set: true } });
-      }),
-    ),
-  );
-
-  router.post(
-    "/devices/refresh",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as Principal;
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.device.bindRefresh({
-          userId: principal.userId,
-          deviceIdHash: principal.deviceIdHash ?? "",
-        });
-        if (isErr(result)) return result.error as never;
-        return ok({
-          status: 200,
-          body: {
-            refresh_token: result.value.refreshToken,
-            expires_at: result.value.expiresAt.toISOString(),
-            offline_until: result.value.offlineUntil.toISOString(),
-          },
-        });
-      }),
-    ),
-  );
-
-  router.post(
     "/devices/revoke",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
     requirePermission(asPerm("REVOKE_DEVICE")),
@@ -391,46 +352,6 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const result = await svc.consent.revoke(principal.userId, input.consent_type);
         if (isErr(result)) return result.error as never;
         return ok({ status: 200, body: { accepted: false, revoked: result.value.revoked } });
-      }),
-    ),
-  );
-
-  // ── Admin self-signup (unauthenticated, idempotent) ───────────────────────────────────────
-  // Creates an ACTIVE ADMIN account after email + password-strength checks (A3.7). The new admin
-  // then logs in, which triggers MFA enrolment (ADMIN requires_mfa). No direct DB seeding needed.
-  const AdminSignupSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(1),
-    full_name: z.string().min(1).max(200),
-    phone: z.string().max(40).optional(),
-  });
-  router.post(
-    "/admin-signup",
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const input = parseBody(AdminSignupSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.auth.signupAdmin({
-          email: input.email,
-          password: input.password,
-          fullName: input.full_name,
-          phone: input.phone ?? null,
-        });
-        if (isErr(result)) return result.error as never;
-        tx.audit({
-          action: "CREATE",
-          entity_table: "app.users",
-          entity_id: result.value.userId,
-          actor_user_id: result.value.userId,
-          request_id: req.requestId,
-          ip_address: ip(req),
-          user_agent: ua(req),
-          endpoint: req.path,
-          http_method: req.method,
-          reason: "admin_self_signup",
-        });
-        return ok({ status: 201, body: { user_id: result.value.userId, email: result.value.email, role: result.value.role } });
       }),
     ),
   );

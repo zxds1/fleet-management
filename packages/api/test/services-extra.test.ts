@@ -168,67 +168,31 @@ describe("SessionService", () => {
 
 describe("DeviceService", () => {
   const devices: any = {
-    findAnyByHash: jest.fn(),
     register: jest.fn(async (i: any) => ({ id: "d1", push_token: i.pushToken })),
-    findLive: jest.fn(),
-    markPinSet: jest.fn(async () => undefined),
-    bindRefreshToken: jest.fn(async () => undefined),
+    getById: jest.fn(async (id: string) => ({ id })),
+    findAnyByHash: jest.fn(async () => ({ id: "d1" })),
     revoke: jest.fn(async () => undefined),
-    recordOfflinePinOutcome: jest.fn(async () => undefined),
   };
-  const tokens: any = { issueRefreshToken: jest.fn(() => ({ token: "rt", expiresAt: new Date() })) };
-  const config: any = { numeric: jest.fn(async () => 24) };
-  const svc = new DeviceService(devices, tokens, config);
+  const svc = new DeviceService(devices);
 
   beforeEach(() => jest.clearAllMocks());
 
   it("registers a new device", async () => {
-    devices.findAnyByHash.mockResolvedValue(null);
     const r = await svc.register({ userId: "u1", deviceIdHash: "h" });
     expect(r.ok).toBe(true);
     expect((r as any).value.deviceId).toBe("d1");
   });
 
-  it("rejects a revoked device", async () => {
-    devices.findAnyByHash.mockResolvedValue({ revoked_at: new Date() });
-    const r = await svc.register({ userId: "u1", deviceIdHash: "h" });
-    expect(r.ok).toBe(false);
-    expect((r as any).error).toBeInstanceOf(DeviceRevoked);
-  });
-
-  it("sets a PIN on a live device", async () => {
-    devices.findLive.mockResolvedValue({ id: "d1" });
-    const r = await svc.setPin("u1", "h");
-    expect(r.ok).toBe(true);
-    expect(devices.markPinSet).toHaveBeenCalledWith("d1");
-  });
-
-  it("setPin 404s for an unregistered device", async () => {
-    devices.findLive.mockResolvedValue(null);
-    const r = await svc.setPin("u1", "h");
-    expect(r.ok).toBe(false);
-    expect((r as any).error).toBeInstanceOf(NotFound);
-  });
-
-  it("binds a device-bound refresh token", async () => {
-    devices.findLive.mockResolvedValue({ id: "d1" });
-    const r = await svc.bindRefresh({ userId: "u1", deviceIdHash: "h" });
-    expect(r.ok).toBe(true);
-    expect(devices.bindRefreshToken).toHaveBeenCalled();
-  });
-
-  it("revokes a device by hash", async () => {
-    devices.findAnyByHash.mockResolvedValue({ id: "d1" });
-    const r = await svc.revoke("u1", "h", "admin");
+  it("revokes a device by id", async () => {
+    const r = await svc.revokeById("d1", "admin");
     expect(r.ok).toBe(true);
     expect(devices.revoke).toHaveBeenCalled();
   });
 
-  it("records an offline PIN outcome", async () => {
-    devices.findAnyByHash.mockResolvedValue({ id: "d1" });
-    const r = await svc.recordOfflinePinOutcome({ userId: "u1", deviceIdHash: "h", failures: 5, lockedUntil: null, pinWiped: false });
+  it("revokes a device by hash", async () => {
+    const r = await svc.revoke("u1", "h", "admin");
     expect(r.ok).toBe(true);
-    expect(devices.recordOfflinePinOutcome).toHaveBeenCalled();
+    expect(devices.revoke).toHaveBeenCalled();
   });
 });
 

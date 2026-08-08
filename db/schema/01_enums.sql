@@ -24,6 +24,7 @@ CREATE TYPE app.role_code AS ENUM (
 );
 
 CREATE TYPE app.driver_status AS ENUM (
+    'PENDING',         -- created by an admin, awaiting approval before the driver can sign in
     'ACTIVE',
     'SUSPENDED',       -- B13: device refresh tokens are revoked on entry
     'ON_LEAVE',

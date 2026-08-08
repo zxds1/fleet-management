@@ -10,12 +10,11 @@ import type { Env } from "../config/env";
 
 export interface AccessTokenClaims extends JwtPayload {
   sub: string;
-  email: string;
+  email: string | null;
   roles: RoleCode[];
   permissions: PermissionCode[];
   sid: string;
   locale: "en" | "sw";
-  dev?: string; // device_id_hash (driver PIN path, B12)
 }
 
 export interface IssuedAccessToken {
@@ -37,7 +36,7 @@ export class TokenService {
 
   issueAccessToken(input: {
     userId: string;
-    email: string;
+    email: string | null;
     roles: RoleCode[];
     permissions: PermissionCode[];
     sessionId: string;
@@ -135,12 +134,11 @@ export class TokenService {
 export function principalFromClaims(claims: AccessTokenClaims): Principal {
   return {
     userId: claims.sub,
-    email: claims.email,
+    email: claims.email ?? "",
     roles: claims.roles ?? [],
     permissions: new Set<PermissionCode>(claims.permissions ?? []),
     sessionId: claims.sid,
     locale: claims.locale ?? "en",
-    ...(claims.dev ? { deviceIdHash: claims.dev } : {}),
   };
 }
 

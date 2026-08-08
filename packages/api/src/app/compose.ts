@@ -21,6 +21,7 @@ import {
   SessionRepository,
   UserRepository,
 } from "../repositories/identity";
+import { AdminRepository } from "../repositories/admin";
 import {
   AssignmentRepository,
   FuelRecordRepository,
@@ -62,6 +63,7 @@ import { InspectionService } from "../services/inspections";
 import { TrailerService } from "../services/trailer";
 import { MediaService } from "../services/media";
 import { AnomalyQuery, DashboardQuery, DocumentQuery } from "../services/queries";
+import { AdminService } from "../services/admin";
 import type { MediaPresigner } from "../media/presigner";
 
 export interface Infra {
@@ -102,6 +104,8 @@ export interface Repositories {
   trailers: TrailerRepository;
   trailerAssignments: TrailerAssignmentRepository;
   mediaObjects: MediaObjectRepository;
+  /** Read model for the admin driver roster (A3.7). */
+  adminRepo: AdminRepository;
 }
 
 export interface Services extends Repositories {
@@ -124,6 +128,8 @@ export interface Services extends Repositories {
   anomaly: AnomalyQuery;
   document: DocumentQuery;
   dashboard: DashboardQuery;
+  /** Admin console commands (A3.7): roster + device/session revoke. */
+  admin: AdminService;
 }
 
 export function makeRepositories(client: DbClient): Repositories {
@@ -156,6 +162,7 @@ export function makeRepositories(client: DbClient): Repositories {
     trailers: new TrailerRepository(client),
     trailerAssignments: new TrailerAssignmentRepository(client),
     mediaObjects: new MediaObjectRepository(client),
+    adminRepo: new AdminRepository(client),
   };
 }
 
@@ -177,7 +184,7 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const session = new SessionService(repos.sessions, infra.store, infra.tokens, infra.config, resolveIdentity);
   const auth = new AuthService(repos.users, repos.permissions, session, infra.tokens, infra.env);
   const mfa = new MfaService(repos.users, repos.recovery, infra.secretBox, infra.tokens, session);
-  const device = new DeviceService(repos.devices, infra.tokens, infra.config);
+  const device = new DeviceService(repos.devices);
   const consent = new ConsentService(repos.consents);
   const shift = new ShiftService(repos.shifts, repos.assignments, repos.vehicles, repos.fuelRecords, repos.workLogs, repos.hos, repos.consents);
   const shiftQuery = new ShiftQuery(repos.shifts);
@@ -202,8 +209,9 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const anomaly = new AnomalyQuery(client);
   const document = new DocumentQuery(client);
   const dashboard = new DashboardQuery(client);
+  const admin = new AdminService(repos.adminRepo, repos.users, repos.drivers, device, auth);
 
-  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, trailer, media, anomaly, document, dashboard };
+  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, trailer, media, anomaly, document, dashboard, admin };
 }
 
 export type { PoolLike };

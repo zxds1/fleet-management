@@ -21,8 +21,8 @@ SET search_path = app, telemetry, audit, public;
 INSERT INTO app.roles (code, name, description, requires_mfa) VALUES
     ('DRIVER',        'Driver',        'Clock in/out, submit inspections, fuel, expenses and accident reports.', false),
     ('DISPATCHER',    'Dispatcher',    'Assign assets, view the live map and read shift data.',                   false),
-    ('FLEET_MANAGER', 'Fleet Manager', 'Dispatcher rights plus verification, quarantine and data overrides.',     true),
-    ('ADMIN',         'Administrator', 'Full system access including user management and audit logs.',            true),
+    ('FLEET_MANAGER', 'Fleet Manager', 'Dispatcher rights plus verification, quarantine and data overrides.',     false),
+    ('ADMIN',         'Administrator', 'Full system access including user management and audit logs.',            false),
     ('FINANCE',       'Finance',       'Read-only financial access; may clear verified receipts for payment.',    false),
     ('AUDITOR',       'Auditor',       'Read-only access to all data including the audit trail.',                 false)
 ON CONFLICT (code) DO NOTHING;
@@ -63,6 +63,8 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('user:manage',             'Create, edit and deactivate users',                    1),
     ('role:manage',             'Grant and revoke roles',                               1),
     ('device:revoke',           'Revoke a driver device (B13)',                         1),
+    ('manage_own_mfa',          'Enrol, confirm or disable own MFA (B12)',              1),
+    ('revoke_device',           'Revoke own registered device (B12)',                   1),
     ('config:read',             'Read system configuration',                            1),
     ('config:manage',           'Change system configuration thresholds (C2.4)',        1),
     ('audit:read',              'Read the audit trail',                                 1),
@@ -103,7 +105,8 @@ SELECT 'DRIVER', p FROM unnest(ARRAY[
     'shift:clock_in','shift:clock_out','shift:read_own',
     'inspection:submit','trailer:swap',
     'fuel:record_gauge','fuel:submit_purchase',
-    'expense:submit','accident:report','hos:read','asset:read','assignment:read'
+    'expense:submit','accident:report','hos:read','asset:read','assignment:read',
+    'manage_own_mfa','revoke_device'
 ]) AS p
 ON CONFLICT DO NOTHING;
 
@@ -213,11 +216,7 @@ INSERT INTO app.system_config (key, value, value_type, description, min_value, m
     ('retention.accident_days',                  '2557', 'number',  'Accident evidence retention, enforced by S3 Object Lock (C5.3).', 2557, 7300, 'days', 3),
     ('retention.audit_days',                     '2557', 'number',  'Audit trail retention (C6.5).', 2557, 7300, 'days', 1),
     -- Security
-    ('auth.device_offline_max_hours',            '24',   'number',  'Maximum offline operation before a forced online login (B13).', 1, 168, 'hours', 1),
-    ('auth.offline_pin_lockout_attempts',        '5',    'number',  'Offline PIN failures before a temporary lockout (M4).', 3, 10, 'attempts', 1),
-    ('auth.offline_pin_wipe_attempts',           '10',   'number',  'Offline PIN failures before the local PIN hash is wiped (M4).', 5, 20, 'attempts', 1),
-    ('auth.offline_pin_lockout_minutes',         '15',   'number',  'Lockout duration after too many offline PIN failures (M4).', 1, 240, 'minutes', 1),
-    ('auth.max_concurrent_sessions',             '10',   'number',  'Concurrent admin sessions per user (A1.6).', 1, 50, 'sessions', 1),
+    ('auth.max_concurrent_sessions',            '10',   'number',  'Concurrent admin sessions per user (A1.6).', 1, 50, 'sessions', 1),
     -- Localisation
     ('locale.timezone',                          '"Africa/Nairobi"', 'string', 'Operational timezone (A2.3).', NULL, NULL, NULL, 1),
     ('locale.currency',                          '"KES"', 'string', 'Default currency (A2.2).', NULL, NULL, NULL, 1)

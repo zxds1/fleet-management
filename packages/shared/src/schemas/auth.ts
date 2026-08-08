@@ -5,22 +5,19 @@
 import { z } from "zod";
 
 export const LoginSchema = z.object({
-  email: z.string().email(),
+  // Drivers authenticate by phone; admins by email. Exactly one is required.
+  email: z.string().email().optional(),
+  phone: z.string().regex(/^\+?[1-9]\d{6,14}$/).optional(),
   password: z.string().min(1).max(200),
   mfa_code: z.string().regex(/^\d{6}$/).optional(),
   device_id_hash: z.string().min(16).optional(),
-});
+}).refine((v) => v.email || v.phone, { message: "Provide either email or phone" });
 export type LoginInput = z.infer<typeof LoginSchema>;
 
 export const MfaEnrollSchema = z.object({
   password: z.string().min(1).max(200),
 });
 export type MfaEnrollInput = z.infer<typeof MfaEnrollSchema>;
-
-export const SetPinSchema = z.object({
-  pin: z.string().regex(/^\d{4}$/, "PIN must be exactly 4 digits"),
-});
-export type SetPinInput = z.infer<typeof SetPinSchema>;
 
 export const ConsentSchema = z.object({
   consent_type: z.enum(["GPS_TRACKING_WORKING_HOURS", "PHONE_GPS_FALLBACK", "DATA_PROCESSING_NOTICE"]),

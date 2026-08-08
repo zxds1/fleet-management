@@ -88,19 +88,6 @@ components:
               code: { type: string }
               message: { type: string }
 
-    AdminSignupRequest:
-      type: object
-      required: [email, password, full_name]
-      properties:
-        email: { type: string, format: email, example: admin@fleet.co.ke }
-        password:
-          type: string
-          minLength: 12
-          description: Must be >= 12 chars and include lower, upper, digit and symbol; common words rejected.
-          example: "Trucking!2026Safe"
-        full_name: { type: string, maxLength: 200, example: "Asha Maina" }
-        phone: { type: string, maxLength: 40, example: "+2547..." }
-
     CursorPage:
       type: object
       required: [data, next_cursor, has_more]
@@ -147,6 +134,34 @@ components:
         expires_in_seconds: { type: integer, example: 60 }
         method: { type: string, example: PUT }
 
+    DriverSummary:
+      type: object
+      description: Admin driver roster row (A3.7 / admin console).
+      required: [user_id, mfa_enrolled, status]
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email, nullable: true }
+        phone: { type: string, nullable: true, description: Driver sign-in identifier. }
+        full_name: { type: string, nullable: true }
+        mfa_enrolled: { type: boolean }
+        status: { type: string, enum: [PENDING, ACTIVE, SUSPENDED, ON_LEAVE, TERMINATED] }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        devices:
+          type: array
+          items:
+            type: object
+            required: [device_id, platform]
+            properties:
+              device_id: { type: string }
+              platform: { type: string, enum: [ios, android] }
+              last_seen_at: { type: string, format: date-time, nullable: true }
+
+    RevokeSessionsRequest:
+      type: object
+      description: Target user for a forced global sign-out. Omit user_id to revoke the caller's own sessions.
+      properties:
+        user_id: { type: string, format: uuid, nullable: true }
+
     IdempotencyReplay:
       type: object
       required: [replayed, original_status]
@@ -173,6 +188,9 @@ components:
     Conflict:
       description: Optimistic / state conflict.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    UnprocessableEntity:
+      description: Semantic validation failed (see Problem.field_errors).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     SemanticViolation:
       description: Business-rule violation (e.g. odometer decreased, missing closeout evidence).
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
@@ -191,7 +209,7 @@ paths:
   /auth/login:
     post:
       tags: [Auth]
-      summary: Authenticate by email + password (+ MFA if enrolled).
+      summary: Authenticate by email (admin) or phone (driver) + password. MFA is optional and only challenged when the user has enrolled.
       security: []
       requestBody:
         required: true
@@ -199,12 +217,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [password]
               properties:
-                email: { type: string, format: email }
+                email: { type: string, format: email, description: Admins sign in with email. }
+                phone: { type: string, description: Drivers sign in with their phone number (E.164). }
                 password: { type: string }
                 mfa_code: { type: string, description: Required when the user has MFA enrolled (A3.7). }
-                device_id_hash: { type: string, description: Required for driver PIN offline revocation path (B12). }
+                device_id_hash: { type: string, description: Optional device identifier for push delivery (account is not device-bound). }
       responses:
         '200':
           description: Tokens issued.
@@ -220,38 +239,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Account suspended (B13).
-          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
-
-  /auth/admin-signup:
-    post:
-      tags: [Auth]
-      summary: Self-service administrator signup (A3.7).
-      description: >
-        Creates an ACTIVE ADMIN account after email-uniqueness and password-strength checks.
-        The new admin then logs in, which triggers MFA enrolment (ADMIN requires_mfa). Idempotent.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/AdminSignupRequest' }
-      responses:
-        '201':
-          description: Admin account created.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id, email, role]
-                properties:
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, format: email }
-                  role: { type: string, enum: [ADMIN] }
-        '409':
-          description: Email already registered.
-          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
-        '422':
-          description: Validation failed (weak password / invalid email).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
   /auth/mfa/enroll:
@@ -279,27 +266,110 @@ paths:
                   secret_encrypted_preview: { type: string }
                   recovery_codes: { type: array, items: { type: string } }
 
-  /devices/{deviceId}/pin:
-    put:
-      tags: [Auth]
-      summary: Set / reset the local 4-digit driver PIN on a device (B12, M4).
+  /devices/{deviceId}/revoke:
+    post:
+      tags: [Security]
+      summary: Revoke a device (forces the driver to re-authenticate; D-3 / session cap).
       parameters:
         - name: deviceId
           in: path
           required: true
           schema: { type: string }
+      responses:
+        '204': { description: Device revoked; its sessions are invalidated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /sessions/revoke:
+    post:
+      tags: [Security]
+      summary: Force a global sign-out for a user (revoke all sessions). Omit user_id for self.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevokeSessionsRequest' }
+      responses:
+        '204': { description: All sessions for the target user invalidated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /drivers:
+    get:
+      tags: [Admin]
+      summary: List drivers for the admin console (A3.7). Cursor-paginated.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [ACTIVE, SUSPENDED] }
+      responses:
+        '200':
+          description: Cursor page of driver summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor, has_more]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/DriverSummary' } }
+                  next_cursor: { type: string, nullable: true }
+                  has_more: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Admin]
+      summary: Create a driver account (PENDING approval, A3.7). The driver signs in with their phone number.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [pin]
+              required: [phone, full_name, password]
               properties:
-                pin: { type: string, pattern: '^[0-9]{4}$' }
+                phone: { type: string, description: E.164 phone number; the driver sign-in identifier. }
+                full_name: { type: string }
+                password: { type: string, description: Enforced by the server password-strength policy. }
+                licence_number: { type: string, nullable: true }
+                licence_class: { type: string, nullable: true }
+                emergency_contact_name: { type: string, nullable: true }
+                emergency_contact_phone: { type: string, nullable: true }
       responses:
-        '204': { description: PIN hash stored on device. }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+        '201':
+          description: Driver created (PENDING).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  status: { type: string, enum: [PENDING] }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /drivers/{id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a PENDING driver so they can sign in (A3.7).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Driver approved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------------ Shifts
   /shifts/clock-in:

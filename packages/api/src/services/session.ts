@@ -12,7 +12,7 @@ import { hashToken } from "../security/tokens";
 import type { SessionRepository } from "../repositories/identity";
 
 export interface ResolvedIdentity {
-  email: string;
+  email: string | null;
   roles: RoleCode[];
   permissions: PermissionCode[];
   locale: "en" | "sw";
@@ -59,12 +59,11 @@ export class SessionService {
 
     const access = this.tokens.issueAccessToken({
       userId: input.userId,
-      email: identity.email,
+      email: identity.email ?? "",
       roles: identity.roles,
       permissions: identity.permissions,
       sessionId: session.id,
       locale: identity.locale,
-      ...(input.deviceIdHash ? { deviceIdHash: input.deviceIdHash } : {}),
     });
 
     return ok({

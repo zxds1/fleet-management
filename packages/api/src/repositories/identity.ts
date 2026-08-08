@@ -15,10 +15,11 @@ import type {
   UserRow,
   UserSessionRow,
   ConsentType,
+  DriverStatus,
 } from "@fleet/shared";
 
 export interface CreateUserInput {
-  email: string;
+  email?: string | null;
   passwordHash: string;
   fullName: string;
   phone?: string | null;
@@ -40,6 +41,14 @@ export class UserRepository extends BaseRepository<UserRow> {
     return res.rows[0] ?? null;
   }
 
+  async findByPhone(phone: string): Promise<UserRow | null> {
+    const res = await this.client.query<UserRow>(
+      `SELECT * FROM app.users WHERE phone = $1 AND deleted_at IS NULL LIMIT 1`,
+      [phone],
+    );
+    return res.rows[0] ?? null;
+  }
+
   async create(input: CreateUserInput): Promise<UserRow> {
     const res = await this.client.query<UserRow>(
       `INSERT INTO app.users
@@ -48,7 +57,7 @@ export class UserRepository extends BaseRepository<UserRow> {
        RETURNING *`,
       [
         randomUUID(),
-        input.email,
+        input.email ?? null,
         input.passwordHash,
         input.fullName,
         input.phone ?? null,
@@ -83,11 +92,19 @@ export class UserRepository extends BaseRepository<UserRow> {
   async recordSuccessfulLogin(userId: string): Promise<void> {
     await this.client.query(
       `UPDATE app.users
-          SET failed_login_count = 0, locked_until = NULL, last_login_at = now()
-        WHERE id = $1`,
+           SET failed_login_count = 0, locked_until = NULL, last_login_at = now()
+         WHERE id = $1`,
       [userId],
     );
   }
+
+  async setActive(userId: string, isActive: boolean): Promise<void> {
+    await this.client.query(
+      `UPDATE app.users SET is_active = $2, updated_at = now() WHERE id = $1`,
+      [userId, isActive],
+    );
+  }
+
 
   async setLockout(userId: string, lockedUntil: Date | null): Promise<void> {
     await this.client.query(
@@ -114,37 +131,42 @@ export class UserRepository extends BaseRepository<UserRow> {
 export interface ResolvedPermissions {
   roles: RoleCode[];
   permissions: PermissionCode[];
-  requiresMfa: boolean;
 }
 
 export class PermissionRepository {
   constructor(private readonly client: DbClient) {}
 
-  /** Union of every role's grants (N4 / C6.2). No primary role. */
+  /** Union of every role's grants (N4 / C6.2). No primary role. MFA is opt-in, so no requiresMfa flag. */
   async resolve(userId: string): Promise<ResolvedPermissions> {
     const res = await this.client.query<{
       role_code: RoleCode;
-      requires_mfa: boolean;
       permission_code: PermissionCode | null;
     }>(
-      `SELECT ur.role_code, r.requires_mfa, rp.permission_code
-          FROM app.user_roles ur
-          JOIN app.roles r ON r.code = ur.role_code
-          LEFT JOIN app.role_permissions rp ON rp.role_code = ur.role_code
-         WHERE ur.user_id = $1`,
+      `SELECT ur.role_code, rp.permission_code
+           FROM app.user_roles ur
+           JOIN app.roles r ON r.code = ur.role_code
+           LEFT JOIN app.role_permissions rp ON rp.role_code = ur.role_code
+          WHERE ur.user_id = $1`,
       [userId],
     );
 
     const roles = new Set<RoleCode>();
     const permissions = new Set<PermissionCode>();
-    let requiresMfa = false;
     for (const row of res.rows) {
       roles.add(row.role_code);
-      if (row.requires_mfa) requiresMfa = true;
       if (row.permission_code) permissions.add(row.permission_code);
     }
-    return { roles: [...roles], permissions: [...permissions].sort(), requiresMfa };
+    return { roles: [...roles], permissions: [...permissions].sort() };
   }
+}
+
+export interface CreateDriverInput {
+  userId: string;
+  licenceNumber?: string | null;
+  licenceClass?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  status?: DriverStatus;
 }
 
 export class DriverRepository extends BaseRepository<DriverRow> {
@@ -158,6 +180,33 @@ export class DriverRepository extends BaseRepository<DriverRow> {
       [userId],
     );
     return res.rows[0] ?? null;
+  }
+
+  async create(input: CreateDriverInput): Promise<DriverRow> {
+    const res = await this.client.query<DriverRow>(
+      `INSERT INTO app.drivers
+        (id, user_id, licence_number, licence_class, emergency_contact_name, emergency_contact_phone, status, status_changed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       RETURNING *`,
+      [
+        randomUUID(),
+        input.userId,
+        input.licenceNumber ?? null,
+        input.licenceClass ?? null,
+        input.emergencyContactName ?? null,
+        input.emergencyContactPhone ?? null,
+        (input.status ?? "PENDING") as DriverStatus,
+      ],
+    );
+    return res.rows[0] as DriverRow;
+  }
+
+  /** Admin approval flips a PENDING driver to ACTIVE so they can sign in (A3.7). */
+  async setStatus(userId: string, status: DriverStatus): Promise<void> {
+    await this.client.query(
+      `UPDATE app.drivers SET status = $2, status_changed_at = now() WHERE user_id = $1`,
+      [userId, status],
+    );
   }
 }
 
@@ -296,33 +345,6 @@ export class DriverDeviceRepository extends BaseRepository<DriverDeviceRow> {
     return res.rows[0] as DriverDeviceRow;
   }
 
-  /** B12: only the fact that a PIN exists is stored; the bcrypt hash never leaves the device. */
-  async markPinSet(deviceId: string): Promise<void> {
-    await this.client.query(
-      `UPDATE app.driver_devices
-          SET pin_set_at = now(), offline_pin_failures = 0, offline_locked_until = NULL
-        WHERE id = $1`,
-      [deviceId],
-    );
-  }
-
-  async bindRefreshToken(input: {
-    deviceId: string;
-    refreshTokenHash: string;
-    refreshExpiresAt: Date;
-    offlineWindowExpiresAt: Date;
-  }): Promise<void> {
-    await this.client.query(
-      `UPDATE app.driver_devices
-          SET refresh_token_hash = $2,
-              refresh_token_expires_at = $3,
-              offline_window_expires_at = $4,
-              last_seen_online_at = now()
-        WHERE id = $1`,
-      [input.deviceId, input.refreshTokenHash, input.refreshExpiresAt, input.offlineWindowExpiresAt],
-    );
-  }
-
   async revoke(deviceId: string, reason: string, by: string): Promise<void> {
     await this.client.query(
       `UPDATE app.driver_devices
@@ -331,24 +353,6 @@ export class DriverDeviceRepository extends BaseRepository<DriverDeviceRow> {
               offline_window_expires_at = NULL
         WHERE id = $1 AND revoked_at IS NULL`,
       [deviceId, reason, by],
-    );
-  }
-
-  /** M4 mirror of the on-device counters: 5 failures → 15 min lock, 10 → local PIN wipe. */
-  async recordOfflinePinOutcome(input: {
-    deviceId: string;
-    failures: number;
-    lockedUntil: Date | null;
-    pinWiped: boolean;
-  }): Promise<void> {
-    await this.client.query(
-      `UPDATE app.driver_devices
-          SET offline_pin_failures = $2,
-              offline_locked_until = $3,
-              pin_set_at = CASE WHEN $4 THEN NULL ELSE pin_set_at END,
-              last_seen_online_at = now()
-        WHERE id = $1`,
-      [input.deviceId, input.failures, input.lockedUntil, input.pinWiped],
     );
   }
 }

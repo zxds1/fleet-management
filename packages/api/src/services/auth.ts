@@ -1,9 +1,9 @@
 // packages/api/src/services/auth.ts
-// Login / refresh / logout (02-auth.md §2). Password verification with argon2id; MFA gate for
-// users whose role requires it (roles.requires_mfa) or who have opted in (users.mfa_enabled);
-// account lockout after LOGIN_MAX_FAILURES (env, 02 §9 / M4). All mutations run inside the caller's
-// transaction via http/write.ts so the failed-login counter and lockout commit atomically with the
-// idempotency completion (D8).
+// Login / refresh / logout (02-auth.md §2). Password verification with argon2id; MFA is OPTIONAL
+// and opt-in only (challenged solely when users.mfa_enabled). Drivers authenticate by phone, admins
+// by email. Account lockout after LOGIN_MAX_FAILURES (env, 02 §9 / M4). All mutations run inside the
+// caller's transaction via http/write.ts so the failed-login counter and lockout commit atomically
+// with the idempotency completion (D8).
 
 import { AccountSuspended, err, ok, type Result, Unauthenticated, ValidationError } from "@fleet/shared";
 import type { Env } from "../config/env";
@@ -22,7 +22,8 @@ export type LoginResult =
   | { mfaRequired: true; challengeToken: string };
 
 export interface LoginInput {
-  email: string;
+  email?: string;
+  phone?: string;
   password: string;
   ipAddress?: string | null;
   userAgent?: string | null;
@@ -54,7 +55,9 @@ export class AuthService {
   ) {}
 
   async login(input: LoginInput): Promise<Result<LoginResult>> {
-    const user = await this.users.findByEmail(input.email);
+    const user = input.phone
+      ? await this.users.findByPhone(input.phone)
+      : await this.users.findByEmail(input.email ?? "");
     if (!user) return err(new Unauthenticated("Invalid email or password"));
 
     if (!user.is_active) return err(new AccountSuspended());
@@ -74,9 +77,9 @@ export class AuthService {
 
     await this.users.recordSuccessfulLogin(user.id);
 
-    const identity = await this.resolve(user.id);
+    // MFA is OPTIONAL and opt-in: only challenged when the user has enrolled (users.mfa_enabled).
     if (user.mfa_enabled) {
-      const challengeToken = this.tokens.issueMfaChallenge({ userId: user.id, email: user.email });
+      const challengeToken = this.tokens.issueMfaChallenge({ userId: user.id, email: user.email ?? "" });
       return ok({ mfaRequired: true, challengeToken });
     }
 
@@ -90,11 +93,23 @@ export class AuthService {
     return err(issued.error);
   }
 
+  async refresh(refreshToken: string): Promise<Result<IssuedSession>> {
+    return this.sessions.refresh(refreshToken);
+  }
+
+  async logout(userId: string, sessionId: string): Promise<void> {
+    await this.sessions.revoke(userId, sessionId);
+  }
+
+  async logoutAll(userId: string): Promise<void> {
+    await this.sessions.revokeAll(userId);
+  }
+
   /**
    * Self-service admin account creation (A3.7 signup). Validates email format + uniqueness, enforces
-   * the password-strength policy, hashes with argon2id, creates an ACTIVE user granted the ADMIN role,
-   * and returns the new id. The admin then logs in (which triggers MFA enrolment, since ADMIN
-   * requires_mfa). No direct DB seeding required.
+   * the password-strength policy, hashes with argon2id, creates an ACTIVE user granted the ADMIN role.
+   * MFA is optional, so the new admin may enrol later via /auth/mfa/enroll. No direct DB seeding
+   * required.
    */
   async signupAdmin(input: SignupAdminInput): Promise<Result<SignupAdminResult>> {
     const email = input.email.trim().toLowerCase();
@@ -134,26 +149,14 @@ export class AuthService {
     });
     await this.users.assignRole(user.id, "ADMIN");
 
-    return ok({ userId: user.id, email: user.email, role: "ADMIN" });
-  }
-
-  async refresh(refreshToken: string): Promise<Result<IssuedSession>> {
-    return this.sessions.refresh(refreshToken);
-  }
-
-  async logout(userId: string, sessionId: string): Promise<void> {
-    await this.sessions.revoke(userId, sessionId);
-  }
-
-  async logoutAll(userId: string): Promise<void> {
-    await this.sessions.revokeAll(userId);
+    return ok({ userId: user.id, email: user.email ?? email, role: "ADMIN" });
   }
 
   /** Resolves the precomputed permission union + roles + locale for a user id (N4 / C6.2). */
-  async resolve(userId: string): Promise<{ email: string; roles: ResolvedPermissions["roles"]; permissions: ResolvedPermissions["permissions"]; locale: "en" | "sw" }> {
+  async resolve(userId: string): Promise<{ email: string; phone?: string; roles: ResolvedPermissions["roles"]; permissions: ResolvedPermissions["permissions"]; locale: "en" | "sw" }> {
     const user = await this.users.getById(userId);
     if (!user) throw new Unauthenticated();
     const resolved = await this.permissions.resolve(userId);
-    return { email: user.email, roles: resolved.roles, permissions: resolved.permissions, locale: (user.locale as "en" | "sw") ?? "en" };
+    return { email: user.email ?? "", phone: user.phone ?? undefined, roles: resolved.roles, permissions: resolved.permissions, locale: (user.locale as "en" | "sw") ?? "en" };
   }
 }

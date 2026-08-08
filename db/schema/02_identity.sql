@@ -13,19 +13,20 @@ SET search_path = app, telemetry, audit, public;
 -- N4: role membership lives in app.user_roles, not on this table. A user may
 -- hold several roles simultaneously and permissions are combined by union.
 --
--- B12: the driver PIN is NEVER stored here. It exists only as a bcrypt hash in
--- the device keystore. This table holds no PIN column by design.
+-- Drivers sign in with a phone number (unique); admins self-register with an
+-- email. Either identifier may be null, but exactly one is required per role:
+-- drivers carry `phone`, admins carry `email`. MFA is OPTIONAL and opt-in only
+-- (enrolled via /auth/mfa/enroll); nothing here forces it.
 -- -----------------------------------------------------------------------------
 CREATE TABLE app.users (
     id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    email                   citext NOT NULL,
+    email                   citext,                       -- admins; null for phone-only drivers
     password_hash           text NOT NULL,               -- argon2id
     full_name               text NOT NULL CHECK (btrim(full_name) <> ''),
-    phone                   app.phone_e164,
+    phone                   app.phone_e164 UNIQUE,        -- drivers; null for email-only admins
     is_active               boolean NOT NULL DEFAULT true,
 
-    -- A3.7: TOTP MFA is mandatory for ADMIN and FLEET_MANAGER. Enforcement is in
-    -- the auth service; the flag below records enrolment state.
+    -- A3.7: TOTP MFA is OPTIONAL and opt-in. The flag records enrolment state only.
     mfa_enabled             boolean NOT NULL DEFAULT false,
     mfa_secret_encrypted    bytea,                       -- AES-GCM via KMS data key
     mfa_enrolled_at         timestamptz,
@@ -50,16 +51,19 @@ CREATE TABLE app.users (
     CONSTRAINT users_mfa_consistent
         CHECK ((mfa_enabled = false) OR (mfa_secret_encrypted IS NOT NULL)),
     CONSTRAINT users_dnd_pair
-        CHECK ((dnd_start_local IS NULL) = (dnd_end_local IS NULL))
+        CHECK ((dnd_start_local IS NULL) = (dnd_end_local IS NULL)),
+    CONSTRAINT users_contact_required
+        CHECK (email IS NOT NULL OR phone IS NOT NULL)
 );
 
--- Email uniqueness applies only to live rows (D3 soft delete).
+-- Email uniqueness applies only to live rows (D3 soft delete) and only when present.
 CREATE UNIQUE INDEX users_email_unique
-    ON app.users (email) WHERE deleted_at IS NULL;
+    ON app.users (email) WHERE deleted_at IS NULL AND email IS NOT NULL;
+CREATE INDEX users_phone_idx ON app.users (phone) WHERE deleted_at IS NULL AND phone IS NOT NULL;
 CREATE INDEX users_full_name_trgm
     ON app.users USING gin (full_name gin_trgm_ops);
 
-COMMENT ON TABLE  app.users IS 'System users. Deliberately contains no PIN column (B12).';
+COMMENT ON TABLE  app.users IS 'System users. Drivers authenticate by phone, admins by email.';
 COMMENT ON COLUMN app.users.mfa_secret_encrypted IS 'TOTP seed, AES-GCM encrypted with a KMS data key. Never returned by the API.';
 
 -- -----------------------------------------------------------------------------
@@ -70,7 +74,6 @@ CREATE TABLE app.roles (
     code            app.role_code PRIMARY KEY,
     name            text NOT NULL,
     description     text NOT NULL,
-    requires_mfa    boolean NOT NULL DEFAULT false,   -- A3.7
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -145,11 +148,11 @@ COMMENT ON TABLE app.user_sessions IS
     'Admin/web sessions. A1.6 caps concurrent live sessions at 10 per user (enforced in Redis, audited here).';
 
 -- -----------------------------------------------------------------------------
--- app.driver_devices  (B12, B13, M4, N9)
+-- app.driver_devices  (B13, N9)
 -- -----------------------------------------------------------------------------
--- The server never learns the PIN. It stores a hash of the device identifier and
--- a device-bound refresh token, which is what makes remote revocation possible
--- for a driver who is suspended while offline (B13).
+-- A driver may sign in from any phone (the account is not bound to a device), so
+-- the device record exists only to deliver push notifications and to support
+-- remote revocation (B13). No PIN, no device-bound offline refresh path.
 -- -----------------------------------------------------------------------------
 CREATE TABLE app.driver_devices (
     id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -166,19 +169,7 @@ CREATE TABLE app.driver_devices (
                                 CHECK (push_provider IN ('FCM')),
     push_token_updated_at       timestamptz,
 
-    -- B12: proof that a PIN exists on the device, not the PIN itself.
-    pin_set_at                  timestamptz,
     biometric_enrolled          boolean NOT NULL DEFAULT false,
-
-    -- M4: offline brute-force protection state, mirrored from the device on sync.
-    offline_pin_failures        smallint NOT NULL DEFAULT 0
-                                CHECK (offline_pin_failures >= 0),
-    offline_locked_until        timestamptz,
-
-    -- B13: the 24-hour offline ceiling.
-    refresh_token_hash          text,
-    refresh_token_expires_at    timestamptz,
-    offline_window_expires_at   timestamptz,
 
     last_seen_online_at         timestamptz,
     revoked_at                  timestamptz,
@@ -191,12 +182,7 @@ CREATE TABLE app.driver_devices (
 
 CREATE UNIQUE INDEX driver_devices_user_device_unique
     ON app.driver_devices (user_id, device_id_hash) WHERE revoked_at IS NULL;
-CREATE UNIQUE INDEX driver_devices_refresh_token_unique
-    ON app.driver_devices (refresh_token_hash) WHERE refresh_token_hash IS NOT NULL;
 CREATE INDEX driver_devices_user_idx ON app.driver_devices (user_id);
-
-COMMENT ON COLUMN app.driver_devices.offline_window_expires_at IS
-    'B13: after this instant the app must reach the server before any further offline use.';
 
 -- -----------------------------------------------------------------------------
 -- app.drivers  (N4, B16, C3.10)
@@ -212,7 +198,7 @@ CREATE TABLE app.drivers (
     id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id                     uuid NOT NULL UNIQUE REFERENCES app.users(id) ON DELETE RESTRICT,
     employee_number             text,
-    licence_number              text NOT NULL,
+    licence_number              text,                       -- optional at creation; completed after approval
     licence_class               text,
     licence_expiry              date,
     medical_certificate_expiry  date,

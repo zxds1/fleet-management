@@ -91,6 +91,7 @@ export type DocumentType =
   | "OTHER";
 
 export type DriverStatus =
+  | "PENDING"
   | "ACTIVE"
   | "SUSPENDED"
   | "ON_LEAVE"
@@ -351,6 +352,8 @@ export type PermissionCode =
   | "maintenance:manage"
   | "maintenance:read"
   | "maintenance:record"
+  | "manage_own_mfa"
+  | "revoke_device"
   | "notification:manage"
   | "payroll:export"
   | "recovery:manage"
@@ -412,6 +415,8 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   "maintenance:manage",
   "maintenance:read",
   "maintenance:record",
+  "manage_own_mfa",
+  "revoke_device",
   "notification:manage",
   "payroll:export",
   "recovery:manage",
@@ -559,13 +564,7 @@ export interface DriverDeviceRow {
   push_token: string | null;
   push_provider: string;
   push_token_updated_at: string | null;
-  pin_set_at: string | null;
   biometric_enrolled: boolean;
-  offline_pin_failures: number;
-  offline_locked_until: string | null;
-  refresh_token_hash: string | null;
-  refresh_token_expires_at: string | null;
-  offline_window_expires_at: string | null;
   last_seen_online_at: string | null;
   revoked_at: string | null;
   revoked_by: string | null;
@@ -1378,7 +1377,7 @@ export interface UserSessionRow {
 /** app.users */
 export interface UserRow {
   id: string;
-  email: string;
+  email: string | null;
   password_hash: string;
   full_name: string;
   phone: string | null;
