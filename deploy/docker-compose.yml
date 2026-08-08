@@ -149,7 +149,7 @@ services:
       - redis
       - api
     environment:
-      WS_PORT: "8081"
+      WS_PORT: "4001"
       DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-only-not-secret
@@ -158,7 +158,7 @@ services:
       JWT_KID_PREVIOUS: k0
       NODE_ENV: development
     ports:
-      - "8081:8081"
+      - "4001:4001"
     volumes:
       - ../..:/app
 
