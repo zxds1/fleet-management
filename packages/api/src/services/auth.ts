@@ -5,10 +5,11 @@
 // transaction via http/write.ts so the failed-login counter and lockout commit atomically with the
 // idempotency completion (D8).
 
-import { AccountSuspended, err, ok, type Result, Unauthenticated } from "@fleet/shared";
+import { AccountSuspended, err, ok, type Result, Unauthenticated, ValidationError } from "@fleet/shared";
 import type { Env } from "../config/env";
 import type { TokenService } from "../security/tokens";
 import { argon2idHasher } from "../security/passwords";
+import { checkPasswordStrength } from "../security/passwordPolicy";
 import {
   PermissionRepository,
   UserRepository,
@@ -27,6 +28,21 @@ export interface LoginInput {
   userAgent?: string | null;
   deviceIdHash?: string;
 }
+
+export interface SignupAdminInput {
+  email: string;
+  password: string;
+  fullName: string;
+  phone?: string | null;
+}
+
+export interface SignupAdminResult {
+  userId: string;
+  email: string;
+  role: "ADMIN";
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class AuthService {
   constructor(
@@ -72,6 +88,53 @@ export class AuthService {
     });
     if (issued.ok) return ok({ mfaRequired: false, session: issued.value });
     return err(issued.error);
+  }
+
+  /**
+   * Self-service admin account creation (A3.7 signup). Validates email format + uniqueness, enforces
+   * the password-strength policy, hashes with argon2id, creates an ACTIVE user granted the ADMIN role,
+   * and returns the new id. The admin then logs in (which triggers MFA enrolment, since ADMIN
+   * requires_mfa). No direct DB seeding required.
+   */
+  async signupAdmin(input: SignupAdminInput): Promise<Result<SignupAdminResult>> {
+    const email = input.email.trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      return err(new ValidationError("Invalid email address", [
+        { field: "email", code: "INVALID_EMAIL", message: "Enter a valid email address." },
+      ]));
+    }
+
+    const existing = await this.users.findByEmail(email);
+    if (existing) {
+      return err(new ValidationError("Email already registered", [
+        { field: "email", code: "EMAIL_TAKEN", message: "An account with this email already exists." },
+      ]));
+    }
+
+    const strength = checkPasswordStrength(input.password, email);
+    if (!strength.ok) {
+      return err(
+        new ValidationError("Password too weak: " + strength.reasons.join(" "), strength.reasons.map((message) => ({
+          field: "password",
+          code: "WEAK_PASSWORD",
+          message,
+        }))),
+      );
+    }
+
+    const hash = await argon2idHasher.hash(input.password);
+    const fullName = (input.fullName.trim() || email.split("@")[0]) ?? email;
+    const user = await this.users.create({
+      email,
+      passwordHash: hash,
+      fullName,
+      phone: input.phone ?? null,
+      isActive: true,
+      mfaEnabled: false,
+    });
+    await this.users.assignRole(user.id, "ADMIN");
+
+    return ok({ userId: user.id, email: user.email, role: "ADMIN" });
   }
 
   async refresh(refreshToken: string): Promise<Result<IssuedSession>> {

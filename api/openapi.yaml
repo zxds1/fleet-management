@@ -88,6 +88,19 @@ components:
               code: { type: string }
               message: { type: string }
 
+    AdminSignupRequest:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email: { type: string, format: email, example: admin@fleet.co.ke }
+        password:
+          type: string
+          minLength: 12
+          description: Must be >= 12 chars and include lower, upper, digit and symbol; common words rejected.
+          example: "Trucking!2026Safe"
+        full_name: { type: string, maxLength: 200, example: "Asha Maina" }
+        phone: { type: string, maxLength: 40, example: "+2547..." }
+
     CursorPage:
       type: object
       required: [data, next_cursor, has_more]
@@ -207,6 +220,38 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Account suspended (B13).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /auth/admin-signup:
+    post:
+      tags: [Auth]
+      summary: Self-service administrator signup (A3.7).
+      description: >
+        Creates an ACTIVE ADMIN account after email-uniqueness and password-strength checks.
+        The new admin then logs in, which triggers MFA enrolment (ADMIN requires_mfa). Idempotent.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminSignupRequest' }
+      responses:
+        '201':
+          description: Admin account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, email, role]
+                properties:
+                  user_id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  role: { type: string, enum: [ADMIN] }
+        '409':
+          description: Email already registered.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: Validation failed (weak password / invalid email).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
   /auth/mfa/enroll:

@@ -2,6 +2,7 @@
 // Identity repositories (02-auth.md). Parameterised SQL only; no business rules (06 §2).
 // Soft delete is honoured on master rows (users, drivers) — D3.
 
+import { randomUUID } from "node:crypto";
 import { BaseRepository } from "@fleet/db";
 import type {
   DbClient,
@@ -16,6 +17,16 @@ import type {
   ConsentType,
 } from "@fleet/shared";
 
+export interface CreateUserInput {
+  email: string;
+  passwordHash: string;
+  fullName: string;
+  phone?: string | null;
+  locale?: string;
+  isActive?: boolean;
+  mfaEnabled?: boolean;
+}
+
 export class UserRepository extends BaseRepository<UserRow> {
   constructor(client: DbClient) {
     super(client, "app.users");
@@ -27,6 +38,34 @@ export class UserRepository extends BaseRepository<UserRow> {
       [email],
     );
     return res.rows[0] ?? null;
+  }
+
+  async create(input: CreateUserInput): Promise<UserRow> {
+    const res = await this.client.query<UserRow>(
+      `INSERT INTO app.users
+        (id, email, password_hash, full_name, phone, is_active, mfa_enabled, locale, password_changed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       RETURNING *`,
+      [
+        randomUUID(),
+        input.email,
+        input.passwordHash,
+        input.fullName,
+        input.phone ?? null,
+        input.isActive ?? true,
+        input.mfaEnabled ?? false,
+        input.locale ?? "en",
+      ],
+    );
+    return res.rows[0] as UserRow;
+  }
+
+  async assignRole(userId: string, roleCode: RoleCode): Promise<void> {
+    await this.client.query(
+      `INSERT INTO app.user_roles (user_id, role_code) VALUES ($1, $2)
+       ON CONFLICT (user_id, role_code) DO NOTHING`,
+      [userId, roleCode],
+    );
   }
 
   async recordFailedLogin(userId: string, lockedUntil: Date | null): Promise<number> {
@@ -89,10 +128,10 @@ export class PermissionRepository {
       permission_code: PermissionCode | null;
     }>(
       `SELECT ur.role_code, r.requires_mfa, rp.permission_code
-         FROM app.user_roles ur
-         JOIN app.roles r ON r.code = ur.role_code
-         LEFT JOIN app.role_permissions rp ON rp.role_code = ur.role_code
-        WHERE ur.user_id = $1`,
+          FROM app.user_roles ur
+          JOIN app.roles r ON r.code = ur.role_code
+          LEFT JOIN app.role_permissions rp ON rp.role_code = ur.role_code
+         WHERE ur.user_id = $1`,
       [userId],
     );
 
@@ -136,8 +175,8 @@ export class SessionRepository extends BaseRepository<UserSessionRow> {
   }): Promise<UserSessionRow> {
     const res = await this.client.query<UserSessionRow>(
       `INSERT INTO app.user_sessions (user_id, refresh_token_hash, expires_at, ip_address, user_agent)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *`,
       [input.userId, input.refreshTokenHash, input.expiresAt, input.ipAddress ?? null, input.userAgent ?? null],
     );
     return res.rows[0] as UserSessionRow;
@@ -146,8 +185,8 @@ export class SessionRepository extends BaseRepository<UserSessionRow> {
   async findActiveByTokenHash(tokenHash: string): Promise<UserSessionRow | null> {
     const res = await this.client.query<UserSessionRow>(
       `SELECT * FROM app.user_sessions
-        WHERE refresh_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
-        LIMIT 1`,
+         WHERE refresh_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+         LIMIT 1`,
       [tokenHash],
     );
     return res.rows[0] ?? null;
@@ -186,8 +225,8 @@ export class SessionRepository extends BaseRepository<UserSessionRow> {
   async listActive(userId: string): Promise<UserSessionRow[]> {
     const res = await this.client.query<UserSessionRow>(
       `SELECT * FROM app.user_sessions
-        WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
-        ORDER BY issued_at ASC`,
+         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+         ORDER BY issued_at ASC`,
       [userId],
     );
     return res.rows;
@@ -231,19 +270,19 @@ export class DriverDeviceRepository extends BaseRepository<DriverDeviceRow> {
   }): Promise<DriverDeviceRow> {
     const res = await this.client.query<DriverDeviceRow>(
       `INSERT INTO app.driver_devices
-         (user_id, device_id_hash, device_label, device_model, os_version, app_version,
-          push_token, push_token_updated_at, last_seen_online_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $7 IS NULL THEN NULL ELSE now() END, now())
-       ON CONFLICT (user_id, device_id_hash) WHERE revoked_at IS NULL DO UPDATE
-         SET device_label = COALESCE(EXCLUDED.device_label, app.driver_devices.device_label),
-             device_model = COALESCE(EXCLUDED.device_model, app.driver_devices.device_model),
-             os_version   = COALESCE(EXCLUDED.os_version,   app.driver_devices.os_version),
-             app_version  = COALESCE(EXCLUDED.app_version,  app.driver_devices.app_version),
-             push_token   = COALESCE(EXCLUDED.push_token,   app.driver_devices.push_token),
-             push_token_updated_at = CASE WHEN EXCLUDED.push_token IS NULL
-                                          THEN app.driver_devices.push_token_updated_at ELSE now() END,
-             last_seen_online_at = now()
-       RETURNING *`,
+          (user_id, device_id_hash, device_label, device_model, os_version, app_version,
+           push_token, push_token_updated_at, last_seen_online_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $7 IS NULL THEN NULL ELSE now() END, now())
+        ON CONFLICT (user_id, device_id_hash) WHERE revoked_at IS NULL DO UPDATE
+          SET device_label = COALESCE(EXCLUDED.device_label, app.driver_devices.device_label),
+              device_model = COALESCE(EXCLUDED.device_model, app.driver_devices.device_model),
+              os_version   = COALESCE(EXCLUDED.os_version,   app.driver_devices.os_version),
+              app_version  = COALESCE(EXCLUDED.app_version,  app.driver_devices.app_version),
+              push_token   = COALESCE(EXCLUDED.push_token,   app.driver_devices.push_token),
+              push_token_updated_at = CASE WHEN EXCLUDED.push_token IS NULL
+                                           THEN app.driver_devices.push_token_updated_at ELSE now() END,
+              last_seen_online_at = now()
+        RETURNING *`,
       [
         input.userId,
         input.deviceIdHash,
@@ -322,9 +361,9 @@ export class ConsentRepository extends BaseRepository<UserConsentRow> {
   async findAccepted(userId: string, consentType: ConsentType): Promise<UserConsentRow | null> {
     const res = await this.client.query<UserConsentRow>(
       `SELECT * FROM app.user_consents
-        WHERE user_id = $1 AND consent_type = $2 AND revoked_at IS NULL
-        ORDER BY accepted_at DESC
-        LIMIT 1`,
+         WHERE user_id = $1 AND consent_type = $2 AND revoked_at IS NULL
+         ORDER BY accepted_at DESC
+         LIMIT 1`,
       [userId, consentType],
     );
     return res.rows[0] ?? null;
@@ -340,11 +379,11 @@ export class ConsentRepository extends BaseRepository<UserConsentRow> {
   }): Promise<UserConsentRow> {
     const res = await this.client.query<UserConsentRow>(
       `INSERT INTO app.user_consents
-         (user_id, consent_type, policy_version, ip_address, user_agent, device_id_hash)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (user_id, consent_type, policy_version) WHERE revoked_at IS NULL
-         DO UPDATE SET accepted_at = app.user_consents.accepted_at
-       RETURNING *`,
+          (user_id, consent_type, policy_version, ip_address, user_agent, device_id_hash)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (user_id, consent_type, policy_version) WHERE revoked_at IS NULL
+          DO UPDATE SET accepted_at = app.user_consents.accepted_at
+        RETURNING *`,
       [
         input.userId,
         input.consentType,

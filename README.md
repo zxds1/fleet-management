@@ -315,7 +315,69 @@ identical request/response shapes.
 
 ---
 
-## 11. Source of truth / design docs
+## 11. Traccar integration & hardware onboarding
+
+Traccar is the **device-authoritative** telemetry decoder (N2.1). The fleet DB is authoritative for
+**assets/vehicles**; the two are joined by `app.vehicles.traccar_device_id`. Positions reach the
+pipeline through **two idempotent paths** (both keyed/deduped on `traccar_position_id`):
+
+1. **Webhook (push).** Traccar forwards each decoded position to `POST /api/v1/telemetry/webhook`
+   (the `@fleet/api` public endpoint, A1.1). The handler validates the body (`TraccarWebhookSchema`),
+   resolves `deviceId → vehicle_id`, and `XADD`s the normalised position to the durable Redis Stream
+   `traccar:positions` (N2.3). No idempotency/auth on the route itself — the worker dedupes.
+2. **REST back-fill poller (pull).** `@fleet/worker --role ingest` runs `BackfillPoller`, which calls
+   `GET {TRACCAR_BASE_URL}/api/positions?from=<now-lookback>` every `TRACCAR_POLL_MINUTES` (Basic
+   auth) and feeds the parsed positions into the **same** `IngestConsumer.processPositions` pipeline.
+   This is the gap-closer and the primary durability guarantee if Redis-Stream forwarding is
+   unavailable (R-102).
+
+The ingest worker (`--role ingest`) wires both: `IngestConsumer` `XREAD`s the stream and applies the
+retention transform + derived state (`tracker_health`, `driver_duty_segments`, `driver_hos_state`,
+movement events); `BackfillPoller` fills any holes. Both paths land each `traccar_position_id` exactly
+once (UNIQUE index). See `docs/backend/04-telemetry-ingest.md` for the full topology and retention rules.
+
+### Configuration (worker `TRACCAR_*`, also used by `api` for the webhook contract)
+
+| Var | Default | Purpose |
+|---|---|---|
+| `TRACCAR_BASE_URL` | `http://localhost:8082` | Traccar REST base (web UI + API) |
+| `TRACCAR_USERNAME` / `TRACCAR_PASSWORD` | `admin` | Basic-auth for the REST poller |
+| `TRACCAR_POLL_MINUTES` | `5` | back-fill poll cadence |
+| `TRACCAR_LOOKBACK_MINUTES` | `30` | back-fill window |
+
+Webhook auth (optional, security.md S-1): set `WEBHOOK_SECRET` on `api` to require an `X-Signature`
+HMAC-SHA256 over the raw body plus an `X-Timestamp` (±5 min skew); mismatch → `401`. Without a secret
+the webhook runs unauthenticated (logs a warning). Traccar's built-in HTTP forwarding does not sign
+with this scheme, so to enforce HMAC either front the endpoint with a signing proxy or accept the
+unauthenticated path.
+
+### Connecting GPS hardware
+
+1. **Provision the device in Traccar** — in the Traccar web UI (`:8082`) add the tracker (Teltonika,
+   Queclink, or any Traccar-supported unit). Traccar assigns a numeric **device id** and decodes
+   positions over its supported transport (TCP/UDP/HTTP; default tracker port `5005`).
+2. **Link it to a vehicle** — set that Traccar device id as `traccar_device_id` on the matching
+   `app.vehicles` row (via the fleet admin/API). The worker resolves `traccar_device_id → vehicle_id`
+   on every position (`TelemetryRepository.resolveVehicleId`); unmatched devices are still ingested
+   but skipped for vehicle-specific derived state.
+3. **Point Traccar at the platform** — enable forwarding to the webhook URL
+   `https://<api>/api/v1/telemetry/webhook` (and/or rely on the REST poller). If the pinned Traccar
+   build supports Redis-Stream forwarding, set `FORWARD_REDIS_CHANNEL=traccar:positions` to the same
+   Redis the worker consumes.
+
+Once linked, positions flow automatically: tracker → Traccar (decode) → webhook/REST → Redis Stream →
+ingest worker → `telemetry.location_updates` + derived state, surfaced live over the `ws` gateway.
+
+### Local stack
+
+`deploy/docker-compose.yml` already includes a `traccar` service (web UI `:8082`, tracker port
+`:5005`, forwarding to the compose Redis Stream `traccar:positions`); `api`/`worker` point
+`TRACCAR_BASE_URL` at it. Bring it up with the stack in §8 and provision a test device in the Traccar
+UI to exercise the ingest path end-to-end.
+
+---
+
+## 12. Source of truth / design docs
 
 `docs/architecture/*` (locked decisions, service boundaries, risk register) and `docs/backend/*`
 (overview, shared kernel, auth, REST, ingest, workers, migrations, websocket, error model,
