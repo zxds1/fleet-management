@@ -12,8 +12,9 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "tsc -b --noEmit",
     "test": "jest --passWithNoTests",
-    "contract": "jest --passWithNoTests --testPathPattern contract",
-    "start": "node dist/server.js"
+      "contract": "jest --passWithNoTests --testPathPattern contract",
+      "dev:api": "npm run build && node dist/server.js",
+      "start": "node dist/server.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

@@ -13,8 +13,10 @@
     "lint": "tsc -b --noEmit",
     "test": "jest --passWithNoTests",
     "contract": "tsc -b --noEmit",
-    "start": "node dist/index.js --role worker",
-    "start:ingest": "node dist/index.js --role ingest"
+      "dev:worker": "npm run build && node dist/index.js --role worker",
+      "dev:ingest": "npm run build && node dist/index.js --role ingest",
+      "start": "node dist/index.js --role worker",
+      "start:ingest": "node dist/index.js --role ingest"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
