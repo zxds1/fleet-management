@@ -127,6 +127,36 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     ),
   );
 
+  // ── Admin self-signup (public, idempotent) ──────────────────────────────────────────────
+  const AdminSignupSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(1),
+    full_name: z.string().min(1).max(200),
+    phone: z.string().max(40).optional(),
+  });
+  router.post(
+    "/admin-signup",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx) => {
+        const input = parseBody(AdminSignupSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.auth.signupAdmin({
+          email: input.email,
+          password: input.password,
+          fullName: input.full_name,
+          phone: input.phone ?? null,
+        });
+        if (isErr(result)) return result.error as never;
+        const value = result.value;
+        return ok({
+          status: 201,
+          body: { user_id: value.userId, email: value.email, role: value.role },
+        });
+      }),
+    ),
+  );
+
   // ── MFA verify (challenge → tokens) ─────────────────────────────────────────────────────
   router.post(
     "/mfa/verify",

@@ -241,6 +241,42 @@ paths:
           description: Account suspended (B13).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
+  /auth/admin-signup:
+    post:
+      tags: [Auth]
+      summary: Self-service admin account creation (A3.7). Email must be unique; password strength is enforced server-side. Returns the new ACTIVE ADMIN account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, full_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, description: Min 12 chars with lower/upper/digit/symbol. }
+                full_name: { type: string, maxLength: 200 }
+                phone: { type: string, maxLength: 40, description: Optional contact number. }
+      responses:
+        '201':
+          description: Admin account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, email, role]
+                properties:
+                  user_id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  role: { type: string, enum: [ADMIN] }
+        '409':
+          description: Email already registered.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: Validation / weak password.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /auth/mfa/enroll:
     post:
       tags: [Auth]
