@@ -23,7 +23,10 @@ import {
   AccidentReportRepository,
   EscalationTimerRepository,
   PRIMARY_MEDIA_SLOTS,
+  type AccidentDetailRow,
+  type AccidentSummaryRow,
 } from "../repositories/accidents";
+import { buildPage, decodeCursor, MAX_PAGE_LIMIT, type CursorPage } from "../http/pagination";
 import type { Actor } from "./shift";
 
 export interface AccidentOutcome {
@@ -237,8 +240,104 @@ export interface ChainRow {
   stored_hash: string | null;
 }
 
+/** Media reference on the accident detail read model (B.15). */
+export interface AccidentMediaView {
+  media_id: string;
+  slot: string;
+  kind: string;
+  pending: boolean;
+}
+
+/** `GET /accidents/{id}` read model, shared by the driver and admin detail screens (B.15). */
+export interface AccidentDetailView {
+  accident_id: string;
+  reference: string;
+  occurred_at: string | null;
+  reported_at: string;
+  status: string;
+  severity: string;
+  mayday: boolean;
+  description: string | null;
+  driver_statement: string | null;
+  location_label: string | null;
+  vehicle_label: string | null;
+  escalation_tier: number | null;
+  acknowledged_by: string | null;
+  seconds_to_escalation: number | null;
+  chain_valid: boolean | null;
+  media: AccidentMediaView[];
+  can_acknowledge: boolean;
+}
+
 export class AccidentQuery {
-  constructor(private readonly client: DbClient) {}
+  constructor(
+    private readonly client: DbClient,
+    private readonly reports?: AccidentReportRepository,
+    private readonly media?: AccidentMediaRepository,
+  ) {}
+
+  private get reportRepo(): AccidentReportRepository {
+    return this.reports ?? new AccidentReportRepository(this.client);
+  }
+
+  private get mediaRepo(): AccidentMediaRepository {
+    return this.media ?? new AccidentMediaRepository(this.client);
+  }
+
+  /** Cursor page over the caller's own accident reports (B.14, D7). Scoped to their driver id. */
+  async listMine(
+    driverId: string,
+    opts: { limit: number; cursor?: string },
+  ): Promise<Result<CursorPage<AccidentSummaryRow>>> {
+    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
+    const cursor = decodeCursor(opts.cursor);
+    const rows = await this.reportRepo.listByDriver(driverId, {
+      limit: limit + 1,
+      cursorSort: cursor?.sort,
+      cursorId: cursor?.id,
+    });
+    // Cursor MUST be built from the same column the repo keysets/orders on (`r.reported_at`),
+    // otherwise the next page comparison is evaluated against an unrelated timestamp and rows are
+    // skipped or repeated. `reported_at` is NOT NULL; the fallback is belt-and-braces only.
+    return ok(buildPage(rows, limit, (row) => ({ sort: String(row.reported_at ?? row.occurred_at ?? ""), id: row.accident_id })));
+  }
+
+  /**
+   * Single accident detail for the driver and admin screens (B.15). Bundles the media gallery and
+   * the telemetry chain verdict; `can_acknowledge` is true only while the report is unacknowledged.
+   */
+  async getOne(accidentId: string, driverId?: string): Promise<Result<AccidentDetailView>> {
+    const row = await this.reportRepo.getDetailById(accidentId, driverId);
+    if (!row) return err(new NotFound("Accident report not found"));
+
+    const media = await this.mediaRepo.listByReport(accidentId);
+    // The chain only exists once telemetry was frozen; an off-shift SOS may have none (N3.2).
+    let chainValid: boolean | null = null;
+    if (row.telemetry_available) {
+      const chain = await this.verifyChain(accidentId);
+      if (chain.ok) chainValid = chain.value.all_valid;
+    }
+
+    return ok({
+      accident_id: row.accident_id,
+      reference: row.reference,
+      occurred_at: row.occurred_at,
+      reported_at: row.reported_at,
+      status: row.status,
+      severity: row.severity,
+      mayday: row.mayday,
+      description: row.description,
+      driver_statement: row.driver_statement,
+      location_label: row.location_label,
+      vehicle_label: row.vehicle_label,
+      escalation_tier: row.escalation_tier,
+      acknowledged_by: row.acknowledged_by,
+      seconds_to_escalation: row.seconds_to_escalation,
+      chain_valid: chainValid,
+      media: media.map((m) => ({ media_id: m.media_id, slot: m.slot, kind: m.kind, pending: false })),
+      can_acknowledge: row.acknowledged_at == null,
+    });
+  }
 
   /** Returns the per-row validity of the frozen telemetry hash chain (C3.4). Read-only. */
   async verifyChain(

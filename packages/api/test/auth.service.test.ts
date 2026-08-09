@@ -28,11 +28,31 @@ function buildAuth(overrides: {
   user?: UserRow | null;
   failedLoginCount?: number;
   lockoutAfter?: number;
-}): { service: AuthService; calls: { failedLogins: number[]; lockouts: { userId: string; until: Date | null }[]; issued: number } } {
-  const calls = { failedLogins: [] as number[], lockouts: [] as { userId: string; until: Date | null }[], issued: 0 };
+  /** Verdict the injected second-factor checker returns for the single-call MFA leg. */
+  secondFactorOk?: boolean;
+}): {
+  service: AuthService;
+  calls: {
+    failedLogins: number[];
+    lockouts: { userId: string; until: Date | null }[];
+    issued: number;
+    secondFactor: string[];
+  };
+} {
+  const calls = {
+    failedLogins: [] as number[],
+    lockouts: [] as { userId: string; until: Date | null }[],
+    issued: 0,
+    secondFactor: [] as string[],
+  };
   const passwordHash = overrides.user?.password_hash ?? "hash";
   const users = {
     findByEmail: async (email: string) => (overrides.user && overrides.user.email === email ? overrides.user : null),
+    findByPhone: async (phone: string) => {
+      const want = phone.replace(/\D/g, "");
+      const have = (overrides.user?.phone ?? "").replace(/\D/g, "");
+      return overrides.user && want && want === have ? overrides.user : null;
+    },
     recordFailedLogin: async (_id: string, _until: Date | null) => {
       const n = (overrides.failedLoginCount ?? 0) + 1;
       calls.failedLogins.push(n);
@@ -59,8 +79,15 @@ function buildAuth(overrides: {
     revokeAll: async () => undefined,
   } as unknown as import("../src/services/session").SessionService;
 
+  const mfa = {
+    assertSecondFactor: async (_userId: string, code: string) => {
+      calls.secondFactor.push(code);
+      return overrides.secondFactorOk ?? false;
+    },
+  };
+
   const tokens = new TokenService(env()) as unknown as TokenService;
-  const service = new AuthService(users, permissions, session, tokens, env());
+  const service = new AuthService(users, permissions, session, tokens, env(), mfa);
   return { service, calls };
 }
 
@@ -126,5 +153,85 @@ describe("AuthService.login", () => {
     const result = await service.login({ email: "a@b.co", password: "s3cret" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBeInstanceOf(AccountSuspended);
+  });
+});
+
+describe("AuthService.login — driver phone sign-in (02 §2)", () => {
+  const driver = async () =>
+    ({
+      id: "user-1",
+      email: null,
+      phone: "+254700000000",
+      password_hash: await argon2idHasher.hash("s3cret"),
+      is_active: true,
+      mfa_enabled: false,
+      locked_until: null,
+    }) as unknown as UserRow;
+
+  it("authenticates a driver by phone number", async () => {
+    const { service, calls } = buildAuth({ user: await driver() });
+    const result = await service.login({ phone: "+254700000000", password: "s3cret" });
+    expect(result.ok).toBe(true);
+    expect(calls.issued).toBe(1);
+  });
+
+  it("matches a phone number regardless of separators / leading +", async () => {
+    const { service } = buildAuth({ user: await driver() });
+    const result = await service.login({ phone: "254 700 000 000", password: "s3cret" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects an unknown phone number with a generic error", async () => {
+    const { service } = buildAuth({ user: await driver() });
+    const result = await service.login({ phone: "+254711111111", password: "s3cret" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(Unauthenticated);
+  });
+});
+
+describe("AuthService.login — resolved identity + MFA second leg", () => {
+  const mfaUser = async (mfaEnabled: boolean) =>
+    ({
+      id: "user-1",
+      email: "a@b.co",
+      password_hash: await argon2idHasher.hash("s3cret"),
+      is_active: true,
+      mfa_enabled: mfaEnabled,
+      locked_until: null,
+    }) as UserRow;
+
+  it("returns the resolved identity alongside the session so the client can build a Principal", async () => {
+    const { service } = buildAuth({ user: await mfaUser(false) });
+    const result = await service.login({ email: "a@b.co", password: "s3cret" });
+    expect(result.ok).toBe(true);
+    if (result.ok && !result.value.mfaRequired) {
+      expect(result.value.identity).toEqual({ email: "a@b.co", roles: [], permissions: [], locale: "en" });
+    }
+  });
+
+  it("completes the second leg in one call when a valid mfa_code is supplied", async () => {
+    const { service, calls } = buildAuth({ user: await mfaUser(true), secondFactorOk: true });
+    const result = await service.login({ email: "a@b.co", password: "s3cret", mfaCode: "123456" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.mfaRequired).toBe(false);
+    expect(calls.secondFactor).toEqual(["123456"]);
+    expect(calls.issued).toBe(1);
+  });
+
+  it("rejects an invalid mfa_code without issuing a session", async () => {
+    const { service, calls } = buildAuth({ user: await mfaUser(true), secondFactorOk: false });
+    const result = await service.login({ email: "a@b.co", password: "s3cret", mfaCode: "000000" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(Unauthenticated);
+    expect(calls.issued).toBe(0);
+  });
+
+  it("does not consume a second factor when none is supplied (challenge branch)", async () => {
+    const { service, calls } = buildAuth({ user: await mfaUser(true) });
+    const result = await service.login({ email: "a@b.co", password: "s3cret" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.mfaRequired).toBe(true);
+    expect(calls.secondFactor).toHaveLength(0);
+    expect(calls.issued).toBe(0);
   });
 });

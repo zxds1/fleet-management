@@ -7,7 +7,6 @@
 import { ok } from "@fleet/shared";
 import { AdminService } from "../src/services/admin";
 import type { AdminRepository, DriverRosterRow, ListDriversOptions } from "../src/repositories/admin";
-import type { UserRepository, DriverRepository } from "../src/repositories/identity";
 import type { DeviceService } from "../src/services/device";
 import type { AuthService } from "../src/services/auth";
 import type { UserRow, DriverDeviceRow } from "@fleet/shared";
@@ -26,8 +25,9 @@ function device(id: string, provider = "fcm"): DriverDeviceRow {
   return {
     id, user_id: "u", device_id_hash: "h", device_label: null, device_model: null, os_version: null,
     app_version: null, push_token: null, push_provider: provider, push_token_updated_at: null,
-    biometric_enrolled: false, last_seen_online_at: null, revoked_at: null, revoked_by: null,
-    revoked_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    biometric_enrolled: false,
+    last_seen_online_at: null, revoked_at: null, revoked_by: null, revoked_reason: null,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
 }
 
@@ -36,7 +36,7 @@ function cursorAwareRepo(rows: DriverRosterRow[]): AdminRepository {
     listDrivers: async (opts: ListDriversOptions) => {
       if (!opts.cursor) return rows;
       const start = rows.findIndex(
-        (r) => r.user.full_name === opts.cursor!.sort && r.user.id === opts.cursor!.id,
+        (r) => r.user.email === opts.cursor!.sort && r.user.id === opts.cursor!.id,
       );
       return start >= 0 ? rows.slice(start + 1) : rows;
     },
@@ -46,12 +46,12 @@ function cursorAwareRepo(rows: DriverRosterRow[]): AdminRepository {
 describe("AdminService", () => {
   it("returns a cursor page of raw roster rows (limit+1 fetch → has_more)", async () => {
     const rows: DriverRosterRow[] = [
-      { user: user("u1", "amy@fleet.co.ke"), driverStatus: "ACTIVE", devices: [device("d1", "apns"), device("d2", "fcm")] },
-      { user: user("u2", "bob@fleet.co.ke", false), driverStatus: "SUSPENDED", devices: [] },
-      { user: user("u3", "cara@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
+      { user: user("u1", "amy@fleet.co.ke"), devices: [device("d1", "apns"), device("d2", "fcm")] },
+      { user: user("u2", "bob@fleet.co.ke", false), devices: [] },
+      { user: user("u3", "cara@fleet.co.ke"), devices: [] },
     ];
     const adminRepo: AdminRepository = { listDrivers: async () => rows } as unknown as AdminRepository;
-    const svc = new AdminService(adminRepo, {} as UserRepository, {} as DriverRepository, {} as DeviceService, {} as AuthService);
+    const svc = new AdminService(adminRepo, {} as DeviceService, {} as AuthService);
 
     const res = await svc.listDrivers({ limit: 2 });
     if (!res.ok) throw new Error("expected ok");
@@ -69,10 +69,10 @@ describe("AdminService", () => {
 
   it("decodes an opaque cursor back to (email,id) and advances the page", async () => {
     const all: DriverRosterRow[] = [
-      { user: user("u1", "amy@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
-      { user: user("u2", "bob@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
+      { user: user("u1", "amy@fleet.co.ke"), devices: [] },
+      { user: user("u2", "bob@fleet.co.ke"), devices: [] },
     ];
-    const svc = new AdminService(cursorAwareRepo(all), {} as UserRepository, {} as DriverRepository, {} as DeviceService, {} as AuthService);
+    const svc = new AdminService(cursorAwareRepo(all), {} as DeviceService, {} as AuthService);
     const first = await svc.listDrivers({ limit: 1 });
     if (!first.ok) throw new Error("expected ok");
     const cursor = first.value.nextCursor!;
@@ -89,7 +89,7 @@ describe("AdminService", () => {
         return ok({ ok: true });
       },
     } as unknown as DeviceService;
-    const svc = new AdminService({} as AdminRepository, {} as UserRepository, {} as DriverRepository, deviceSvc, {} as AuthService);
+    const svc = new AdminService({} as AdminRepository, deviceSvc, {} as AuthService);
     const res = await svc.revokeDevice("d9", "admin-1");
     expect(res.ok).toBe(true);
     expect(revokedId).toBe("d9");
@@ -102,7 +102,7 @@ describe("AdminService", () => {
         loggedOut = userId;
       },
     } as unknown as AuthService;
-    const svc = new AdminService({} as AdminRepository, {} as UserRepository, {} as DriverRepository, {} as DeviceService, authSvc);
+    const svc = new AdminService({} as AdminRepository, {} as DeviceService, authSvc);
     const res = await svc.revokeSessions("u-target");
     expect(res.ok).toBe(true);
     expect(loggedOut).toBe("u-target");

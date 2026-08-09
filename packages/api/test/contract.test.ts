@@ -19,9 +19,15 @@ const OPENAPI_PATH = resolve(__dirname, "../../../api/openapi.yaml");
 const DBTYPES_PATH = resolve(__dirname, "../../../packages/shared/src/types/db.ts");
 
 // OpenAPI-only helper schemas that intentionally have no 1:1 zod export in @fleet/shared.
-const SCHEMA_ALLOWLIST = new Set(["problem", "money", "geopoint", "mediauploadresponse", "driversummary", "revokesessions", "adminsignup"]);
+const SCHEMA_ALLOWLIST = new Set(["problem", "money", "geopoint", "mediauploadresponse", "driversummary", "revokesessions"]);
 // Operations that are intentionally unauthenticated.
-const PUBLIC_PATHS = new Set(["/auth/login", "/auth/admin-signup", "/telemetry/webhook"]);
+const PUBLIC_PATHS = new Set([
+  "/auth/login",
+  "/auth/refresh",
+  "/auth/mfa/recover",
+  "/auth/admin-signup",
+  "/telemetry/webhook",
+]);
 
 function normalize(name: string): string {
   return name.toLowerCase().replace(/schema|request|response/g, "").replace(/[^a-z0-9]/g, "");

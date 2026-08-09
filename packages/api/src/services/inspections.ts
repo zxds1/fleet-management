@@ -31,7 +31,12 @@ import {
   InspectionTemplateItemRepository,
   InspectionTemplateRepository,
   QuarantineRepository,
+  type DvirDetailItemRow,
+  type DvirDetailRow,
+  type DvirSummaryRow,
+  type InspectionTemplateOption,
 } from "../repositories/inspections";
+import { buildPage, decodeCursor, MAX_PAGE_LIMIT, type CursorPage } from "../http/pagination";
 import type { TrailerRepository, VehicleRepository } from "../repositories/shifts";
 import type { Actor } from "./shift";
 
@@ -206,3 +211,48 @@ type QuarantineEventRowStub = {
   quarantined_at: string;
   requires_repair_document: boolean;
 };
+
+/** `GET /inspections/{id}` read model for the DVIR detail screen (B.12). */
+export interface DvirDetailView extends DvirDetailRow {
+  items: DvirDetailItemRow[];
+}
+
+/**
+ * Read-only DVIR queries (B.10/B.12). Cursor-paginated (D7), always scoped to the caller's driver
+ * id for the "me" surface so a driver can never read another driver's submissions (06 §2).
+ */
+export class InspectionQuery {
+  constructor(
+    private readonly inspections: InspectionRepository,
+    private readonly items: InspectionItemRepository,
+    private readonly templates: InspectionTemplateRepository,
+  ) {}
+
+  /** Checklists the driver may start (B.10). */
+  async listTemplates(): Promise<Result<{ templates: InspectionTemplateOption[] }>> {
+    return ok({ templates: await this.templates.listActive() });
+  }
+
+  /** Cursor page over the caller's own DVIR submissions (B.10). */
+  async listMine(
+    driverId: string,
+    opts: { limit: number; cursor?: string },
+  ): Promise<Result<CursorPage<DvirSummaryRow>>> {
+    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
+    const cursor = decodeCursor(opts.cursor);
+    const rows = await this.inspections.listByDriver(driverId, {
+      limit: limit + 1,
+      cursorSort: cursor?.sort,
+      cursorId: cursor?.id,
+    });
+    return ok(buildPage(rows, limit, (row) => ({ sort: String(row.submitted_at ?? ""), id: row.inspection_id })));
+  }
+
+  /** Single DVIR with its per-item results (B.12). `driverId` scopes it to the caller's own. */
+  async getOne(inspectionId: string, driverId?: string): Promise<Result<DvirDetailView>> {
+    const header = await this.inspections.getDetailById(inspectionId, driverId);
+    if (!header) return err(new NotFound("Inspection not found"));
+    const items = await this.items.listByInspection(inspectionId);
+    return ok({ ...header, items });
+  }
+}

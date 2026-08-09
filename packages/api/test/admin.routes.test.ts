@@ -36,8 +36,9 @@ function device(id: string, provider = "fcm", lastSeen: string | null = null): D
   return {
     id, user_id: "u1", device_id_hash: "h", device_label: null, device_model: null, os_version: null,
     app_version: null, push_token: null, push_provider: provider, push_token_updated_at: null,
-    biometric_enrolled: false, last_seen_online_at: lastSeen, revoked_at: null, revoked_by: null,
-    revoked_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    biometric_enrolled: false,
+    last_seen_online_at: lastSeen, revoked_at: null, revoked_by: null, revoked_reason: null,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
 }
 
@@ -53,13 +54,11 @@ describe("toDriverSummary", () => {
   it("maps a user + devices to the mobile DriverSummary shape", () => {
     const row = {
       user: user({ full_name: "Amy", is_active: true, last_login_at: "2026-08-07T10:00:00.000Z" }),
-      driverStatus: "ACTIVE",
       devices: [device("d1", "apns", "2026-08-07T09:00:00.000Z"), device("d2", "fcm", null)],
     };
     expect(toDriverSummary(row)).toEqual({
       user_id: "u1",
       email: "amy@fleet.co.ke",
-      phone: null,
       full_name: "Amy",
       mfa_enrolled: true,
       status: "ACTIVE",
@@ -72,12 +71,12 @@ describe("toDriverSummary", () => {
   });
 
   it("derives SUSPENDED from an inactive account", () => {
-    const row = { user: user({ is_active: false }), driverStatus: "SUSPENDED", devices: [] };
+    const row = { user: user({ is_active: false }), devices: [] };
     expect(toDriverSummary(row).status).toBe("SUSPENDED");
   });
 
   it("null-safely handles a missing full_name and empty device list", () => {
-    const row = { user: user({ full_name: undefined }), driverStatus: null, devices: [] };
+    const row = { user: user({ full_name: undefined }), devices: [] };
     const summary = toDriverSummary(row);
     expect(summary.full_name).toBeNull();
     expect(summary.devices).toEqual([]);

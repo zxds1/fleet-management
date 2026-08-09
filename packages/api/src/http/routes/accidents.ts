@@ -5,15 +5,17 @@
 // use a pooled client. Driver id is resolved from the Principal via drivers.user_id.
 
 import { Router, type Request, type Response } from "express";
-import { Forbidden, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
+import { Forbidden, NotFound, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
 import { AccidentCreateSchema, AccidentMediaSchema, MaydaySchema } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
-import { parseBody } from "../validate";
+import { parseBody, parseQuery } from "../validate";
+import { CursorQuerySchema } from "../pagination";
 import { withClient } from "../../db/withClient";
+import { ownScopeDriverId } from "../ownScope";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -50,7 +52,15 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.accidentId } as never;
+        if (result.ok) {
+          // Wire contract is snake_case (openapi `/accidents/mayday` → accident_id).
+          const { accidentId, escalatedAt } = result.value;
+          return {
+            status: 201,
+            body: { accident_id: accidentId, escalated_at: escalatedAt ?? null },
+            resourceId: accidentId,
+          } as never;
+        }
         return result.error as never;
       }),
     ),
@@ -74,7 +84,11 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.accidentId } as never;
+        if (result.ok) {
+          // Wire contract is snake_case (openapi `/accidents` → accident_id).
+          const { accidentId } = result.value;
+          return { status: 201, body: { accident_id: accidentId }, resourceId: accidentId } as never;
+        }
         return result.error as never;
       }),
     ),
@@ -98,6 +112,30 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
         });
         if (result.ok) return { status: 204, body: {} } as never;
         return result.error as never;
+      }),
+    ),
+  );
+
+  // ── Own reports (read, cursor) ──────────────────────────────────────────────────────────
+  router.get(
+    "/me",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("accident:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const query = parseQuery(CursorQuerySchema, req);
+        const svc = makeServices(client, infra);
+        const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
+        if (!driver) {
+          res.status(403).json({ error_code: "FORBIDDEN", status: 403, title: "Forbidden" });
+          return;
+        }
+        const result = await svc.accidentQuery.listMine(driver.id, { limit: query.limit, cursor: query.cursor });
+        if (!result.ok) {
+          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
       }),
     ),
   );
@@ -135,8 +173,34 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok) return { status: 200, body: result.value } as never;
+        if (result.ok) {
+          const { accidentId, acknowledgedAt } = result.value;
+          return { status: 200, body: { accident_id: accidentId, acknowledged_at: acknowledgedAt } } as never;
+        }
         return result.error as never;
+      }),
+    ),
+  );
+
+  // ── Single accident detail (read; driver + admin) ────────────────────────────────────────
+  // Registered after /me and /:id/telemetry/verify so the literal paths win the match.
+  // A driver (accident:read without the fleet-wide accident:update) only ever resolves their own
+  // report; anything else 404s rather than leaking another driver's incident.
+  router.get(
+    "/:id",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("accident:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const driverId = await ownScopeDriverId(req, svc, "accident:update");
+        const result = await svc.accidentQuery.getOne(req.params.id!, driverId);
+        if (!result.ok) {
+          const status = result.error instanceof NotFound ? 404 : 422;
+          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
       }),
     ),
   );

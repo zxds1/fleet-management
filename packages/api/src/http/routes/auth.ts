@@ -41,6 +41,32 @@ const DeviceRegisterSchema = z.object({
 });
 const DeviceRevokeSchema = z.object({ device_id_hash: z.string().min(16) });
 
+/** B12: the PIN itself never leaves the device; the server only flips the "a PIN exists" flag. */
+const SetPinSchema = z.object({ pin_set: z.literal(true).optional() }).passthrough();
+
+/**
+ * `POST /auth/mfa/recover` — recovery-code bypass when the authenticator is lost (A3.7).
+ * Identify by email (admin) or user_id; exactly one is required.
+ */
+const MfaRecoverSchema = z
+  .object({
+    email: z.string().email().optional(),
+    user_id: z.string().uuid().optional(),
+    recovery_code: z.string().min(4).max(64),
+  })
+  .refine((v) => !!v.email || !!v.user_id, {
+    message: "Provide either email or user_id",
+    path: ["email"],
+  });
+
+/** `POST /auth/admin-signup` — self-service ADMIN creation (A3.7). */
+const AdminSignupSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(12).max(200),
+  full_name: z.string().min(1).max(200),
+  phone: z.string().regex(/^\+?[1-9]\d{6,14}$/).optional(),
+});
+
 /** Casts a config-sourced permission code string to the generated union without widening errors. */
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
 
@@ -80,9 +106,11 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const input = parseBody(LoginSchema, req);
         const svc = makeServices(tx.client, infra);
         const login = await svc.auth.login({
+          // LoginSchema guarantees email-or-phone: admins sign in by email, drivers by phone.
           email: input.email,
           phone: input.phone,
           password: input.password,
+          mfaCode: input.mfa_code,
           deviceIdHash: input.device_id_hash,
           ipAddress: ip(req),
           userAgent: ua(req),
@@ -122,7 +150,22 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           endpoint: req.path,
           http_method: req.method,
         });
-        return ok({ status: 200, body: sessionBody(s), resourceId: s.sessionId });
+        // The client builds its Principal straight off this body, so the resolved identity
+        // (user_id + roles + the permission union + locale) ships with the tokens (N4 / C6.2).
+        return ok({
+          status: 200,
+          body: {
+            ...sessionBody(s),
+            mfa_required: false,
+            user_id: s.userId,
+            email: value.identity.email,
+            phone: input.phone ?? null,
+            roles: value.identity.roles,
+            permissions: value.identity.permissions,
+            locale: value.identity.locale,
+          },
+          resourceId: s.sessionId,
+        });
       }),
     ),
   );
@@ -180,7 +223,122 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           http_method: req.method,
           reason: "mfa",
         });
-        return ok({ status: 200, body: sessionBody(s), resourceId: s.sessionId });
+        const identity = await svc.auth.resolve(s.userId);
+        return ok({
+          status: 200,
+          body: {
+            ...sessionBody(s),
+            mfa_required: false,
+            user_id: s.userId,
+            email: identity.email,
+            roles: identity.roles,
+            permissions: identity.permissions,
+            locale: identity.locale,
+          },
+          resourceId: s.sessionId,
+        });
+      }),
+    ),
+  );
+
+  // ── MFA recovery-code bypass (unauthenticated: the authenticator is what's lost) ────────
+  router.post(
+    "/mfa/recover",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx) => {
+        const input = parseBody(MfaRecoverSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.mfa.recover(
+          {
+            ...(input.email ? { email: input.email } : {}),
+            ...(input.user_id ? { userId: input.user_id } : {}),
+          },
+          input.recovery_code,
+        );
+
+        if (isErr(result)) {
+          tx.audit({
+            action: "LOGIN_FAILED",
+            entity_table: "app.mfa_recovery_codes",
+            request_id: req.requestId,
+            ip_address: ip(req),
+            user_agent: ua(req),
+            endpoint: req.path,
+            http_method: req.method,
+            reason: "invalid_recovery_code",
+          });
+          return result.error as never;
+        }
+
+        const value = result.value;
+        tx.audit({
+          action: "CONFIG_CHANGE",
+          entity_table: "app.mfa_recovery_codes",
+          entity_id: value.userId,
+          actor_user_id: value.userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "mfa_recovery_used",
+        });
+        return ok({
+          status: 200,
+          body: {
+            bypass_token: value.bypassToken,
+            expires_at: value.expiresAt.toISOString(),
+          },
+        });
+      }),
+    ),
+  );
+
+  // ── Self-service ADMIN signup (A3.7) ───────────────────────────────────────────────────
+  router.post(
+    "/admin-signup",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx) => {
+        const input = parseBody(AdminSignupSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.auth.adminSignup({
+          email: input.email,
+          password: input.password,
+          fullName: input.full_name,
+          phone: input.phone ?? null,
+          ipAddress: ip(req),
+          userAgent: ua(req),
+        });
+        if (isErr(result)) return result.error as never;
+
+        const { session: s, identity } = result.value;
+        tx.audit({
+          action: "CREATE",
+          entity_table: "app.users",
+          entity_id: s.userId,
+          actor_user_id: s.userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "admin_signup",
+        });
+        return ok({
+          status: 201,
+          body: {
+            ...sessionBody(s),
+            mfa_required: false,
+            user_id: s.userId,
+            email: identity.email,
+            roles: identity.roles,
+            permissions: identity.permissions,
+            locale: identity.locale,
+          },
+          resourceId: s.userId,
+        });
       }),
     ),
   );
@@ -194,7 +352,22 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const svc = makeServices(tx.client, infra);
         const result = await svc.auth.refresh(input.refresh_token);
         if (isErr(result)) return result.error as never;
-        return ok({ status: 200, body: sessionBody(result.value), resourceId: result.value.sessionId });
+        // Mirrors the /login body: the client rebuilds its Principal from a refresh too, so the
+        // rotated tokens ship with the freshly-resolved identity (roles may have changed).
+        const identity = await svc.auth.resolve(result.value.userId);
+        return ok({
+          status: 200,
+          body: {
+            ...sessionBody(result.value),
+            mfa_required: false,
+            user_id: result.value.userId,
+            email: identity.email,
+            roles: identity.roles,
+            permissions: identity.permissions,
+            locale: identity.locale,
+          },
+          resourceId: result.value.sessionId,
+        });
       }),
     ),
   );
@@ -253,7 +426,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/mfa/enroll",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("MANAGE_OWN_MFA")),
+    requirePermission(asPerm("manage_own_mfa")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -273,7 +446,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/mfa/confirm",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("MANAGE_OWN_MFA")),
+    requirePermission(asPerm("manage_own_mfa")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -325,7 +498,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/devices/revoke",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("REVOKE_DEVICE")),
+    requirePermission(asPerm("revoke_device")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {

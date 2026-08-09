@@ -1,12 +1,12 @@
 // packages/api/src/http/routes/admin.ts
-// Admin console surface (A3.7): driver roster, driver creation + approval, device/session revoke.
-// Reads use a pooled client and the cursor envelope (D7); writes run through executeWrite so audit +
-// idempotency commit atomically with the mutation (D8). Device revoke is keyed by the device primary
-// key (the mobile roster exposes `app.driver_devices.id`, never the opaque `device_id_hash`).
+// Admin console surface (A3.7): driver roster + device/session revoke. Reads use a pooled client and
+// the cursor envelope (D7); writes run through executeWrite so audit + idempotency commit atomically
+// with the mutation (D8). Device revoke is keyed by the device primary key (the mobile roster exposes
+// `app.driver_devices.id`, never the opaque `device_id_hash`).
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { type IdempotencyService, type PermissionCode, type PoolLike, type Principal, type UserRow, type DriverDeviceRow, ok } from "@fleet/shared";
+import { type IdempotencyService, type PermissionCode, type PoolLike, type Principal, type UserRow, type DriverDeviceRow } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
@@ -19,14 +19,21 @@ import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
 const RevokeSessionsSchema = z.object({ user_id: z.string().uuid().nullable().optional() });
+
+const RoleCodeSchema = z.enum(["DRIVER", "DISPATCHER", "FLEET_MANAGER", "ADMIN", "FINANCE", "AUDITOR"]);
+
 const CreateDriverSchema = z.object({
-  phone: z.string().regex(/^\+?[1-9]\d{6,14}$/),
-  full_name: z.string().min(1).max(200),
-  password: z.string().min(1),
-  licence_number: z.string().max(80).optional(),
-  licence_class: z.string().max(40).optional(),
-  emergency_contact_name: z.string().max(200).optional(),
-  emergency_contact_phone: z.string().regex(/^\+?[1-9]\d{6,14}$/).optional(),
+  email: z.string().email(),
+  full_name: z.string().min(1),
+  phone: z.string().min(1).nullable().optional(),
+  roles: z.array(RoleCodeSchema).nonempty().optional(),
+});
+
+/** The caller's own editable profile fields (`PUT /admin/users/me`, admin_profile_settings). */
+const UpdateOwnProfileSchema = z.object({
+  full_name: z.string().min(1).max(200).optional(),
+  phone: z.string().max(40).nullable().optional(),
+  locale: z.enum(["en", "sw"]).optional(),
 });
 
 /** Derives the mobile `platform` from the stored push provider (no native `platform` column). */
@@ -34,14 +41,13 @@ export function platformOf(pushProvider: string): "ios" | "android" {
   return pushProvider === "apns" ? "ios" : "android";
 }
 
-export function toDriverSummary(row: { user: UserRow; driverStatus: string | null; devices: DriverDeviceRow[] }) {
+export function toDriverSummary(row: { user: UserRow; devices: DriverDeviceRow[] }) {
   return {
     user_id: row.user.id,
     email: row.user.email,
-    phone: row.user.phone,
     full_name: row.user.full_name ?? null,
     mfa_enrolled: row.user.mfa_enabled,
-    status: row.driverStatus ?? (row.user.is_active ? "ACTIVE" : "SUSPENDED"),
+    status: row.user.is_active ? "ACTIVE" : "SUSPENDED",
     last_login_at: row.user.last_login_at ?? null,
     devices: (row.devices ?? []).map((d) => ({
       device_id: d.id,
@@ -97,7 +103,30 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
     ),
   );
 
-  // ── Create a driver (PENDING approval) ────────────────────────────────────────────────────
+  // ── Driver detail (read): roster shape + RBAC union + devices ─────────────────────────────
+  router.get(
+    "/drivers/:id",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("user:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const result = await svc.admin.getDriver(req.params.id!);
+        if (!result.ok) {
+          const problem = { ...result.error.toProblem(), instance: req.requestId };
+          res.status(result.error.httpStatus).type("application/problem+json").json(problem);
+          return;
+        }
+        res.status(200).json({
+          ...toDriverSummary(result.value),
+          roles: result.value.roles,
+          permissions: result.value.permissions,
+        });
+      }),
+    ),
+  );
+
+  // ── Create / invite a driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
@@ -109,33 +138,36 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const input = parseBody(CreateDriverSchema, req);
         const svc = makeServices(tx.client, infra);
         const result = await svc.admin.createDriver({
-          phone: input.phone,
+          email: input.email,
           fullName: input.full_name,
-          password: input.password,
-          licenceNumber: input.licence_number ?? null,
-          licenceClass: input.licence_class ?? null,
-          emergencyContactName: input.emergency_contact_name ?? null,
-          emergencyContactPhone: input.emergency_contact_phone ?? null,
+          phone: input.phone ?? null,
+          ...(input.roles ? { roles: [...input.roles] } : {}),
+          createdBy: principal.userId,
         });
         if (!result.ok) return result.error as never;
         tx.audit({
           action: "CREATE",
           entity_table: "app.users",
-          entity_id: result.value.userId,
+          entity_id: result.value.id,
           actor_user_id: principal.userId,
+          new_value: { email: result.value.email, full_name: result.value.full_name },
           request_id: req.requestId,
           ip_address: ip(req),
           user_agent: ua(req),
           endpoint: req.path,
           http_method: req.method,
-          reason: "admin_create_driver",
+          reason: "DRIVER_CREATE",
         });
-        return ok({ status: 201, body: { user_id: result.value.userId, status: result.value.status } });
+        return {
+          status: 201,
+          body: { user_id: result.value.id, email: result.value.email, status: "PENDING" },
+          resourceId: result.value.id,
+        } as never;
       }),
     ),
   );
 
-  // ── Approve a PENDING driver ──────────────────────────────────────────────────────────────
+  // ── Approve a pending driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers/:id/approve",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
@@ -148,18 +180,156 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const result = await svc.admin.approveDriver(req.params.id!);
         if (!result.ok) return result.error as never;
         tx.audit({
-          action: "CONFIG_CHANGE",
-          entity_table: "app.drivers",
+          action: "UPDATE",
+          entity_table: "app.users",
           entity_id: req.params.id!,
           actor_user_id: principal.userId,
+          changed_fields: ["is_active"],
+          new_value: { is_active: true },
           request_id: req.requestId,
           ip_address: ip(req),
           user_agent: ua(req),
           endpoint: req.path,
           http_method: req.method,
-          reason: "admin_approve_driver",
+          reason: "DRIVER_APPROVE",
         });
-        return ok({ status: 200, body: { approved: true } });
+        return { status: 200, body: { user_id: result.value.id, status: "ACTIVE" } } as never;
+      }),
+    ),
+  );
+
+  // ── The caller's own profile (A3.7 admin_profile_settings) ─────────────────────────────────
+  // Declared before `/admin/users/:id/*` so the literal "me" segment can never be captured as an
+  // `:id`. The target is always the resolved principal, so this cannot read another user.
+  router.get(
+    "/admin/users/me",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("user:manage")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const principal = (req as { principal: Principal }).principal;
+        const svc = makeServices(client, infra);
+        const result = await svc.admin.getOwnProfile(principal.userId);
+        if (!result.ok) {
+          const problem = { ...result.error.toProblem(), instance: req.requestId };
+          res.status(result.error.httpStatus).type("application/problem+json").json(problem);
+          return;
+        }
+        res.status(200).json({
+          user_id: result.value.id,
+          email: result.value.email,
+          full_name: result.value.full_name,
+          phone: result.value.phone,
+          locale: result.value.locale,
+        });
+      }),
+    ),
+  );
+
+  // ── Update the caller's own profile ────────────────────────────────────────────────────────
+  router.put(
+    "/admin/users/me",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("user:manage")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const input = parseBody(UpdateOwnProfileSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.admin.updateOwnProfile(principal.userId, {
+          ...(input.full_name !== undefined ? { full_name: input.full_name } : {}),
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+          ...(input.locale !== undefined ? { locale: input.locale } : {}),
+        });
+        if (!result.ok) return result.error as never;
+        tx.audit({
+          action: "UPDATE",
+          entity_table: "app.users",
+          entity_id: principal.userId,
+          actor_user_id: principal.userId,
+          changed_fields: Object.keys(input),
+          new_value: input,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "PROFILE_UPDATE",
+        });
+        return {
+          status: 200,
+          body: {
+            user_id: result.value.id,
+            email: result.value.email,
+            full_name: result.value.full_name,
+            phone: result.value.phone,
+            locale: result.value.locale,
+          },
+          resourceId: result.value.id,
+        } as never;
+      }),
+    ),
+  );
+
+  // ── Suspend a user (also drops live sessions) ──────────────────────────────────────────────
+  router.post(
+    "/admin/users/:id/suspend",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("user:manage")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.admin.suspendUser(req.params.id!);
+        if (!result.ok) return result.error as never;
+        tx.audit({
+          action: "UPDATE",
+          entity_table: "app.users",
+          entity_id: req.params.id!,
+          actor_user_id: principal.userId,
+          changed_fields: ["is_active"],
+          new_value: { is_active: false },
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "USER_SUSPEND",
+        });
+        return { status: 200, body: { user_id: result.value.id, status: "SUSPENDED" } } as never;
+      }),
+    ),
+  );
+
+  // ── Reinstate a suspended user ─────────────────────────────────────────────────────────────
+  router.post(
+    "/admin/users/:id/reinstate",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("user:manage")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.admin.reinstateUser(req.params.id!);
+        if (!result.ok) return result.error as never;
+        tx.audit({
+          action: "UPDATE",
+          entity_table: "app.users",
+          entity_id: req.params.id!,
+          actor_user_id: principal.userId,
+          changed_fields: ["is_active"],
+          new_value: { is_active: true },
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "USER_REINSTATE",
+        });
+        return { status: 200, body: { user_id: result.value.id, status: "ACTIVE" } } as never;
       }),
     ),
   );

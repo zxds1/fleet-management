@@ -37,6 +37,13 @@ CREATE TYPE app.consent_type AS ENUM (
     'DATA_PROCESSING_NOTICE'
 );
 
+CREATE TYPE app.training_status AS ENUM (
+    'NOT_STARTED',
+    'IN_PROGRESS',
+    'COMPLETED',
+    'EXPIRED'
+);
+
 -- -----------------------------------------------------------------------------
 -- Assets (Pillar 4)
 -- -----------------------------------------------------------------------------

@@ -5,14 +5,17 @@
 // resolved from the Principal via drivers.user_id.
 
 import { Router, type Request, type Response } from "express";
-import { Forbidden, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
+import { Forbidden, NotFound, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
 import { InspectionSubmitSchema } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
-import { parseBody } from "../validate";
+import { parseBody, parseQuery } from "../validate";
+import { CursorQuerySchema } from "../pagination";
+import { withClient } from "../../db/withClient";
+import { ownScopeDriverId } from "../ownScope";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -48,8 +51,79 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.inspectionId } as never;
+        if (result.ok)
+  // Wire contract is snake_case (openapi `/inspections` → inspection_id, block_shift).
+  return {
+    status: 201,
+    body: { inspection_id: result.value.inspectionId, block_shift: result.value.blockShift },
+    resourceId: result.value.inspectionId,
+  } as never;
         return result.error as never;
+      }),
+    ),
+  );
+
+  // ── Templates the driver may start (read) ────────────────────────────────────────────────
+  router.get(
+    "/templates",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("inspection:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const result = await svc.inspectionQuery.listTemplates();
+        if (!result.ok) {
+          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      }),
+    ),
+  );
+
+  // ── Own DVIR submissions (read, cursor) ──────────────────────────────────────────────────
+  router.get(
+    "/me",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("inspection:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const query = parseQuery(CursorQuerySchema, req);
+        const svc = makeServices(client, infra);
+        const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
+        if (!driver) {
+          res.status(403).json({ error_code: "FORBIDDEN", status: 403, title: "Forbidden" });
+          return;
+        }
+        const result = await svc.inspectionQuery.listMine(driver.id, { limit: query.limit, cursor: query.cursor });
+        if (!result.ok) {
+          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      }),
+    ),
+  );
+
+  // ── Single DVIR detail with per-item results (read) ───────────────────────────────────────
+  // Registered after /templates and /me so the literal paths win the match.
+  // A driver (inspection:read without the fleet-wide inspection:template_manage) only ever
+  // resolves their own submission; anything else 404s.
+  router.get(
+    "/:id",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("inspection:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const driverId = await ownScopeDriverId(req, svc, "inspection:template_manage");
+        const result = await svc.inspectionQuery.getOne(req.params.id!, driverId);
+        if (!result.ok) {
+          const status = result.error instanceof NotFound ? 404 : 422;
+          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
       }),
     ),
   );

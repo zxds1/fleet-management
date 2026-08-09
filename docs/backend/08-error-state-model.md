@@ -38,6 +38,9 @@ subclass or a `ConflictError`/`SemanticViolation` with that exact `error_code` (
 | 422 | `DEFECTS_NOT_REVIEWED` | DVIR defects not acknowledged (C1.6) | `03` §5 |
 | 422 | `IDEMPOTENCY_CONFLICT` | key reused, body differs (C5.1) | `01` §5 |
 | 422 | `WORK_PLAN_REQUIRED` | clock-in missing plan evidence (C1.13) | `03` §2.2 |
+| 422 | `ONBOARDING_PROFILE_EMPTY` | background check submitted with no profile captured | onboarding (`03` onboarding) |
+| 422 | `ONBOARDING_CONSENT_REQUIRED` | background check submitted without the consent flag | onboarding (`03` onboarding) |
+| 422 | `BACKGROUND_CHECK_ALREADY_CLEARED` | background check resubmitted after it cleared | onboarding (`03` onboarding) |
 | 429 | `RATE_LIMITED` | too many attempts (login/PIN) | `02` §9/M4 |
 | 429 | `OFFLINE_PIN_LOCKED` | offline PIN locked 15 min (M4) | `02` §4 |
 | 503 | `SERVICE_UNAVAILABLE` | downstream degraded (Traccar/Vision/FCM) | handler boundary |

@@ -16,6 +16,15 @@ import { createInspectionRouter } from "../http/routes/inspections";
 import { createTrailerRouter } from "../http/routes/trailer";
 import { createMediaRouter } from "../http/routes/media";
 import { createInsightsRouter } from "../http/routes/insights";
+import { createAdminRouter } from "../http/routes/admin";
+import { createOnboardingRouter } from "../http/routes/onboarding";
+import { createVehicleRouter } from "../http/routes/vehicles";
+import { createVehicleIssueRouter } from "../http/routes/vehicleIssue";
+import { createMaintenanceRouter } from "../http/routes/maintenance";
+import { createTrainingRouter } from "../http/routes/training";
+import { createReportsRouter } from "../http/routes/reports";
+import { createSettingsRouter } from "../http/routes/settings";
+import { createNotificationRouter } from "../http/routes/notifications";
 import { createTelemetryRouter } from "../http/routes/telemetry";
 import { readiness, deepHealth } from "./health";
 import type { Container } from "./container";
@@ -127,8 +136,82 @@ export function createApp(container: Container): Express {
     infra: container.infra,
   }));
 
+  // Driver onboarding + background check. Mounted at the literal `${base}/drivers/me` BEFORE the
+  // admin router (which owns `${base}/drivers` and `${base}/drivers/:id`), so the "me" segment can
+  // never be captured as an `:id`. Express matches mounts in registration order.
+  app.use(`${base}/drivers/me`, createOnboardingRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Admin console surface (A3.7): driver roster + device/session revoke.
+  // Mounted at the API base so paths match the locked contract: /drivers, /devices/{deviceId}/revoke,
+  // /sessions/revoke.
+  app.use(`${base}`, createAdminRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
   app.use(`${base}`, createInsightsRouter({
     pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Vehicle master data (Pillar 4). The router declares absolute `/vehicles` paths internally, so
+  // it mounts at the API base rather than at `${base}/vehicles` (which would double the prefix).
+  app.use(`${base}`, createVehicleRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Driver-reported vehicle issues (spec `report_vehicle_issue`). Also declares absolute
+  // `/vehicles/{vehicleId}/issues` paths, so it mounts at the API base alongside the vehicle router.
+  app.use(`${base}`, createVehicleIssueRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  app.use(`${base}/maintenance`, createMaintenanceRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  app.use(`${base}/training`, createTrainingRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  app.use(`${base}/reports`, createReportsRouter({
+    pool: container.pool,
+    infra: container.infra,
+  }));
+
+  // Admin trigger thresholds (C2.4): GET/PUT `${base}/admin/settings/triggers`.
+  app.use(`${base}/admin/settings`, createSettingsRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  app.use(`${base}/notifications`, createNotificationRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
     infra: container.infra,
   }));
 

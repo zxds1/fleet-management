@@ -52,6 +52,7 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('asset:update',            'Edit vehicle and trailer master data',                 1),
     ('asset:quarantine',        'Quarantine an asset',                                  1),
     ('asset:lift_quarantine',   'Lift a quarantine (C3.9)',                             1),
+    ('anomaly:read',            'Read the open-anomaly feed and detail',                1),
     ('document:read',           'Read asset and driver documents',                      1),
     ('document:manage',         'Upload and replace documents',                         1),
     ('geofence:read',           'Read geofences',                                       1),
@@ -91,22 +92,42 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('accident:close',          'Resolve and close an accident',                        3),
     ('hos:read',                'Read hours-of-service state',                          3),
     ('hos:override',            'Assign a non-default HOS policy to a driver (C3.2)',   3),
-    ('maintenance:read',        'Read maintenance schedules',                           3),
-    ('maintenance:manage',      'Define maintenance tasks and intervals',               3),
+    ('maintenance:read',        'Read maintenance schedules',                          3),
+    ('maintenance:manage',       'Define maintenance tasks and intervals',              3),
     ('maintenance:record',      'Record completed maintenance',                         3),
-    ('notification:manage',     'Manage templates and the on-call roster',              3)
+    ('notification:read',        'Read own notifications',                              3),
+    ('notification:manage',     'Manage templates and the on-call roster',              3),
+    -- Training / LMS (Phase 3)
+    ('training:read',           'Read training courses and lessons',                    3),
+    ('training:manage',          'Author training courses and lessons',                 3),
+    ('training:complete',        'Mark a training lesson complete',                     3),
+    ('training:review',          'Review driver training completion (manager)',        3),
+    -- Driver onboarding / background check (Phase 1 for the driver-facing steps)
+    ('onboarding:read',         'Read own onboarding record',                           1),
+    ('onboarding:submit',       'Submit onboarding + background check',                 1),
+    ('onboarding:review',       'Review and clear driver background checks',            3),
+    -- Driver-reported vehicle issues (14_vehicle_issues.sql)
+    ('vehicle:report',          'Report a vehicle issue / defect (non-accident)',       3)
 ON CONFLICT (code) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- Role -> permission mapping  (C6.1, C6.2 union semantics)
 -- -----------------------------------------------------------------------------
+-- The driver surface is read-own only: every route granted here resolves the caller's own
+-- driver id server-side (accidents/me, fuel/refuel/me, inspections/me, notifications, training
+-- enrolment), so these reads can never widen to another driver's data (C6.2 union semantics).
 INSERT INTO app.role_permissions (role_code, permission_code)
 SELECT 'DRIVER', p FROM unnest(ARRAY[
     'shift:clock_in','shift:clock_out','shift:read_own',
-    'inspection:submit','trailer:swap',
-    'fuel:record_gauge','fuel:submit_purchase',
-    'expense:submit','accident:report','hos:read','asset:read','assignment:read',
-    'manage_own_mfa','revoke_device'
+    'inspection:submit','inspection:read','trailer:swap',
+    'fuel:record_gauge','fuel:submit_purchase','fuel:read',
+    'expense:submit','accident:report','accident:read','accident:acknowledge',
+    'hos:read','asset:read','assignment:read',
+    'manage_own_mfa','revoke_device',
+    'notification:read','notification:manage',
+    'training:read','training:complete',
+    'onboarding:read','onboarding:submit',
+    'vehicle:report'
 ]) AS p
 ON CONFLICT DO NOTHING;
 
@@ -130,6 +151,10 @@ SELECT 'FLEET_MANAGER', p FROM unnest(ARRAY[
     'accident:read','accident:acknowledge','accident:update','accident:close',
     'hos:read','hos:override',
     'maintenance:read','maintenance:manage','maintenance:record',
+    'vehicle:report',
+    'notification:read','notification:manage',
+    'training:read','training:manage','training:complete','training:review',
+    'onboarding:read','onboarding:review',
     'document:read','document:manage','geofence:read','geofence:manage',
     'report:read','report:export','config:read'
 ]) AS p
@@ -151,7 +176,8 @@ SELECT 'AUDITOR', p FROM unnest(ARRAY[
     'audit:read','asset:read','assignment:read','shift:read_all','inspection:read',
     'fuel:read','expense:read','accident:read','hos:read','maintenance:read',
     'document:read','geofence:read','telemetry:read_history','report:read',
-    'user:read','config:read'
+    'user:read','config:read','training:read','anomaly:read','notification:read',
+    'onboarding:read'
 ]) AS p
 ON CONFLICT DO NOTHING;
 

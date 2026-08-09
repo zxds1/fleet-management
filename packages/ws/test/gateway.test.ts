@@ -47,9 +47,17 @@ class FakeSocket implements WsSocket {
   }
 }
 
-function tokenFor(sessionId: string, sub = "u1", roles: string[] = ["ADMIN"]): string {
+function tokenFor(sessionId: string, sub = "u1"): string {
   return jwt.sign(
-    { sub, email: "a@b.c", roles, permissions: ["shift:read"], sid: sessionId, locale: "en" },
+    { sub, email: "a@b.c", roles: ["ADMIN"], permissions: ["shift:read"], sid: sessionId, locale: "en" },
+    env.JWT_SECRET,
+    { algorithm: "HS256", issuer: env.JWT_ISSUER, keyid: env.JWT_KID },
+  );
+}
+
+function driverTokenFor(sessionId: string, sub = "u-driver"): string {
+  return jwt.sign(
+    { sub, email: "d@b.c", roles: ["DRIVER"], permissions: ["shift:clock_in"], sid: sessionId, locale: "en" },
     env.JWT_SECRET,
     { algorithm: "HS256", issuer: env.JWT_ISSUER, keyid: env.JWT_KID },
   );
@@ -71,7 +79,7 @@ function baseDeps(overrides: Partial<GatewayDeps> = {}): GatewayDeps {
     vehicleSnapshot: async () => [],
     notificationsFor: async () => [],
     isAccidentOnCall: async () => false,
-    driverContext: async () => ({ vehicleId: null, shiftId: null }),
+    driverScope: async () => null,
     driverVehicleState: async () => null,
     driverShiftState: async () => null,
     bus: new MemoryEventBus(),
@@ -177,6 +185,239 @@ describe("vehicle state diff (07 §5 backpressure)", () => {
   });
 });
 
+describe("gateway driver channels (07 §3/§5)", () => {
+  const scope = { driverId: "d1", vehicleId: "v1" };
+  const vehicleRow = { vehicle_id: "v1", display_state: "MOVING" } as VehicleDisplayStateViewRow;
+  const shiftRow = { shift_id: "sh1", state: "OPEN", vehicle_id: "v1" } as never;
+
+  function driverDeps(overrides: Partial<GatewayDeps> = {}): GatewayDeps {
+    return baseDeps({
+      driverScope: async () => scope,
+      driverVehicleState: async () => vehicleRow,
+      driverShiftState: async () => shiftRow,
+      ...overrides,
+    });
+  }
+
+  it("joins the driver's own room and never the admin map room", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    await handleConnection(socket, driverDeps(), createState());
+
+    expect(socket.disconnectCalled).toBe(false);
+    expect(socket.rooms).toContain("driver:d1");
+    expect(socket.rooms).toContain("notifications:u-driver");
+    expect(socket.rooms).not.toContain("map:vehicle-states");
+    expect(socket.rooms).not.toContain("accident:live");
+  });
+
+  it("snapshots the driver's own vehicle + shift state on (re)connect", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    await handleConnection(socket, driverDeps(), createState());
+
+    const events = socket.emitted.map((e) => e.event);
+    expect(events).toContain("driver:vehicle");
+    expect(events).toContain("driver:shift");
+    expect(events).toContain("notifications");
+    expect(socket.emitted.find((e) => e.event === "driver:vehicle")?.payload).toEqual(vehicleRow);
+  });
+
+  it("records the driver→vehicle scope so bus events can be routed", async () => {
+    const state = createState();
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    await handleConnection(socket, driverDeps(), state);
+    expect(state.driverVehicles.get("d1")).toBe("v1");
+  });
+
+  it("connects a driver with no assignment without emitting a vehicle snapshot", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    const deps = driverDeps({ driverScope: async () => ({ driverId: "d2", vehicleId: null }) });
+    await handleConnection(socket, deps, createState());
+
+    expect(socket.disconnectCalled).toBe(false);
+    expect(socket.rooms).toContain("driver:d2");
+    expect(socket.emitted.map((e) => e.event)).not.toContain("driver:vehicle");
+  });
+
+  it("fans driver shift + accident bus events out to that driver's room only", async () => {
+    const bus = new MemoryEventBus();
+    const deps = driverDeps({ bus });
+    const emits: { room: string; event: string; payload: unknown }[] = [];
+    const fakeIo = {
+      use: (_fn: unknown) => undefined,
+      on: (_e: string, _fn: (s: WsSocket) => void) => undefined,
+      to: (room: string) => ({
+        emit: (event: string, payload: unknown) => emits.push({ room, event, payload }),
+      }),
+      emit: (_e: string, _p: unknown) => undefined,
+    };
+    attachGateway(fakeIo as never, deps, createState());
+
+    await bus.publish("ws:driver:shift", { driverId: "d1", state: "CLOSED" });
+    await bus.publish("ws:driver:accident", { driverId: "d1", accident_id: "a1" });
+    await bus.publish("ws:driver:shift", { state: "CLOSED" }); // unscoped → dropped
+
+    expect(emits).toEqual([
+      { room: "driver:d1", event: "driver:shift", payload: { driverId: "d1", state: "CLOSED" } },
+      { room: "driver:d1", event: "driver:accident", payload: { driverId: "d1", accident_id: "a1" } },
+    ]);
+  });
+
+  it("pushes a changed vehicle row to the owning driver's room as well as the admin map", async () => {
+    const bus = new MemoryEventBus();
+    const state = createState();
+    state.driverVehicles.set("d1", "v1");
+    const deps = driverDeps({ bus, vehicleSnapshot: async () => [vehicleRow] });
+    const emits: { room: string; event: string }[] = [];
+    const fakeIo = {
+      use: (_fn: unknown) => undefined,
+      on: (_e: string, _fn: (s: WsSocket) => void) => undefined,
+      to: (room: string) => ({ emit: (event: string, _p: unknown) => emits.push({ room, event }) }),
+      emit: (_e: string, _p: unknown) => undefined,
+    };
+    attachGateway(fakeIo as never, deps, state);
+
+    await bus.publish("ws:map:vehicle-states", {});
+    await new Promise((r) => setImmediate(r));
+
+    expect(emits).toContainEqual({ room: "map:vehicle-states", event: "map:vehicle-states" });
+    expect(emits).toContainEqual({ room: "driver:d1", event: "driver:vehicle" });
+  });
+});
+
+/**
+ * REGRESSION (mobile contract): the driver realtime channel payload *shapes*.
+ *
+ * `packages/mobile/src/core/driver/feed.ts` consumes these emits directly, so the wire shape is a
+ * contract: notifications must arrive as an ARRAY (both the (re)connect snapshot and the live
+ * fan-out `[notification]`), and the driver's own vehicle snapshot must be the raw
+ * `app.v_vehicle_display_state` row — `license_plate`, PG numerics as strings, nullable GPS.
+ */
+describe("gateway driver payload shapes (mobile feed.ts contract)", () => {
+  const driverScope = { driverId: "d1", vehicleId: "v1" };
+
+  /** Realistic `app.v_vehicle_display_state` row: null GPS fix, numeric columns as strings. */
+  const unfixedVehicleRow = {
+    vehicle_id: "v1",
+    license_plate: "KDA 123A",
+    vehicle_class: "TRUCK",
+    asset_status: "ACTIVE",
+    is_operational: true,
+    shift_id: "sh1",
+    driver_id: "d1",
+    driver_name: "Peter Mwangi",
+    last_position: null,
+    latitude: null,
+    longitude: null,
+    last_position_at: "2026-08-09T06:00:00.000Z",
+    last_speed_kph: "0.00",
+    last_ignition: false,
+    is_online: true,
+    next_eligible_clock_in_at: null,
+    limit_reached_at: null,
+    warning_sent_at: null,
+    display_state: "PARKED",
+  } as unknown as VehicleDisplayStateViewRow;
+
+  const notificationRow = {
+    id: "n1",
+    title: "Shift closed",
+    body: "Your shift was closed by dispatch",
+    status: "QUEUED",
+    priority: "HIGH",
+    queued_at: "2026-08-09T17:05:00.000Z",
+  } as never;
+
+  it("joins the driver room and emits the own-vehicle snapshot as the raw view row", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    const deps = baseDeps({
+      driverScope: async () => driverScope,
+      driverVehicleState: async () => unfixedVehicleRow,
+      notificationsFor: async () => [notificationRow],
+    });
+    await handleConnection(socket, deps, createState());
+
+    expect(socket.rooms).toContain("driver:d1");
+
+    const vehicleEmit = socket.emitted.find((e) => e.event === "driver:vehicle");
+    expect(vehicleEmit).toBeDefined();
+    const payload = vehicleEmit!.payload as Record<string, unknown>;
+    // The mobile VehicleStateSchema relies on exactly these keys/shapes.
+    expect(payload["license_plate"]).toBe("KDA 123A");
+    expect(payload["latitude"]).toBeNull();
+    expect(payload["longitude"]).toBeNull();
+    expect(typeof payload["last_speed_kph"]).toBe("string");
+    expect(payload["display_state"]).toBe("PARKED");
+  });
+
+  it("emits the driver notifications (re)connect snapshot as an ARRAY", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    const deps = baseDeps({
+      driverScope: async () => driverScope,
+      driverVehicleState: async () => unfixedVehicleRow,
+      notificationsFor: async () => [notificationRow],
+    });
+    await handleConnection(socket, deps, createState());
+
+    const notifEmit = socket.emitted.find((e) => e.event === "notifications");
+    expect(notifEmit).toBeDefined();
+    expect(Array.isArray(notifEmit!.payload)).toBe(true);
+    expect(notifEmit!.payload).toHaveLength(1);
+  });
+
+  it("emits an empty ARRAY (not null/undefined) when the driver has no notifications", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: driverTokenFor("s1") } };
+    const deps = baseDeps({ driverScope: async () => driverScope, notificationsFor: async () => [] });
+    await handleConnection(socket, deps, createState());
+
+    const notifEmit = socket.emitted.find((e) => e.event === "notifications");
+    expect(Array.isArray(notifEmit!.payload)).toBe(true);
+    expect(notifEmit!.payload).toHaveLength(0);
+  });
+
+  it("fans a live notification out to the user room wrapped in an ARRAY", async () => {
+    const bus = new MemoryEventBus();
+    const deps = baseDeps({ bus });
+    const emits: { room: string; event: string; payload: unknown }[] = [];
+    const fakeIo = {
+      use: (_fn: unknown) => undefined,
+      on: (_e: string, _fn: (s: WsSocket) => void) => undefined,
+      to: (room: string) => ({
+        emit: (event: string, payload: unknown) => emits.push({ room, event, payload }),
+      }),
+      emit: (_e: string, _p: unknown) => undefined,
+    };
+    attachGateway(fakeIo as never, deps, createState());
+
+    await bus.publish("ws:notifications", { userId: "u-driver", notification: notificationRow });
+    await new Promise((r) => setImmediate(r));
+
+    expect(emits).toHaveLength(1);
+    expect(emits[0]!.room).toBe("notifications:u-driver");
+    expect(emits[0]!.event).toBe("notifications");
+    expect(Array.isArray(emits[0]!.payload)).toBe(true);
+    expect(emits[0]!.payload).toEqual([notificationRow]);
+  });
+
+  it("emits the admin map snapshot as a BARE ARRAY (what core/admin.ts parses)", async () => {
+    const socket = new FakeSocket();
+    socket.handshake = { auth: { token: tokenFor("s1") } };
+    const deps = baseDeps({ vehicleSnapshot: async () => [unfixedVehicleRow] });
+    await handleConnection(socket, deps, createState());
+
+    const mapEmit = socket.emitted.find((e) => e.event === "map:vehicle-states");
+    expect(mapEmit).toBeDefined();
+    expect(Array.isArray(mapEmit!.payload)).toBe(true);
+    expect(mapEmit!.payload).toEqual([unfixedVehicleRow]);
+  });
+});
+
 describe("attachGateway wiring", () => {
   it("rejects a connection in the auth middleware via next(Error)", async () => {
     const deps = baseDeps();
@@ -195,39 +436,5 @@ describe("attachGateway wiring", () => {
     expect(middlewareCalls).toHaveLength(1);
     expect(middlewareCalls[0]!.err).toBeInstanceOf(Error);
     expect(middlewareCalls[0]!.err?.message).toBe("UNAUTHENTICATED");
-  });
-});
-
-describe("gateway driver connections (D-3)", () => {
-  it("subscribes a driver to their own per-assignment rooms and sends a driver snapshot", async () => {
-    const socket = new FakeSocket();
-    socket.handshake = { auth: { token: tokenFor("s1", "u-driver", ["DRIVER"]) } };
-    const deps = baseDeps({
-      driverContext: async () => ({ vehicleId: "v9", shiftId: "sh9" }),
-      driverVehicleState: async () => ({ vehicle_id: "v9", display_state: "MOVING" }) as never,
-      driverShiftState: async () => ({ shiftId: "sh9", state: "OPEN", vehicleId: "v9", clockInAt: null, clockOutAt: null }) as never,
-    });
-    await handleConnection(socket, deps, createState());
-
-    expect(socket.disconnectCalled).toBe(false);
-    expect(socket.rooms).toContain("ws:driver:shift:sh9");
-    expect(socket.rooms).toContain("ws:driver:vehicle:v9");
-    expect(socket.rooms).toContain("ws:driver:accident:u-driver");
-    // Drivers must NOT join the admin rooms.
-    expect(socket.rooms).not.toContain("map:vehicle-states");
-    expect(socket.rooms).not.toContain("notifications:u-driver");
-
-    const events = socket.emitted.map((e) => e.event);
-    expect(events).toContain("ws:driver:vehicle");
-    expect(events).toContain("ws:driver:shift");
-  });
-
-  it("does not emit admin vehicle/notification snapshots to a driver", async () => {
-    const socket = new FakeSocket();
-    socket.handshake = { auth: { token: tokenFor("s1", "u-driver", ["DRIVER"]) } };
-    await handleConnection(socket, baseDeps({ driverContext: async () => ({ vehicleId: null, shiftId: null }) }), createState());
-    const events = socket.emitted.map((e) => e.event);
-    expect(events).not.toContain("map:vehicle-states");
-    expect(events).not.toContain("notifications");
   });
 });

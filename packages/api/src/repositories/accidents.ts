@@ -41,6 +41,69 @@ export interface NewAccidentReport {
   wasOffShift: boolean;
 }
 
+/**
+ * Driver/admin accident read model (B.14/B.15). The schema has no `reference`, `severity` or
+ * `location_label` column, so all three are derived in SQL: `reference` from the leading id
+ * segment (a short, human-quotable handle), `severity` from the mayday flag + status, and
+ * `location_label` from the reported lat/long pair. `escalation_tier` comes from the newest
+ * still-open escalation timer (C6.3).
+ */
+export interface AccidentSummaryRow {
+  accident_id: string;
+  reference: string;
+  reported_at: string;
+  occurred_at: string | null;
+  location_label: string | null;
+  severity: string;
+  status: string;
+  mayday: boolean;
+  escalation_tier: number | null;
+}
+
+/** Detail row: the summary plus vehicle plate, statement and escalation countdown. */
+export interface AccidentDetailRow extends AccidentSummaryRow {
+  reported_at: string;
+  description: string | null;
+  driver_statement: string | null;
+  vehicle_label: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  seconds_to_escalation: number | null;
+  telemetry_available: boolean;
+}
+
+/** Derived columns shared by the summary and detail projections. */
+const ACCIDENT_DERIVED_SQL = `
+         r.id                                 AS accident_id,
+         'ACC-' || upper(left(r.id::text, 8)) AS reference,
+         r.reported_at,
+         r.occurred_at,
+         CASE
+           WHEN r.reported_latitude IS NOT NULL AND r.reported_longitude IS NOT NULL
+             THEN round(r.reported_latitude, 5)::text || ', ' || round(r.reported_longitude, 5)::text
+           ELSE NULL
+         END                                  AS location_label,
+         CASE
+           WHEN r.is_mayday THEN 'CRITICAL'
+           WHEN r.status = 'INVESTIGATING' THEN 'MAJOR'
+           ELSE 'MINOR'
+         END                                  AS severity,
+         r.status::text                       AS status,
+         r.is_mayday                          AS mayday,
+         t.tier::int                          AS escalation_tier`;
+
+/** Newest still-open escalation timer for the report (drives tier + countdown). */
+const OPEN_TIMER_JOIN_SQL = `
+    LEFT JOIN LATERAL (
+      SELECT et.tier, et.fires_at
+        FROM app.escalation_timers et
+       WHERE et.incident_kind = 'ACCIDENT'
+         AND et.incident_id = r.id
+         AND et.cancelled_at IS NULL
+       ORDER BY et.tier DESC
+       LIMIT 1
+    ) t ON true`;
+
 export class AccidentReportRepository extends BaseRepository<AccidentReportRow> {
   constructor(client: DbClient) {
     super(client, "app.accident_reports", { deletedAtColumn: null });
@@ -98,6 +161,66 @@ export class AccidentReportRepository extends BaseRepository<AccidentReportRow> 
     );
     return res.rows[0] as AccidentReportRow;
   }
+
+  /**
+   * The caller's own reports, keyset paginated on (reported_at, id). Always scoped to the caller's
+   * driver id so a driver can never read another driver's reports (06 §2).
+   */
+  async listByDriver(
+    driverId: string,
+    opts: { limit: number; cursorSort?: string; cursorId?: string },
+  ): Promise<AccidentSummaryRow[]> {
+    const params: unknown[] = [driverId];
+    let keyset = "";
+    if (opts.cursorSort && opts.cursorId) {
+      params.push(opts.cursorSort, opts.cursorId);
+      keyset = `AND (r.reported_at, r.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    }
+    params.push(opts.limit);
+    const res = await this.client.query<AccidentSummaryRow>(
+      `SELECT ${ACCIDENT_DERIVED_SQL}
+         FROM app.accident_reports r ${OPEN_TIMER_JOIN_SQL}
+        WHERE r.driver_id = $1::uuid ${keyset}
+        ORDER BY r.reported_at DESC, r.id DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+    return res.rows;
+  }
+
+  /**
+   * Single report detail joined with the vehicle plate and escalation countdown (B.15).
+   * `driverId` narrows the lookup to that driver's own report, so an unprivileged caller can
+   * never read another driver's accident by guessing an id (C6.2).
+   */
+  async getDetailById(reportId: string, driverId?: string): Promise<AccidentDetailRow | null> {
+    const params: unknown[] = [reportId];
+    let scope = "";
+    if (driverId) {
+      params.push(driverId);
+      scope = ` AND r.driver_id = $${params.length}::uuid`;
+    }
+    const res = await this.client.query<AccidentDetailRow>(
+      `SELECT ${ACCIDENT_DERIVED_SQL},
+              r.reported_at,
+              r.mayday_reason         AS description,
+              r.driver_statement,
+              v.license_plate::text   AS vehicle_label,
+              r.acknowledged_by::text AS acknowledged_by,
+              r.acknowledged_at,
+              CASE
+                WHEN r.acknowledged_at IS NOT NULL OR t.fires_at IS NULL THEN NULL
+                ELSE greatest(0, floor(extract(epoch FROM (t.fires_at - now()))))::int
+              END                     AS seconds_to_escalation,
+              r.telemetry_available
+         FROM app.accident_reports r
+         LEFT JOIN app.vehicles v ON v.id = r.vehicle_id ${OPEN_TIMER_JOIN_SQL}
+        WHERE r.id = $1::uuid${scope}
+        LIMIT 1`,
+      params,
+    );
+    return res.rows[0] ?? null;
+  }
 }
 
 export class AccidentMediaRepository extends BaseRepository<AccidentMediaRow> {
@@ -112,6 +235,20 @@ export class AccidentMediaRepository extends BaseRepository<AccidentMediaRow> {
       [reportId, slot],
     );
     return res.rows.length > 0;
+  }
+
+  /** Media gallery for the detail screen, in capture order. */
+  async listByReport(reportId: string): Promise<{ media_id: string; slot: string; kind: string }[]> {
+    const res = await this.client.query<{ media_id: string; slot: string; kind: string }>(
+      `SELECT m.media_object_id::text AS media_id,
+              m.slot::text            AS slot,
+              'PHOTO'                 AS kind
+         FROM app.accident_media m
+        WHERE m.report_id = $1::uuid
+        ORDER BY m.uploaded_at ASC, m.id ASC`,
+      [reportId],
+    );
+    return res.rows;
   }
 }
 

@@ -97,6 +97,19 @@ export type DriverStatus =
   | "ON_LEAVE"
   | "TERMINATED";
 
+export type TrainingStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "EXPIRED";
+
+export type BackgroundCheckStatus =
+  | "NOT_SUBMITTED"
+  | "SUBMITTED"
+  | "CLEARED"
+  | "FLAGGED"
+  | "EXPIRED";
+
 export type DutySegmentSource =
   | "TELEMETRY_INFERRED"
   | "DRIVER_DECLARED"
@@ -309,6 +322,24 @@ export type VehicleDisplayState =
   | "IDLING"
   | "PARKED";
 
+export type VehicleIssueCategory =
+  | "MECHANICAL"
+  | "ELECTRICAL"
+  | "TYRE"
+  | "BODY"
+  | "OTHER";
+
+export type VehicleIssueSeverity =
+  | "LOW"
+  | "MEDIUM"
+  | "HIGH";
+
+export type VehicleIssueStatus =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "RESOLVED"
+  | "DISMISSED";
+
 // ------------------------------------------------- permission codes (N4)
 // Generated from app.permissions so a missing grant is a compile error (02 §5).
 export type PermissionCode =
@@ -372,7 +403,17 @@ export type PermissionCode =
   | "telemetry:read_live"
   | "trailer:swap"
   | "user:manage"
-  | "user:read";
+  | "user:read"
+  | "anomaly:read"
+  | "notification:read"
+  | "training:read"
+  | "training:manage"
+  | "training:complete"
+  | "training:review"
+  | "onboarding:read"
+  | "onboarding:submit"
+  | "onboarding:review"
+  | "vehicle:report";
 
 export const PERMISSION_CODES: readonly PermissionCode[] = [
   "accident:acknowledge",
@@ -436,6 +477,16 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   "trailer:swap",
   "user:manage",
   "user:read",
+  "anomaly:read",
+  "notification:read",
+  "training:read",
+  "training:manage",
+  "training:complete",
+  "training:review",
+  "onboarding:read",
+  "onboarding:submit",
+  "onboarding:review",
+  "vehicle:report",
 ] as const;
 
 // ----------------------------------------------------------- row types
@@ -611,6 +662,31 @@ export interface DriverHosStateRow {
   limit_reached_at: string | null;
   computed_at: string;
   computed_through: string;
+}
+
+/** app.driver_onboarding */
+export interface DriverOnboardingRow {
+  id: string;
+  driver_id: string;
+  full_name: string | null;
+  licence_number: string | null;
+  licence_class: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  address_json: unknown | null;
+  ssn_encrypted: string | null;
+  dob: string | null;
+  previous_addresses_json: unknown | null;
+  background_check_status: BackgroundCheckStatus;
+  background_check_submitted_at: string | null;
+  background_check_cleared_at: string | null;
+  consent_given: boolean;
+  consent_at: string | null;
+  assigned_vehicle_id: string | null;
+  onboarding_complete: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 }
 
 /** app.drivers */
@@ -1006,6 +1082,48 @@ export interface MaintenanceScheduleRow {
   overdue_by_days: number | null;
   alert_sent_at: string | null;
   evaluated_at: string;
+}
+
+/** app.training_courses */
+export interface TrainingCourseRow {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  is_mandatory: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/** app.training_lessons */
+export interface TrainingLessonRow {
+  id: string;
+  course_id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  content_url: string | null;
+  duration_minutes: number | null;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/** app.training_enrollments */
+export interface TrainingEnrollmentRow {
+  id: string;
+  driver_id: string;
+  lesson_id: string;
+  status: TrainingStatus;
+  completed_at: string | null;
+  quiz_score: number | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 }
 
 /** app.maintenance_tasks */
@@ -1572,6 +1690,26 @@ export interface VehicleDisplayStateViewRow {
   limit_reached_at: string | null;
   warning_sent_at: string | null;
   display_state: VehicleDisplayState | null;
+}
+
+/** app.vehicle_issues */
+export interface VehicleIssueRow {
+  id: string;
+  vehicle_id: string;
+  reported_by_driver_id: string;
+  shift_id: string | null;
+  category: VehicleIssueCategory;
+  severity: VehicleIssueSeverity;
+  description: string;
+  photo_media_object_id: string | null;
+  status: VehicleIssueStatus;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 }
 
 /** app.vehicle_movement_events */

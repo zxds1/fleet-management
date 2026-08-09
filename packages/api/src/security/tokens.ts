@@ -31,6 +31,13 @@ export interface IssuedRefreshToken {
   expiresAt: Date;
 }
 
+/** Short-lived `mfa_bypass`-scoped token returned by `POST /auth/mfa/recover` (A3.7). */
+export interface IssuedBypassToken {
+  token: string;
+  expiresAt: Date;
+  expiresInSeconds: number;
+}
+
 export class TokenService {
   constructor(private readonly env: Env) {}
 
@@ -126,6 +133,40 @@ export class TokenService {
     } catch (e) {
       if (e instanceof Unauthenticated) throw e;
       throw new Unauthenticated("MFA challenge expired or invalid");
+    }
+  }
+
+  /**
+   * Short-lived bypass token minted after a valid MFA recovery code (A3.7). Scoped `mfa_bypass`
+   * so `verifyAccessToken` can never mistake it for an access token, and it reuses the
+   * MFA-challenge TTL so a lost authenticator grants only a brief window.
+   */
+  issueMfaBypass(input: { userId: string; email: string }): IssuedBypassToken {
+    const expiresInSeconds = this.env.MFA_CHALLENGE_TTL_SECONDS;
+    const token = jwt.sign(
+      { sub: input.userId, email: input.email, scope: "mfa_bypass" },
+      this.env.JWT_SECRET,
+      {
+        algorithm: "HS256",
+        expiresIn: expiresInSeconds,
+        issuer: this.env.JWT_ISSUER,
+        keyid: this.env.JWT_KID,
+      },
+    );
+    return { token, expiresInSeconds, expiresAt: new Date(Date.now() + expiresInSeconds * 1000) };
+  }
+
+  verifyMfaBypass(token: string): { userId: string; email: string } {
+    try {
+      const decoded = jwt.verify(token, this.env.JWT_SECRET, {
+        algorithms: ["HS256"],
+        issuer: this.env.JWT_ISSUER,
+      }) as JwtPayload & { sub: string; email: string; scope?: string };
+      if (decoded.scope !== "mfa_bypass") throw new Unauthenticated("Invalid MFA bypass token");
+      return { userId: decoded.sub, email: decoded.email };
+    } catch (e) {
+      if (e instanceof Unauthenticated) throw e;
+      throw new Unauthenticated("MFA bypass token expired or invalid");
     }
   }
 }

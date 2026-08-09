@@ -46,6 +46,9 @@ SCHEMA=( \
   db/schema/09_audit_notifications.sql \
   db/schema/10_partitions.sql \
   db/schema/11_views.sql \
+  db/schema/12_training.sql \
+  db/schema/13_onboarding.sql \
+  db/schema/14_vehicle_issues.sql \
 )
 
 echo "==> Applying schema"

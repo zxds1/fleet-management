@@ -38,6 +38,9 @@ const SCHEMA_FILES = [
   "09_audit_notifications.sql",
   "10_partitions.sql",
   "11_views.sql",
+  "12_training.sql",
+  "13_onboarding.sql",
+  "14_vehicle_issues.sql",
 ];
 
 /** Run psql against `uri`, returning stdout. Throws with stderr on failure. */

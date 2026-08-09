@@ -31,6 +31,7 @@ import {
   VehicleRepository,
   WorkLogRepository,
 } from "../repositories/shifts";
+import type { ShiftHistoryRow } from "../repositories/shifts";
 import { ConsentRepository } from "../repositories/identity";
 
 export interface Actor {
@@ -328,5 +329,24 @@ export class ShiftQuery {
     }));
     void encodeCursor;
     return ok(page);
+  }
+
+  /** Cursor page over the caller's own shift history (03 §2.2, D7). */
+  async listHistory(driverId: string, opts: { limit: number; cursor?: string }): Promise<Result<CursorPage<ShiftHistoryRow>>> {
+    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
+    const cursor = decodeCursor(opts.cursor);
+    const rows = await this.shifts.listHistoryByDriver(driverId, {
+      limit: limit + 1,
+      cursorSort: cursor?.sort,
+      cursorId: cursor?.id,
+    });
+    return ok(buildPage(rows, limit, (row) => ({ sort: String(row.clock_in_at ?? ""), id: row.shift_id })));
+  }
+
+  /** Verification detail for one shift; NotFound when the id is unknown. */
+  async getVerification(shiftId: string): Promise<Result<ShiftVerificationInboxViewRow>> {
+    const row = await this.shifts.getVerificationById(shiftId);
+    if (!row) return err(new NotFound("Shift not found"));
+    return ok(row);
   }
 }

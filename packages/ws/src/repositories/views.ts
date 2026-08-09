@@ -58,62 +58,85 @@ export class OnCallRepository {
   }
 }
 
-export interface DriverContext {
+/** The driver's own scope: their driver id plus the vehicle they are currently bound to. */
+export interface DriverScope {
+  driverId: string;
   vehicleId: string | null;
-  shiftId: string | null;
 }
 
+/** The driver's live shift state — the (re)connect snapshot for `driver:shift` (07 §5). */
 export interface DriverShiftState {
-  shiftId: string;
+  shift_id: string | null;
   state: string | null;
-  vehicleId: string | null;
-  clockInAt: string | null;
-  clockOutAt: string | null;
+  operational_date: string | null;
+  clock_in_at: string | null;
+  clock_out_at: string | null;
+  vehicle_id: string | null;
+  is_overrun: boolean | null;
+  next_eligible_clock_in_at: string | null;
 }
 
-/** Driver-scoped projections for the driver realtime surface (07 §3/§5, D-3). */
 export class DriverRepository {
   constructor(private readonly client: DbClient) {}
 
   /**
-   * The driver's currently-open (or pending-closeout) assignment — the scope the gateway joins the
-   * `driver:shift` / `driver:vehicle` rooms from. Returns nulls when the driver has no active shift.
+   * Resolves the driver behind a user and the vehicle to scope their real-time to: the vehicle of
+   * the OPEN shift when one exists, otherwise the most recent dispatch assignment (the same
+   * precedence `GET /drivers/me/assignment` uses).
    */
-  async activeContext(userId: string): Promise<DriverContext> {
-    const res = await this.client.query<{ vehicle_id: string | null; shift_id: string | null }>(
-      `SELECT vehicle_id, shift_id
-         FROM app.v_shift_verification_inbox
-        WHERE driver_id = $1
-          AND state IN ('OPEN', 'PENDING_CLOSEOUT')
-        ORDER BY clock_in_at DESC
+  async scopeForUser(userId: string): Promise<DriverScope | null> {
+    const res = await this.client.query<{ driver_id: string; vehicle_id: string | null }>(
+      `SELECT d.id AS driver_id,
+              COALESCE(s.vehicle_id, a.vehicle_id) AS vehicle_id
+         FROM app.drivers d
+         LEFT JOIN LATERAL (
+             SELECT sh.vehicle_id
+               FROM app.shifts sh
+              WHERE sh.driver_id = d.id AND sh.state = 'OPEN'
+              ORDER BY sh.clock_in_at DESC
+              LIMIT 1
+         ) s ON true
+         LEFT JOIN LATERAL (
+             SELECT asg.vehicle_id
+               FROM app.assignments asg
+              WHERE asg.driver_id = d.id
+              ORDER BY asg.assigned_date DESC, asg.created_at DESC
+              LIMIT 1
+         ) a ON true
+        WHERE d.user_id = $1::uuid AND d.deleted_at IS NULL
         LIMIT 1`,
       [userId],
     );
     const row = res.rows[0];
-    return { vehicleId: row?.vehicle_id ?? null, shiftId: row?.shift_id ?? null };
+    return row ? { driverId: row.driver_id, vehicleId: row.vehicle_id } : null;
   }
 
-  /** The driver's own vehicle display state — emitted on (re)connect and on change (07 §5). */
+  /** The driver's own vehicle display-state row — same view the admin map reads, scoped (07 §3). */
   async vehicleState(vehicleId: string): Promise<VehicleDisplayStateViewRow | null> {
     const res = await this.client.query<VehicleDisplayStateViewRow>(
-      `SELECT * FROM app.v_vehicle_display_state WHERE vehicle_id = $1`,
+      `SELECT * FROM app.v_vehicle_display_state WHERE vehicle_id = $1::uuid LIMIT 1`,
       [vehicleId],
     );
     return res.rows[0] ?? null;
   }
 
-  /** The driver's active shift summary (clock-in/out, state) for the `driver:shift` snapshot. */
-  async shiftState(shiftId: string): Promise<DriverShiftState | null> {
+  /** The driver's current (or most recent) shift plus their HOS re-eligibility instant. */
+  async shiftState(driverId: string): Promise<DriverShiftState | null> {
     const res = await this.client.query<DriverShiftState>(
-      `SELECT shift_id,
-              state,
-              vehicle_id,
-              clock_in_at,
-              clock_out_at
-         FROM app.v_shift_verification_inbox
-        WHERE shift_id = $1
+      `SELECT s.id                AS shift_id,
+              s.state::text       AS state,
+              s.operational_date::text AS operational_date,
+              s.clock_in_at,
+              s.clock_out_at,
+              s.vehicle_id,
+              s.is_overrun,
+              hs.next_eligible_clock_in_at
+         FROM app.shifts s
+         LEFT JOIN app.driver_hos_state hs ON hs.driver_id = s.driver_id
+        WHERE s.driver_id = $1::uuid
+        ORDER BY (s.state = 'OPEN') DESC, s.clock_in_at DESC
         LIMIT 1`,
-      [shiftId],
+      [driverId],
     );
     return res.rows[0] ?? null;
   }

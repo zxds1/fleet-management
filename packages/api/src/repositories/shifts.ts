@@ -9,10 +9,24 @@ import type {
   DriverHosStateRow,
   FuelRecordRow,
   ShiftRow,
+  ShiftVerificationInboxViewRow,
   TrailerRow,
-  VehicleRow,
   WorkLogRow,
+  VehicleRow,
 } from "@fleet/shared";
+
+/** Mobile/admin read model for a driver's own shift history (03 §2.2). */
+export interface ShiftHistoryRow {
+  shift_id: string;
+  vehicle_id: string | null;
+  vehicle_plate: string | null;
+  clock_in_at: string;
+  clock_out_at: string | null;
+  duration_seconds: number | null;
+  distance_km: string | null;
+  state: ShiftRow["state"] | null;
+  verification_status: ShiftRow["verification_status"] | null;
+}
 
 export class ShiftRepository extends BaseRepository<ShiftRow> {
   constructor(client: DbClient) {
@@ -41,6 +55,50 @@ export class ShiftRepository extends BaseRepository<ShiftRow> {
       [driverId],
     );
     return res.rows;
+  }
+
+  /**
+   * Driver-owned shift history, keyset paginated on (clock_in_at, id). Always scoped to the
+   * caller's driver id so a driver can never read another driver's rows (06 §2).
+   */
+  async listHistoryByDriver(
+    driverId: string,
+    opts: { limit: number; cursorSort?: string; cursorId?: string },
+  ): Promise<ShiftHistoryRow[]> {
+    const params: unknown[] = [driverId];
+    let keyset = "";
+    if (opts.cursorSort && opts.cursorId) {
+      params.push(opts.cursorSort, opts.cursorId);
+      keyset = `AND (s.clock_in_at, s.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    }
+    params.push(opts.limit);
+    const res = await this.client.query<ShiftHistoryRow>(
+      `SELECT s.id                        AS shift_id,
+              s.vehicle_id                AS vehicle_id,
+              v.license_plate             AS vehicle_plate,
+              s.clock_in_at               AS clock_in_at,
+              s.clock_out_at              AS clock_out_at,
+              s.shift_duration_seconds    AS duration_seconds,
+              s.total_distance_km         AS distance_km,
+              s.state                     AS state,
+              s.verification_status       AS verification_status
+         FROM app.shifts s
+         LEFT JOIN app.vehicles v ON v.id = s.vehicle_id
+        WHERE s.driver_id = $1 ${keyset}
+        ORDER BY s.clock_in_at DESC, s.id DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+    return res.rows;
+  }
+
+  /** Verification detail for a single shift (admin detail screen). */
+  async getVerificationById(shiftId: string): Promise<ShiftVerificationInboxViewRow | null> {
+    const res = await this.client.query<ShiftVerificationInboxViewRow>(
+      `SELECT * FROM app.v_shift_verification_inbox WHERE shift_id = $1::uuid LIMIT 1`,
+      [shiftId],
+    );
+    return res.rows[0] ?? null;
   }
 }
 

@@ -167,7 +167,38 @@ export class FuelCardService {
 
 import type { DbClient, FuelReconciliationInboxViewRow } from "@fleet/shared";
 import { FuelStatementRepository } from "../repositories/fuel";
+import type { FuelPurchaseDetailRow } from "../repositories/fuel";
+import type { CursorPage } from "../http/pagination";
 import { buildPage, decodeCursor, MAX_PAGE_LIMIT, resolveSortColumn } from "../http/pagination";
+
+/** Wire shape for a fuel purchase: `total_cost` is a money object, matching the mobile read model. */
+export interface FuelPurchaseView {
+  purchase_id: string;
+  purchased_at: string;
+  vehicle_id: string | null;
+  vehicle_plate: string | null;
+  litres: string | null;
+  total_cost: { amount: string | null; currency: string };
+  supplier_name: string | null;
+  odometer_km: number | null;
+  reconciliation_status: string;
+  rejection_reason: string | null;
+}
+
+function toPurchaseView(row: FuelPurchaseDetailRow): FuelPurchaseView {
+  return {
+    purchase_id: row.purchase_id,
+    purchased_at: row.purchased_at,
+    vehicle_id: row.vehicle_id,
+    vehicle_plate: row.vehicle_plate,
+    litres: row.litres,
+    total_cost: { amount: row.total_cost_amount, currency: row.currency },
+    supplier_name: row.supplier_name,
+    odometer_km: row.odometer_km,
+    reconciliation_status: row.reconciliation_status,
+    rejection_reason: row.rejection_reason,
+  };
+}
 
 export interface StatementInput {
   provider: string;
@@ -215,7 +246,37 @@ export class ReconciliationService {
 const INBOX_SORT = { purchased_at: "purchased_at" } as const;
 
 export class FuelQuery {
-  constructor(private readonly client: DbClient) {}
+  constructor(
+    private readonly client: DbClient,
+    private readonly purchases?: FuelPurchaseRepository,
+  ) {}
+
+  private get purchaseRepo(): FuelPurchaseRepository {
+    return this.purchases ?? new FuelPurchaseRepository(this.client);
+  }
+
+  /** Cursor page over the caller's own fuel purchases (03 §2.3, D7). */
+  async listMyPurchases(
+    driverId: string,
+    opts: { limit: number; cursor?: string },
+  ): Promise<Result<CursorPage<FuelPurchaseView>>> {
+    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
+    const cursor = decodeCursor(opts.cursor);
+    const rows = await this.purchaseRepo.listByDriver(driverId, {
+      limit: limit + 1,
+      cursorSort: cursor?.sort,
+      cursorId: cursor?.id,
+    });
+    const page = buildPage(rows, limit, (row) => ({ sort: String(row.purchased_at ?? ""), id: row.purchase_id }));
+    return ok({ ...page, data: page.data.map(toPurchaseView) });
+  }
+
+  /** Single purchase detail; NotFound when the id is unknown. */
+  async getPurchase(purchaseId: string, driverId?: string): Promise<Result<FuelPurchaseView>> {
+    const row = await this.purchaseRepo.getDetailById(purchaseId, driverId);
+    if (!row) return err(new NotFound("Fuel purchase not found"));
+    return ok(toPurchaseView(row));
+  }
 
   /** Cursor page over `v_fuel_reconciliation_inbox` (03 §2.3, D7). */
   async reconciliationInbox(opts: {

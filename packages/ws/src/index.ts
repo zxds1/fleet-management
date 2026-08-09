@@ -52,9 +52,9 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
     vehicleSnapshot: () => vehicleRepo.snapshot(),
     notificationsFor: (userId) => notifRepo.unread(userId),
     isAccidentOnCall: (userId) => onCallRepo.isAccidentOnCall(userId),
-    driverContext: (userId) => driverRepo.activeContext(userId),
+    driverScope: (userId) => driverRepo.scopeForUser(userId),
     driverVehicleState: (vehicleId) => driverRepo.vehicleState(vehicleId),
-    driverShiftState: (shiftId) => driverRepo.shiftState(shiftId),
+    driverShiftState: (driverId) => driverRepo.shiftState(driverId),
     bus,
   };
 

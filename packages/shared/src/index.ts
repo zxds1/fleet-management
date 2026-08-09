@@ -19,6 +19,7 @@ export * from "./schemas/accidents";
 export * from "./schemas/inspections";
 export * from "./schemas/trailer";
 export * from "./schemas/media";
+export * from "./schemas/vehicleIssue";
 export * from "./realtime";
 export * from "./telemetry";
 export * from "./ingest";

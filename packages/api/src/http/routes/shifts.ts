@@ -73,7 +73,16 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
             endpoint: req.path,
             http_method: req.method,
           });
-          return { status: 201, body: result.value, resourceId: result.value.shiftId } as never;
+          // Wire contract is snake_case (openapi `/shifts/clock-in`).
+          return {
+            status: 201,
+            body: {
+              shift_id: result.value.shiftId,
+              clock_in_at: result.value.clockInAt,
+              disclaimer: result.value.disclaimer,
+            },
+            resourceId: result.value.shiftId,
+          } as never;
         }
         return result.error as never;
       }),
@@ -110,7 +119,8 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
             endpoint: req.path,
             http_method: req.method,
           });
-          return { status: 200, body: result.value } as never;
+          // Wire contract is snake_case (openapi `/shifts/clock-out`).
+          return { status: 200, body: { shift_id: result.value.shiftId } } as never;
         }
         return result.error as never;
       }),
@@ -131,7 +141,19 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
           return;
         }
         const shift = await svc.shift.getActive(driver.id);
-        res.status(200).json({ shift: shift ?? null });
+        // Contract (openapi `/shifts/me/active`): a bare, nullable ActiveShift — not an envelope.
+        // `app.shifts` names the key `id` and the trailer `assigned_trailer_id`, so project them
+        // onto the contract's `shift_id` / `trailer_id`.
+        res.status(200).json(
+          shift
+            ? {
+                shift_id: shift.id,
+                vehicle_id: shift.vehicle_id,
+                trailer_id: shift.assigned_trailer_id,
+                clock_in_at: shift.clock_in_at,
+              }
+            : null,
+        );
       }),
     ),
   );
@@ -155,6 +177,49 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
         });
         if (!result.ok) {
           res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      }),
+    ),
+  );
+
+  // ── Own shift history (read, cursor) ──────────────────────────────────────────────────────
+  router.get(
+    "/me",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("shift:read_own")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const query = parseQuery(CursorQuerySchema, req);
+        const svc = makeServices(client, infra);
+        const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
+        if (!driver) {
+          res.status(403).json({ error_code: "FORBIDDEN", status: 403, title: "Forbidden" });
+          return;
+        }
+        const result = await svc.shiftQuery.listHistory(driver.id, { limit: query.limit, cursor: query.cursor });
+        if (!result.ok) {
+          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      }),
+    ),
+  );
+
+  // ── Verification detail for one shift (read) ───────────────────────────────────────────────
+  router.get(
+    "/:id/verification",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("shift:read_all")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const result = await svc.shiftQuery.getVerification(req.params.id!);
+        if (!result.ok) {
+          const status = result.error instanceof NotFound ? 404 : 422;
+          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
           return;
         }
         res.status(200).json(result.value);
@@ -191,7 +256,8 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
             http_method: req.method,
             reason: input.action,
           });
-          return { status: 200, body: result.value } as never;
+          // Wire contract is snake_case (openapi `/shifts/{id}/verify`).
+          return { status: 200, body: { shift_id: result.value.shiftId, status: result.value.status } } as never;
         }
         return result.error as never;
       }),
@@ -227,7 +293,8 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
             http_method: req.method,
             reason: input.reason ?? "Admin force-close (N6/C3.8)",
           });
-          return { status: 200, body: result.value } as never;
+          // Wire contract is snake_case (openapi `/shifts/{id}/force-close`).
+          return { status: 200, body: { shift_id: result.value.shiftId } } as never;
         }
         return result.error as never;
       }),
