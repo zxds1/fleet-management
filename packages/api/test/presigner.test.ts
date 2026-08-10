@@ -66,3 +66,21 @@ describe("EnvMediaPresigner (D5 SigV4)", () => {
     expect(out.url).not.toContain("X-Amz-");
   });
 });
+describe("EnvMediaPresigner.presignGet (F7)", () => {
+  it("mints a SigV4 presigned GET URL with the expected query params", async () => {
+    const p = new EnvMediaPresigner(
+      env({ AWS_ACCESS_KEY_ID: "AKIA_TEST", AWS_SECRET_ACCESS_KEY: "secret", S3_ENDPOINT: undefined, S3_FORCE_PATH_STYLE: false }),
+    );
+    const out = await p.presignGet("fleet-media", "fuel_receipt/abc-123", 60);
+    expect(out.expiresInSeconds).toBe(60);
+    expect(out.url).toContain("fleet-media.s3.af-south-1.amazonaws.com/fuel_receipt/abc-123?");
+    expect(new URL(out.url).searchParams.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+    expect((new URL(out.url).searchParams.get("X-Amz-Signature") ?? "").length).toBe(64);
+  });
+
+  it("degrades to the canonical endpoint GET URL when credentials are absent", async () => {
+    const p = new EnvMediaPresigner(env({ AWS_ACCESS_KEY_ID: undefined, AWS_SECRET_ACCESS_KEY: undefined }));
+    const out = await p.presignGet("fleet-media", "fuel_receipt/k1", 60);
+    expect(out.url).toBe("https://fleet-media.s3.af-south-1.amazonaws.com/fuel_receipt/k1");
+  });
+});

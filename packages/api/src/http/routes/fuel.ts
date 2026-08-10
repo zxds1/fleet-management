@@ -5,9 +5,9 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { Forbidden, NotFound, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
-import { RefuelSchema, VerifyPurchaseSchema } from "@fleet/shared";
-import { authenticate } from "../../middleware/authenticate";
+import { Forbidden, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
+import { FuelCorrectionSchema, PhotoFirstRefuelSchema, RefuelSchema, VerifyPurchaseSchema } from "@fleet/shared";
+import { authenticate, principalOf } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
@@ -15,7 +15,6 @@ import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
 import { withClient } from "../../db/withClient";
-import { ownScopeDriverId } from "../ownScope";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -40,8 +39,6 @@ const StatementSchema = z.object({
 const InboxQuerySchema = CursorQuerySchema.extend({
   vehicle_id: z.string().uuid().optional(),
   verified: z.enum(["true", "false"]).optional(),
-  /** Admin console shorthand for `verified=false` (the outstanding queue). */
-  unverified_only: z.enum(["true", "false"]).optional(),
 });
 
 export interface FuelRouterDeps {
@@ -61,7 +58,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
   router.post(
     "/refuel",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("fuel:submit_purchase")),
+    requirePermission(asPerm("fuel:enter")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -75,13 +72,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok)
-  // Wire contract is snake_case (openapi `/fuel/refuel` → fuel_purchase_id, open_anomalies).
-  return {
-    status: 201,
-    body: { fuel_purchase_id: result.value.fuelPurchaseId, open_anomalies: result.value.openAnomalies },
-    resourceId: result.value.fuelPurchaseId,
-  } as never;
+        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.fuelPurchaseId } as never;
         return result.error as never;
       }),
     ),
@@ -103,9 +94,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok)
-  // Wire contract is snake_case (openapi `/fuel/purchases/{purchaseId}/verify`).
-  return { status: 200, body: { fuel_purchase_id: result.value.fuelPurchaseId, status: result.value.status } } as never;
+        if (result.ok) return { status: 200, body: result.value } as never;
         return result.error as never;
       }),
     ),
@@ -127,88 +116,29 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
           { label: input.label, lastFour: input.last_four, provider: input.provider, isPooled: input.is_pooled, assignedVehicleId: input.assigned_vehicle_id ?? null },
           { userId: principal.userId, email: principal.email, roles: principal.roles },
         );
-        if (result.ok)
-  // Wire contract is snake_case (openapi fuel card → fuel_card_id).
-  return { status: 201, body: { fuel_card_id: result.value.fuelCardId }, resourceId: result.value.fuelCardId } as never;
+        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.fuelCardId } as never;
         return result.error as never;
       }),
     ),
   );
 
   // ── Reconciliation inbox (read, cursor) ────────────────────────────────────────────────────
-  // Admin surface: gated on `fuel:verify` so a driver (who now holds `fuel:read` for their own
-  // receipts) can never page the whole fleet's reconciliation queue.
   router.get(
     "/reconciliation-inbox",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("fuel:verify")),
+    requirePermission(asPerm("fuel:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const query = parseQuery(InboxQuerySchema, req);
         const svc = makeServices(client, infra);
-        // `unverified_only=true` is the admin console's filter for the outstanding queue; it is
-        // the inverse of `verified`. An explicit `verified` wins when both are supplied.
-        const verified =
-          query.verified === "true"
-            ? true
-            : query.verified === "false"
-              ? false
-              : query.unverified_only === "true"
-                ? false
-                : undefined;
         const result = await svc.fuelQuery.reconciliationInbox({
           vehicleId: query.vehicle_id,
-          verified,
+          verified: query.verified === "true" ? true : query.verified === "false" ? false : undefined,
           limit: query.limit,
           cursor: query.cursor,
         });
         if (!result.ok) {
           res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
-          return;
-        }
-        res.status(200).json(result.value);
-      }),
-    ),
-  );
-
-  // ── Own fuel purchases (read, cursor) ──────────────────────────────────────────────────────
-  router.get(
-    "/refuel/me",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("fuel:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
-        const query = parseQuery(CursorQuerySchema, req);
-        const svc = makeServices(client, infra);
-        const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
-        if (!driver) {
-          res.status(403).json({ error_code: "FORBIDDEN", status: 403, title: "Forbidden" });
-          return;
-        }
-        const result = await svc.fuelQuery.listMyPurchases(driver.id, { limit: query.limit, cursor: query.cursor });
-        if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
-          return;
-        }
-        res.status(200).json(result.value);
-      }),
-    ),
-  );
-
-  // ── Single purchase detail (read) ──────────────────────────────────────────────────────────
-  // A driver (fuel:read without the fleet-wide fuel:verify) only resolves their own purchase.
-  router.get(
-    "/purchases/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("fuel:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
-        const svc = makeServices(client, infra);
-        const driverId = await ownScopeDriverId(req, svc, "fuel:verify");
-        const result = await svc.fuelQuery.getPurchase(req.params.id!, driverId);
-        if (!result.ok) {
-          const status = result.error instanceof NotFound ? 404 : 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
           return;
         }
         res.status(200).json(result.value);
@@ -246,10 +176,92 @@ export function createReconciliationRouter(deps: FuelRouterDeps): Router {
           },
           { userId: principal.userId, email: principal.email, roles: principal.roles },
         );
-        if (result.ok)
-  // Wire contract is snake_case (openapi statement import → statement_id).
-  return { status: 201, body: { statement_id: result.value.statementId }, resourceId: result.value.statementId } as never;
+        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.statementId } as never;
         return result.error as never;
+      }),
+    ),
+  );
+
+  return router;
+}
+
+/**
+ * Driver photo-first fuel capture (A1.4), mounted at /driver/fuel.
+ *
+ * Distinct from POST /fuel/refuel, which keeps the B3 gauge-pair contract under `fuel:enter`.
+ * Here the driver submits photographs and an odometer reading only; OCR fills the rest
+ * asynchronously and the driver may correct it before an Admin verifies.
+ */
+export function createDriverFuelRouter(deps: FuelRouterDeps): Router {
+  const router = Router();
+  const { pool, idempotency: idem, releaseClaim, infra } = deps;
+  const writer = (req: Request, res: Response, fn: Parameters<typeof executeWrite>[3]) =>
+    executeWrite(req, res, { pool, idempotency: idem, releaseClaim }, fn);
+
+  // ── Submit receipt + odometer photographs ─────────────────────────────────────────────────
+  router.post(
+    "/purchase",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("fuel:submit_purchase")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const input = parseBody(PhotoFirstRefuelSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const driver = await svc.drivers.findByUserId(principal.userId);
+        if (!driver) return new Forbidden() as never;
+        const result = await svc.fuel.submitPhotoFirst(tx, driver.id, input, {
+          userId: principal.userId,
+          email: principal.email,
+          roles: principal.roles,
+        });
+        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.fuelPurchaseId } as never;
+        return result.error as never;
+      }),
+    ),
+  );
+
+  // ── Correct what OCR read ──────────────────────────────────────────────────────────────────
+  router.post(
+    "/correct",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("fuel:submit_purchase")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const input = parseBody(FuelCorrectionSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const driver = await svc.drivers.findByUserId(principal.userId);
+        if (!driver) return new Forbidden() as never;
+        const result = await svc.fuel.applyCorrection(tx, driver.id, input, {
+          userId: principal.userId,
+          email: principal.email,
+          roles: principal.roles,
+        });
+        if (result.ok) return { status: 200, body: result.value } as never;
+        return result.error as never;
+      }),
+    ),
+  );
+
+  // ── Poll the OCR result for the review step (A1.4 step 5) ─────────────────────────────────
+  // OCR runs asynchronously in the worker, so the purchase POST cannot return the parsed values.
+  // The driver's review screen polls this until `ocr_status` is terminal, then renders the fields.
+  router.get(
+    "/purchase/:id/ocr",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("fuel:submit_purchase")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const principal = principalOf(req);
+        const svc = makeServices(client, infra);
+        const driver = await svc.drivers.findByUserId(principal.userId);
+        if (!driver) throw new Forbidden();
+        const result = await svc.fuelQuery.ocrPreview(req.params.id!, driver.id);
+        if (!result.ok) throw result.error;
+        res.status(200).json(result.value);
       }),
     ),
   );

@@ -49,7 +49,7 @@ class FakeSocket implements WsSocket {
 
 function tokenFor(sessionId: string, sub = "u1"): string {
   return jwt.sign(
-    { sub, email: "a@b.c", roles: ["ADMIN"], permissions: ["shift:read"], sid: sessionId, locale: "en" },
+    { sub, email: "a@b.c", roles: ["ADMIN"], permissions: ["shift:read"], sid: sessionId, locale: "en", tid: "00000000-0000-0000-0000-000000000001" },
     env.JWT_SECRET,
     { algorithm: "HS256", issuer: env.JWT_ISSUER, keyid: env.JWT_KID },
   );

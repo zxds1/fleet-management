@@ -12,6 +12,9 @@ export interface RetentionContextData {
   shiftWindow: RetentionWindow | null;
   recoveryModeActive: boolean;
   openAccident: boolean;
+  /** Owning tenant of the vehicle (14_tenancy.sql). Stamped onto telemetry rows and used to
+   * scope the ingest transaction via SET LOCAL app.current_tenant_id. */
+  tenantId: string;
 }
 
 export interface InsertLocationRow {
@@ -34,6 +37,8 @@ export interface InsertLocationRow {
   traccarDeviceId: number;
   attributes: Record<string, unknown>;
   retentionReason: string;
+  /** Owning tenant of the vehicle (14_tenancy.sql). telemetry.location_updates is tenant-scoped. */
+  tenantId: string;
 }
 
 export class TelemetryRepository {
@@ -57,6 +62,7 @@ export class TelemetryRepository {
       shift: [Date, Date | null] | null;
       recovery_active: boolean;
       accident_open: boolean;
+      tenant_id: string;
     }>(
       `SELECT
          (SELECT (s.clock_in_at, s.clock_out_at)::record FROM app.shifts s
@@ -67,7 +73,8 @@ export class TelemetryRepository {
             WHERE r.vehicle_id = $1 AND r.disabled_at IS NULL
               AND r.enabled_at <= $2 AND r.expires_at >= $2) AS recovery_active,
          EXISTS(SELECT 1 FROM app.accident_reports a
-            WHERE a.vehicle_id = $1 AND a.status IN ('PENDING','INVESTIGATING')) AS accident_open`,
+            WHERE a.vehicle_id = $1 AND a.status IN ('PENDING','INVESTIGATING')) AS accident_open,
+         (SELECT v.tenant_id FROM app.vehicles v WHERE v.id = $1) AS tenant_id`,
       [vehicleId, at],
     );
     const row = res.rows[0];
@@ -76,7 +83,12 @@ export class TelemetryRepository {
       const [clockInAt, clockOutAt] = row.shift;
       shiftWindow = { start: clockInAt, end: clockOutAt ?? at };
     }
-    return { shiftWindow, recoveryModeActive: row?.recovery_active ?? false, openAccident: row?.accident_open ?? false };
+    return {
+      shiftWindow,
+      recoveryModeActive: row?.recovery_active ?? false,
+      openAccident: row?.accident_open ?? false,
+      tenantId: row?.tenant_id ?? "",
+    };
   }
 
   async insertLocationUpdate(row: InsertLocationRow): Promise<void> {
@@ -85,11 +97,11 @@ export class TelemetryRepository {
          vehicle_id, shift_id, recorded_at, position, latitude, longitude,
          speed_kph, heading_deg, altitude_m, ignition,
          obd_odometer_km, obd_engine_hours, obd_fuel_level_percent, obd_fault_codes,
-         satellites, hdop, is_valid_fix, traccar_position_id, traccar_device_id, attributes, retention_reason
+         satellites, hdop, is_valid_fix, traccar_position_id, traccar_device_id, attributes, retention_reason, tenant_id
        ) VALUES (
          $1,$2,$3,
          ST_SetSRID(ST_MakePoint($4,$5),4326)::geography,
-         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,true,$18,$19,$20,$21
+         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,true,$18,$19,$20,$21,$22
        )`,
       [
         row.vehicleId,
@@ -113,6 +125,7 @@ export class TelemetryRepository {
         row.traccarDeviceId,
         row.attributes,
         row.retentionReason,
+        row.tenantId,
       ],
     );
   }

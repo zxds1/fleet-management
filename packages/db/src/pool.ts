@@ -16,6 +16,14 @@ export interface PoolConfig {
   max?: number;
   statementTimeoutMs?: number;
   idleTimeoutMillis?: number;
+  /**
+   * Raw `options` string appended to every new connection's startup (pg's `options` param),
+   * e.g. `'-c app.current_role=SYSTEM_ADMIN'`. Used by the worker pool so background jobs
+   * (OCR, stale-shift sweeps, outbox relay, escalations) run as RLS-bypassing tenants: those
+   * jobs scan the whole dataset and never set `app.current_tenant_id`, so FORCE RLS would
+   * otherwise reduce them to zero rows once 14_tenancy.sql is applied.
+   */
+  options?: string;
 }
 
 export type FleetPool = PoolLike & { end(): Promise<void> };
@@ -31,6 +39,7 @@ export function createPool(config: PoolConfig = {}): FleetPool {
     max: config.max ?? 10,
     statement_timeout: config.statementTimeoutMs ?? 30_000,
     idleTimeoutMillis: config.idleTimeoutMillis ?? 10_000,
+    options: config.options,
   });
 
   return {

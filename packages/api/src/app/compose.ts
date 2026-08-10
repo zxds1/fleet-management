@@ -24,6 +24,14 @@ import {
 import { AdminRepository } from "../repositories/admin";
 import { OnboardingRepository } from "../repositories/onboarding";
 import {
+  InvitationRepository,
+  ManagerAssignmentRepository,
+  TenantRepository,
+  TenantUserRepository,
+  UserRoleRepository,
+  UserTenantRepository,
+} from "../repositories/tenancy";
+import {
   AssignmentRepository,
   FuelRecordRepository,
   HosRepository,
@@ -74,7 +82,9 @@ import { TrailerService } from "../services/trailer";
 import { MediaService } from "../services/media";
 import { AnomalyQuery, DashboardQuery, DocumentQuery } from "../services/queries";
 import { AdminService } from "../services/admin";
-import { VehicleService } from "../services/asset";
+import { VehicleService } from "../services/vehicles";
+import { AnalyticsService } from "../services/analytics";
+import { TenancyService } from "../services/tenancy";
 import { MaintenanceService } from "../services/maintenance";
 import { VehicleIssueService } from "../services/vehicleIssue";
 import { TrainingService } from "../services/training";
@@ -82,6 +92,7 @@ import { ReportsService } from "../services/reports";
 import { SettingsService } from "../services/settings";
 import { NotificationService } from "../services/notifications";
 import { OnboardingService } from "../services/onboarding";
+import type { EmailService } from "../services/email";
 import type { MediaPresigner } from "../media/presigner";
 
 export interface Infra {
@@ -91,6 +102,8 @@ export interface Infra {
   config: ConfigClient;
   store: SessionStore;
   presigner: MediaPresigner;
+  /** Invitation delivery (14_tenancy.sql). The accept token travels by email only. */
+  email: EmailService;
 }
 
 export interface Repositories {
@@ -139,6 +152,13 @@ export interface Repositories {
   adminRepo: AdminRepository;
   /** Driver onboarding + background-check records (13_onboarding.sql). */
   onboardingRepo: OnboardingRepository;
+  /** Tenancy (14_tenancy.sql): companies, memberships, invitations, roles, manager scope. */
+  tenants: TenantRepository;
+  invitations: InvitationRepository;
+  userTenants: UserTenantRepository;
+  userRoles: UserRoleRepository;
+  managerAssignments: ManagerAssignmentRepository;
+  tenantUsers: TenantUserRepository;
 }
 
 export interface Services extends Repositories {
@@ -164,7 +184,11 @@ export interface Services extends Repositories {
   dashboard: DashboardQuery;
   /** Admin console commands (A3.7): roster + device/session revoke. */
   admin: AdminService;
-  /** Vehicle master data (Pillar 4). */
+  /** Tenant provisioning + RBAC administration (14_tenancy.sql). */
+  tenancy: TenancyService;
+  /** Scope-aware hierarchical analytics (/analytics/*, aliased at /reports/*). */
+  analytics: AnalyticsService;
+  /** Vehicle master data + assignment (Pillar 4, /vehicles). */
   vehicle: VehicleService;
   /** Maintenance records + work orders (Pillar 3). */
   maintenance: MaintenanceService;
@@ -222,6 +246,12 @@ export function makeRepositories(client: DbClient): Repositories {
     settingsRepo: new SettingsRepository(client),
     adminRepo: new AdminRepository(client),
     onboardingRepo: new OnboardingRepository(client),
+    tenants: new TenantRepository(client),
+    invitations: new InvitationRepository(client),
+    userTenants: new UserTenantRepository(client),
+    userRoles: new UserRoleRepository(client),
+    managerAssignments: new ManagerAssignmentRepository(client),
+    tenantUsers: new TenantUserRepository(client),
   };
 }
 
@@ -232,10 +262,17 @@ export function makeServices(client: DbClient, infra: Infra): Services {
     const user = await repos.users.getById(userId);
     if (!user) throw new Unauthenticated();
     const resolved = await repos.permissions.resolve(userId);
+    // The tenant is resolved from app.user_tenants (14_tenancy.sql) and signed into the JWT `tid`
+    // claim, so every request is scoped from the first call after sign-in. Users predating tenancy
+    // resolve to the bootstrap tenant, which is where their rows were back-filled.
+    const tenantId = await repos.userTenants.findPrimaryTenantId(userId);
     return {
       // app.users.email is NOT NULL in the schema; the generated row type widens it to
       // `string | null`, so normalise here rather than leaking null into token claims.
       email: user.email ?? "",
+      // Drivers sign in by phone and carry no email, so the mirrored identity keeps both.
+      phone: user.phone ?? null,
+      tenantId,
       roles: resolved.roles,
       permissions: resolved.permissions,
       locale: user.locale === "sw" ? "sw" : "en",
@@ -244,7 +281,7 @@ export function makeServices(client: DbClient, infra: Infra): Services {
 
   const session = new SessionService(repos.sessions, infra.store, infra.tokens, infra.config, resolveIdentity);
   const mfa = new MfaService(repos.users, repos.recovery, infra.secretBox, infra.tokens, session);
-  const auth = new AuthService(repos.users, repos.permissions, session, infra.tokens, infra.env, mfa);
+  const auth = new AuthService(repos.users, repos.permissions, session, infra.tokens, infra.env);
   const device = new DeviceService(repos.devices, infra.tokens, infra.config);
   const consent = new ConsentService(repos.consents);
   const shift = new ShiftService(repos.shifts, repos.assignments, repos.vehicles, repos.fuelRecords, repos.workLogs, repos.hos, repos.consents);
@@ -252,7 +289,7 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const fuel = new FuelService(repos.purchases, repos.fuelRecords);
   const fuelCard = new FuelCardService(repos.cards);
   const reconciliation = new ReconciliationService(repos.statements);
-  const fuelQuery = new FuelQuery(repos.purchases.dbClient, repos.purchases);
+  const fuelQuery = new FuelQuery(repos.purchases.dbClient);
   const accident = new AccidentService(repos.reports, repos.accidentMedia, repos.escalationTimers, infra.config);
   const accidentQuery = new AccidentQuery(repos.reports.dbClient, repos.reports, repos.accidentMedia);
   const inspection = new InspectionService(
@@ -272,7 +309,19 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const document = new DocumentQuery(client);
   const dashboard = new DashboardQuery(client);
   const admin = new AdminService(repos.adminRepo, device, auth);
-  const vehicle = new VehicleService(repos.vehicles);
+  const analytics = new AnalyticsService(client);
+  const tenancy = new TenancyService(
+    repos.tenants,
+    repos.invitations,
+    repos.userTenants,
+    repos.userRoles,
+    repos.managerAssignments,
+    repos.tenantUsers,
+    repos.users,
+    infra.email,
+    `${infra.env.FRONTEND_URL}/accept-invite`,
+  );
+  const vehicle = new VehicleService(repos.vehicles, repos.drivers, repos.assignments, repos.managerAssignments);
   const maintenance = new MaintenanceService(repos.maintenanceRecords, repos.maintenanceTasks);
   const vehicleIssue = new VehicleIssueService(repos.vehicleIssues);
   const training = new TrainingService(repos.trainingLessons, repos.trainingEnrollments);
@@ -281,7 +330,7 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const notification = new NotificationService(repos.notifications);
   const onboarding = new OnboardingService(repos.onboardingRepo, repos.drivers);
 
-  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, onboarding, vehicle, vehicleIssue, maintenance, training, report, settings, notification };
+  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, tenancy, analytics, onboarding, vehicle, vehicleIssue, maintenance, training, report, settings, notification };
 }
 
 export type { PoolLike };

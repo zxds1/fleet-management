@@ -159,19 +159,24 @@ export class IngestConsumer {
           traccarDeviceId: pos.traccarDeviceId,
           attributes: pos.attributes,
           retentionReason: decision.reason,
+          tenantId: ctxData.tenantId,
         });
         prev = computeTrackerHealth(prev, pos, healthCfg);
         result.retained++;
       }
 
       const last = ordered[ordered.length - 1]!;
-      await transaction(this.deps.pool, async (tx) => {
-        const repo = new TelemetryRepository(tx.client, this.deps.publisher);
+      await transaction(
+        this.deps.pool,
+        async (tx) => {
+          const repo = new TelemetryRepository(tx.client, this.deps.publisher);
         for (const r of rows) await repo.insertLocationUpdate(r);
         if (prev) await repo.upsertTrackerHealth(last.traccarDeviceId, prev);
         if (movements.length) await repo.insertMovementEvents(vehicleId, movements);
         await repo.updateTrailerLastKnown(vehicleId, last.longitude, last.latitude, now);
-      });
+        },
+        { tenantId: ctxData.tenantId },
+      );
       result.movements += movements.length;
     }
     return result;

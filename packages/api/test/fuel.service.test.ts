@@ -81,3 +81,28 @@ describe("FuelService.verifyPurchase", () => {
 
   void ok;
 });
+  it("VERIFY with adjusted values promotes them to authoritative litres/total_cost (F5)", async () => {
+    const queries: { text: string; params: unknown[] }[] = [];
+    const txWithQuery = {
+      client: { query: async (text: string, params: unknown[]) => { queries.push({ text, params }); return { rows: [], rowCount: 0 }; } },
+      audit: () => undefined,
+      registerOutbox: () => undefined,
+    } as unknown as Tx;
+    const { svc } = makeService({
+      getById: { id: "pur-1", admin_verified: false, amount_spent: "10", liters_pumped: "2" } as unknown as FuelPurchaseRow,
+    });
+    const r = await svc.verifyPurchase(
+      txWithQuery,
+      "pur-1",
+      { action: "VERIFY", adjusted_litres: 40, adjusted_amount: 4000, adjusted_odometer: 9000 },
+      actor,
+    );
+    expect(r.ok).toBe(true);
+    const update = queries.find((q) => /UPDATE app\.fuel_purchases/.test(q.text));
+    expect(update).toBeDefined();
+    // Authoritative columns must be settled from the admin adjustments.
+    expect(update!.text).toContain("total_cost");
+    expect(update!.text).toContain("litres");
+    expect(update!.params).toContain("4000"); // total_cost written as string
+    expect(update!.params).toContain("40"); // litres written as string
+  });

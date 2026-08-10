@@ -180,6 +180,17 @@ export class DriverRepository extends BaseRepository<DriverRow> {
   async getByUserId(userId: string): Promise<DriverRow | null> {
     return this.findByUserId(userId);
   }
+
+  /** Returns only the driver ids that belong to the tenant; the rest are dropped (IDOR guard). */
+  async resolveIdsInTenant(tenantId: string, ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const res = await this.client.query<{ id: string }>(
+      `SELECT id FROM app.drivers
+         WHERE id = ANY($2::uuid[]) AND tenant_id = $1 AND deleted_at IS NULL`,
+      [tenantId, ids],
+    );
+    return res.rows.map((r) => r.id);
+  }
 }
 
 export class SessionRepository extends BaseRepository<UserSessionRow> {

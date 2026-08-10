@@ -10,10 +10,13 @@ import type { Request, Response } from "express";
 import {
   AppError,
   isErr,
+  isSystemAdmin,
+  BOOTSTRAP_TENANT_ID,
   type IdempotencyService,
   type PoolLike,
   type Principal,
   type Result,
+  type TenantContextInput,
   type Tx,
 } from "@fleet/shared";
 import { transaction } from "@fleet/db";
@@ -29,6 +32,12 @@ export interface WriteContext {
   principal: Principal | null;
   /** Partition key for idempotency (principal.userId, or email for unauthenticated writes). */
   subject: string;
+  /**
+   * Tenant the transaction is bound to. Taken from the verified Principal; unauthenticated writes
+   * (login, accept-invite) run against the bootstrap tenant until the real tenant is resolved,
+   * and those handlers touch only global identity tables, which are not RLS-protected.
+   */
+  tenantId: string;
 }
 
 export interface WriteOutcome<T> {
@@ -60,49 +69,62 @@ export async function executeWrite<T>(
   deps: WriteDeps,
   fn: WriteHandler<T>,
 ): Promise<void> {
+  const principal = (req as { principal?: Principal }).principal ?? null;
   const ctx: WriteContext = {
-    principal: (req as { principal?: Principal }).principal ?? null,
+    principal,
     subject: writeSubject(req),
+    tenantId: principal?.tenantId ?? BOOTSTRAP_TENANT_ID,
   };
   const claim = (req as { idempotency?: { key: string } }).idempotency;
 
-  try {
-    const settled = await transaction(deps.pool, async (tx) => {
-      const result = await fn(tx, ctx);
+  // RLS binding for this transaction (14_tenancy.sql). Derived exclusively from the verified
+  // Principal — a request body can never influence which tenant the statements below can see.
+  const tenant: TenantContextInput = {
+    tenantId: ctx.tenantId,
+    isSystemAdmin: principal ? isSystemAdmin(principal) : false,
+  };
 
-      if (isErr(result)) {
-        const problem = { ...result.error.toProblem(), instance: req.requestId };
+  try {
+    const settled = await transaction(
+      deps.pool,
+      async (tx) => {
+        const result = await fn(tx, ctx);
+
+        if (isErr(result)) {
+          const problem = { ...result.error.toProblem(), instance: req.requestId };
+          if (claim) {
+            await deps.idempotency.complete(
+              {
+                userId: ctx.subject,
+                key: claim.key,
+                state: "FAILED",
+                httpStatus: result.error.httpStatus,
+                body: problem,
+              },
+              tx,
+            );
+          }
+          return { status: result.error.httpStatus, body: problem, failed: true as const };
+        }
+
+        const outcome = result.value;
         if (claim) {
           await deps.idempotency.complete(
             {
               userId: ctx.subject,
               key: claim.key,
-              state: "FAILED",
-              httpStatus: result.error.httpStatus,
-              body: problem,
+              state: "COMPLETED",
+              httpStatus: outcome.status,
+              body: outcome.body,
+              ...(outcome.resourceId ? { resourceId: outcome.resourceId } : {}),
             },
             tx,
           );
         }
-        return { status: result.error.httpStatus, body: problem, failed: true as const };
-      }
-
-      const outcome = result.value;
-      if (claim) {
-        await deps.idempotency.complete(
-          {
-            userId: ctx.subject,
-            key: claim.key,
-            state: "COMPLETED",
-            httpStatus: outcome.status,
-            body: outcome.body,
-            ...(outcome.resourceId ? { resourceId: outcome.resourceId } : {}),
-          },
-          tx,
-        );
-      }
-      return { status: outcome.status, body: outcome.body as unknown, failed: false as const };
-    });
+        return { status: outcome.status, body: outcome.body as unknown, failed: false as const };
+      },
+      tenant,
+    );
 
     if (settled.failed) {
       res.status(settled.status).type("application/problem+json").json(settled.body);

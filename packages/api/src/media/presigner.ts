@@ -6,7 +6,7 @@
 // credentials are absent the presigner degrades to the canonical bucket endpoint (pre-SigV4
 // behaviour) so the contract + unit tests still resolve a URL.
 
-import { S3Client, PutObjectCommand, HeadBucketCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { logger } from "@fleet/shared";
 import type { Env } from "../config/env";
@@ -19,6 +19,8 @@ export interface PresignedUpload {
 
 export interface MediaPresigner {
   presignPut(bucket: string, key: string, contentType: string, expiresInSeconds: number): PresignedUpload | Promise<PresignedUpload>;
+  /** Presigned GET so the client can fetch a stored object without exposing S3 credentials (F7). */
+  presignGet(bucket: string, key: string, expiresInSeconds: number): { url: string; expiresInSeconds: number } | Promise<{ url: string; expiresInSeconds: number }>;
   /** Liveness probe for the configured S3 endpoint (09 §2 readiness). False when creds are absent. */
   ping(): Promise<boolean>;
   /** Hard-deletes a media object (SigV4). No-op when creds are absent; throws on S3 failure. */
@@ -60,6 +62,24 @@ export class EnvMediaPresigner implements MediaPresigner {
       ? endpoint.replace(/\/$/, "")
       : `https://${bucket}.s3.${this.env.AWS_REGION}.amazonaws.com`;
     return { url: `${base}/${key}`, method: "PUT", expiresInSeconds };
+  }
+
+  async presignGet(
+    bucket: string,
+    key: string,
+    expiresInSeconds: number,
+  ): Promise<{ url: string; expiresInSeconds: number }> {
+    if (this.enabled && this.client) {
+      const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+      const url = await getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
+      return { url, expiresInSeconds };
+    }
+    // Degrade to the canonical endpoint URL when credentials are absent (dev / secret-store gaps).
+    const endpoint = this.env.S3_ENDPOINT;
+    const base = endpoint
+      ? endpoint.replace(/\/$/, "")
+      : `https://${bucket}.s3.${this.env.AWS_REGION}.amazonaws.com`;
+    return { url: `${base}/${key}`, expiresInSeconds };
   }
 
   async ping(): Promise<boolean> {

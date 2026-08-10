@@ -25,6 +25,13 @@ export const ConsentSchema = z.object({
   accepted: z.boolean(),
 });
 
+/**
+ * `POST /auth/devices/pin`. The PIN is a device-local secret that never transits the wire (B12);
+ * the server only flips the `pin_set` flag. The body is therefore intentionally empty — this
+ * schema exists so the route validates the request shape and the contract test stays honest.
+ */
+export const SetPinSchema = z.object({});
+
 export const MediaUploadRequestSchema = z.object({
   owner_kind: z.enum([
     "WORK_LOG",

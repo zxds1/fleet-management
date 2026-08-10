@@ -37,6 +37,9 @@ function device(id: string, provider = "fcm", lastSeen: string | null = null): D
     id, user_id: "u1", device_id_hash: "h", device_label: null, device_model: null, os_version: null,
     app_version: null, push_token: null, push_provider: provider, push_token_updated_at: null,
     biometric_enrolled: false,
+    // PIN + offline-lock columns (13_device_pin_offline.sql): a freshly registered device has none.
+    pin_set_at: null, refresh_token_hash: null, refresh_token_expires_at: null,
+    offline_window_expires_at: null, offline_pin_failures: 0, offline_locked_until: null,
     last_seen_online_at: lastSeen, revoked_at: null, revoked_by: null, revoked_reason: null,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };

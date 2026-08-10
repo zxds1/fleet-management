@@ -40,7 +40,12 @@ export interface AuditInput {
     | "CONFIG_CHANGE"
     | "DEVICE_REVOKE"
     | "RECOVERY_MODE_ENABLE"
-    | "RECOVERY_MODE_DISABLE";
+    | "RECOVERY_MODE_DISABLE"
+    | "TENANT_CREATE"
+    | "MEMBERSHIP_GRANT"
+    | "MEMBERSHIP_REVOKE"
+    | "INVITATION_CREATE"
+    | "SCOPE_ASSIGN";
   entity_table: string;
   entity_schema?: string;
   entity_id?: string;
@@ -80,8 +85,22 @@ export class TransactionError extends AppError {
   }
 }
 
-// The real implementation lives in @fleet/db (opens BEGIN, runs fn, flushes
-// audit + outbox, COMMIT; rolls back on throw). Declared here as the contract.
-export async function transaction<T>(pool: PoolLike, fn: (tx: Tx) => Promise<T>): Promise<T> {
+/**
+ * Tenant binding for a transaction (14_tenancy.sql). When present, the runner issues
+ * `SET LOCAL app.current_tenant_id` / `app.current_role` right after BEGIN so every statement is
+ * covered by the `tenant_isolation` RLS policy.
+ */
+export interface TenantContextInput {
+  tenantId: string;
+  isSystemAdmin?: boolean;
+}
+
+// The real implementation lives in @fleet/db (opens BEGIN, applies the tenant GUCs, runs fn,
+// flushes audit + outbox, COMMIT; rolls back on throw). Declared here as the contract.
+export async function transaction<T>(
+  pool: PoolLike,
+  fn: (tx: Tx) => Promise<T>,
+  tenant?: TenantContextInput,
+): Promise<T> {
   throw new TransactionError("transaction() not bound; import the implementation from @fleet/db");
 }

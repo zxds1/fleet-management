@@ -21,18 +21,14 @@ export * from "./config";
 export * from "./time";
 export * from "./types/db";
 export * from "./types/principal";
+export * from "./tenancy";
 export * from "./schemas/auth";
+export * from "./schemas/tenancy";
 export * from "./schemas/shifts";
 export * from "./schemas/fuel";
 export * from "./schemas/accidents";
 export * from "./schemas/inspections";
 export * from "./schemas/trailer";
 export * from "./schemas/media";
+export { RealtimeChannels, RealtimeEvents, EVENT_FOR_CHANNEL, type RealtimeChannel } from "./realtime";
 export * from "./schemas/vehicleIssue";
-export {
-  RealtimeChannels,
-  type RealtimeChannel,
-  RealtimeEvents,
-  type RealtimeEvent,
-  EVENT_FOR_CHANNEL,
-} from "./realtime";

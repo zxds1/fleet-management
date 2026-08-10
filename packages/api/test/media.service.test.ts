@@ -38,6 +38,7 @@ function makeService(overrides: { retentionDays?: number } = {}) {
   } as unknown as ConfigClient;
 
   const presigner: MediaPresigner = {
+      presignGet: () => ({ url: "x", expiresInSeconds: 60 }),
     presignPut: (bucket, key) => ({ url: `https://${bucket}.s3.af-south-1.amazonaws.com/${key}`, method: "PUT", expiresInSeconds: 60 }),
     ping: async () => true,
     deleteObject: async () => undefined,

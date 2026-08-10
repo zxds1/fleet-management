@@ -53,6 +53,7 @@ describe("health probes (09 §2)", () => {
   it("readiness checks PG and optional S3", async () => {
     const p = fakePool(() => client([{ value: 1 }]));
     const presigner: MediaPresigner = {
+      presignGet: () => ({ url: "x", expiresInSeconds: 60 }),
       presignPut: async () => ({ url: "x", method: "PUT", expiresInSeconds: 1 }),
       ping: async () => true,
       deleteObject: async () => undefined,

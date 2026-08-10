@@ -26,6 +26,9 @@ function device(id: string, provider = "fcm"): DriverDeviceRow {
     id, user_id: "u", device_id_hash: "h", device_label: null, device_model: null, os_version: null,
     app_version: null, push_token: null, push_provider: provider, push_token_updated_at: null,
     biometric_enrolled: false,
+    // PIN + offline-lock columns (13_device_pin_offline.sql): a freshly registered device has none.
+    pin_set_at: null, refresh_token_hash: null, refresh_token_expires_at: null,
+    offline_window_expires_at: null, offline_pin_failures: 0, offline_locked_until: null,
     last_seen_online_at: null, revoked_at: null, revoked_by: null, revoked_reason: null,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -46,9 +49,9 @@ function cursorAwareRepo(rows: DriverRosterRow[]): AdminRepository {
 describe("AdminService", () => {
   it("returns a cursor page of raw roster rows (limit+1 fetch → has_more)", async () => {
     const rows: DriverRosterRow[] = [
-      { user: user("u1", "amy@fleet.co.ke"), devices: [device("d1", "apns"), device("d2", "fcm")] },
-      { user: user("u2", "bob@fleet.co.ke", false), devices: [] },
-      { user: user("u3", "cara@fleet.co.ke"), devices: [] },
+      { user: user("u1", "amy@fleet.co.ke"), driverStatus: "ACTIVE", devices: [device("d1", "apns"), device("d2", "fcm")] },
+      { user: user("u2", "bob@fleet.co.ke", false), driverStatus: "SUSPENDED", devices: [] },
+      { user: user("u3", "cara@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
     ];
     const adminRepo: AdminRepository = { listDrivers: async () => rows } as unknown as AdminRepository;
     const svc = new AdminService(adminRepo, {} as DeviceService, {} as AuthService);
@@ -69,8 +72,8 @@ describe("AdminService", () => {
 
   it("decodes an opaque cursor back to (email,id) and advances the page", async () => {
     const all: DriverRosterRow[] = [
-      { user: user("u1", "amy@fleet.co.ke"), devices: [] },
-      { user: user("u2", "bob@fleet.co.ke"), devices: [] },
+      { user: user("u1", "amy@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
+      { user: user("u2", "bob@fleet.co.ke"), driverStatus: "ACTIVE", devices: [] },
     ];
     const svc = new AdminService(cursorAwareRepo(all), {} as DeviceService, {} as AuthService);
     const first = await svc.listDrivers({ limit: 1 });

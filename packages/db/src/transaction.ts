@@ -9,6 +9,7 @@
 import type { PoolLike, TransactionError, Tx } from "@fleet/shared";
 import { TransactionError as SharedTransactionError } from "@fleet/shared";
 import { PgTx } from "./tx";
+import { applyTenantContext, type TenantContext } from "./tenancy";
 
 const INSERT_AUDIT = `
   INSERT INTO audit.audit_logs
@@ -26,10 +27,23 @@ const INSERT_OUTBOX = `
     (event_type, aggregate_type, aggregate_id, payload, priority, occurred_at, available_at)
   VALUES ($1, $2, $3, $4::jsonb, $5, now(), COALESCE($6, now()))`;
 
-export async function transaction<T>(pool: PoolLike, fn: (tx: Tx) => Promise<T>): Promise<T> {
+/**
+ * Runs `fn` in one transaction (D8).
+ *
+ * When `tenant` is supplied the tenant GUCs are applied with SET LOCAL immediately after BEGIN, so
+ * every statement inside — including the audit and outbox flush — runs under the
+ * `tenant_isolation` RLS policy (14_tenancy.sql). The GUCs die with the transaction, so a pooled
+ * connection can never carry one tenant's visibility into the next request.
+ */
+export async function transaction<T>(
+  pool: PoolLike,
+  fn: (tx: Tx) => Promise<T>,
+  tenant?: TenantContext,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    if (tenant) await applyTenantContext(client, tenant);
     const tx = new PgTx(client);
     const result = await fn(tx);
 

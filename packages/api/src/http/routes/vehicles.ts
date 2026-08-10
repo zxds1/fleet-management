@@ -1,25 +1,26 @@
 // packages/api/src/http/routes/vehicles.ts
 // Vehicle master data (Pillar 4). Read list/detail + create + update. Mutations run through
-// executeWrite (audit + idempotency); reads use a pooled client. Reuses the shared VehicleRow
-// read model (app.vehicles) and the VehicleService in services/asset.ts.
+// executeWrite (audit + idempotency); reads use a tenant-scoped pooled client. Reuses the shared
+// VehicleRow read model (app.vehicles) and the tenant-aware VehicleService in services/vehicles.ts.
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { type IdempotencyService, type PermissionCode, type PoolLike } from "@fleet/shared";
+import { type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
-import { withClient } from "../../db/withClient";
-import { CursorQuerySchema } from "../pagination";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
+import { CursorQuerySchema, decodeCursor, type Cursor } from "../pagination";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
 const ip = (req: Request) => req.ip ?? undefined;
 const ua = (req: Request) => req.header("user-agent") ?? undefined;
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 
 const VehicleCreateSchema = z.object({
   license_plate: z.string().min(1).max(20),
@@ -41,6 +42,11 @@ const VehicleUpdateSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+const AssignVehicleSchema = z.object({
+  driver_ids: z.array(z.string().uuid()).max(500).optional(),
+  vehicle_ids: z.array(z.string().uuid()).max(500).optional(),
+});
+
 export interface VehicleRouterDeps {
   pool: PoolLike;
   idempotency: IdempotencyService;
@@ -59,18 +65,20 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
     "/vehicles",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
     requirePermission(asPerm("asset:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
-        const result = await svc.vehicle.list({ limit: query.limit, cursor: query.cursor ?? null });
+        const cursor: Cursor | null = query.cursor ? decodeCursor(query.cursor) : null;
+        const result = await svc.vehicle.list({ tenantId: principal.tenantId, limit: query.limit, cursor });
         if (!result.ok) {
           res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Single vehicle ───────────────────────────────────────────────────────────────────
@@ -78,18 +86,19 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
     "/vehicles/:id",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
     requirePermission(asPerm("asset:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
-        const result = await svc.vehicle.getOne(req.params.id!);
+        const result = await svc.vehicle.get(principal.tenantId, req.params.id!);
         if (!result.ok) {
           const status = result.error.httpStatus ?? 422;
           res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Create ──────────────────────────────────────────────────────────────────────────
@@ -100,10 +109,19 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as { userId: string; email?: string | null };
+        const principal = ctx.principal as { userId: string; tenantId: string };
         const input = parseBody(VehicleCreateSchema, req);
         const svc = makeServices(tx.client, infra);
-        const result = await svc.vehicle.create(input, principal.userId);
+        const result = await svc.vehicle.create({
+          tenantId: principal.tenantId,
+          licensePlate: input.license_plate,
+          vehicleClass: input.vehicle_class,
+          make: input.make,
+          model: input.model,
+          year: input.year,
+          ownershipType: input.ownership_type,
+          fuelTankCapacityLitres: input.fuel_tank_capacity_litres,
+        });
         if (!result.ok) return result.error as never;
         tx.audit({
           action: "CREATE",
@@ -130,10 +148,16 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as { userId: string };
+        const principal = ctx.principal as { userId: string; tenantId: string };
         const input = parseBody(VehicleUpdateSchema, req);
         const svc = makeServices(tx.client, infra);
-        const result = await svc.vehicle.update(req.params.id!, input, principal.userId);
+        const result = await svc.vehicle.update({
+          tenantId: principal.tenantId,
+          vehicleId: req.params.id!,
+          status: input.status,
+          isOperational: input.is_operational,
+          notes: input.notes,
+        });
         if (!result.ok) return result.error as never;
         tx.audit({
           action: "UPDATE",
@@ -151,6 +175,33 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
         return { status: 200, body: result.value } as never;
       }),
     ),
+  );
+
+  // ── Assign drivers / linked vehicles (REPLACE semantics) ──────────────────────────────
+  router.post(
+    "/vehicles/:id/assign",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("asset:update")),
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
+        const input = parseBody(AssignVehicleSchema, req);
+        const svc = makeServices(client, infra);
+        const result = await svc.vehicle.assign({
+          tenantId: principal.tenantId,
+          vehicleId: req.params.id!,
+          driverIds: input.driver_ids ?? [],
+          vehicleIds: input.vehicle_ids ?? [],
+          actorUserId: principal.userId,
+        });
+        if (!result.ok) {
+          const status = result.error.httpStatus ?? 422;
+          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      });
+    }),
   );
 
   return router;

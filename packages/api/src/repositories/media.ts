@@ -11,3 +11,6 @@ export class MediaObjectRepository extends BaseRepository<MediaObjectRow> {
     super(client, "app.media_objects");
   }
 }
+
+
+

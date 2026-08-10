@@ -5,6 +5,7 @@
 
 export * from "./pool";
 export * from "./tx";
+export * from "./tenancy";
 export * from "./transaction";
 export * from "./repository";
 export * from "./migrations";

@@ -10,12 +10,13 @@ import { problemHandler } from "../http/problem";
 import { asyncHandler } from "../http/problem";
 import { createAuthRouter } from "../http/routes/auth";
 import { createShiftRouter } from "../http/routes/shifts";
-import { createFuelRouter, createReconciliationRouter } from "../http/routes/fuel";
+import { createFuelRouter, createReconciliationRouter, createDriverFuelRouter } from "../http/routes/fuel";
 import { createAccidentRouter } from "../http/routes/accidents";
 import { createInspectionRouter } from "../http/routes/inspections";
 import { createTrailerRouter } from "../http/routes/trailer";
 import { createMediaRouter } from "../http/routes/media";
 import { createInsightsRouter } from "../http/routes/insights";
+import { createAnalyticsRouter } from "../http/routes/analytics";
 import { createAdminRouter } from "../http/routes/admin";
 import { createOnboardingRouter } from "../http/routes/onboarding";
 import { createVehicleRouter } from "../http/routes/vehicles";
@@ -26,6 +27,7 @@ import { createReportsRouter } from "../http/routes/reports";
 import { createSettingsRouter } from "../http/routes/settings";
 import { createNotificationRouter } from "../http/routes/notifications";
 import { createTelemetryRouter } from "../http/routes/telemetry";
+import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
 import type { Container } from "./container";
 import { safeJson } from "../security/bodyParser";
@@ -100,6 +102,23 @@ export function createApp(container: Container): Express {
     infra: container.infra,
   }));
 
+  // Photo-first driver fuel capture (A1.4). Separate from /fuel/refuel, which keeps the B3
+  // gauge-pair contract.
+  app.use(`${base}/driver/fuel`, createDriverFuelRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Tracker provisioning (A1.1): /admin/hardware/pair, /admin/hardware/pending.
+  app.use(`${base}/admin/hardware`, createHardwareRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
   app.use(`${base}/reconciliation`, createReconciliationRouter({
     pool: container.pool,
     idempotency: container.idempotency,
@@ -122,6 +141,16 @@ export function createApp(container: Container): Express {
   }));
 
   app.use(`${base}/trailer`, createTrailerRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Vehicle master data + assignment (Pillar 4): GET/POST /vehicles, GET/PATCH /vehicles/{id},
+  // POST /vehicles/{id}/assign. Tenant-scoped throughout; the list seeds the admin-management
+  // screen's vehicle picker.
+  app.use(`${base}/vehicles`, createVehicleRouter({
     pool: container.pool,
     idempotency: container.idempotency,
     releaseClaim: container.releaseClaim,
@@ -212,6 +241,18 @@ export function createApp(container: Container): Express {
     pool: container.pool,
     idempotency: container.idempotency,
     releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Scope-aware hierarchical analytics. Mounted twice on purpose: /analytics is the canonical
+  // surface, /reports is the path the mobile ReportsScreen already calls (GET /reports/analytics).
+  // Both resolve the caller's scope, so an ADMIN sees the company and a manager only their slice.
+  app.use(`${base}/analytics`, createAnalyticsRouter({
+    pool: container.pool,
+    infra: container.infra,
+  }));
+  app.use(`${base}/reports`, createAnalyticsRouter({
+    pool: container.pool,
     infra: container.infra,
   }));
 

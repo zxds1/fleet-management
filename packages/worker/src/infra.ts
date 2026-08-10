@@ -23,6 +23,11 @@ export async function bootInfra(e: Env = env()): Promise<WorkerInfra> {
     connectionString: e.DATABASE_URL,
     max: e.DATABASE_POOL_MAX,
     statementTimeoutMs: e.DATABASE_STATEMENT_TIMEOUT_MS,
+    // Background jobs (OCR, stale-shift, outbox relay, escalations) scan the whole dataset and
+    // never set app.current_tenant_id; under FORCE RLS that would make them no-op. The pool starts
+    // each connection as SYSTEM_ADMIN so RLS is bypassed for the worker (it owns no tenant), matching
+    // the `OR app.fn_is_system_admin()` escape clause on the tenant_isolation policy.
+    options: "-c app.current_role=SYSTEM_ADMIN",
   });
   const redis = createRedis(e);
   const config = new PgConfigClient(pool, redis.cache);

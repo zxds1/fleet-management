@@ -10,6 +10,7 @@ import { createRedis, type RedisBundle } from "../config/redis";
 import { TokenService } from "../security/tokens";
 import { SecretBox } from "../security/crypto";
 import { EnvMediaPresigner } from "../media/presigner";
+import { ConsoleEmailService } from "../services/email";
 import type { Infra } from "./compose";
 
 export interface Container {
@@ -38,7 +39,7 @@ export function buildContainer(environment: Env = loadEnv()): Container {
   const secretBox = new SecretBox(environment.MFA_ENCRYPTION_KEY);
   const presigner = new EnvMediaPresigner(environment);
 
-  const infra: Infra = { env: environment, tokens, secretBox, config, store: redis.sessions, presigner };
+  const infra: Infra = { env: environment, tokens, secretBox, config, store: redis.sessions, presigner, email: new ConsoleEmailService() };
 
   const releaseClaim = async (subject: string, key: string): Promise<void> => {
     const client = await pool.connect();

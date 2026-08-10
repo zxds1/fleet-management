@@ -227,3 +227,6 @@ export class QuarantineRepository extends BaseRepository<QuarantineEventRow> {
     return res.rows.length > 0;
   }
 }
+
+
+

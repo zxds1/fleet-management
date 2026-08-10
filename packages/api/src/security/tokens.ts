@@ -5,16 +5,20 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import jwt, { type JwtPayload } from "jsonwebtoken";
-import { Unauthenticated, type Principal, type PermissionCode, type RoleCode } from "@fleet/shared";
+import { Unauthenticated, BOOTSTRAP_TENANT_ID, type Principal, type PermissionCode, type RoleCode } from "@fleet/shared";
 import type { Env } from "../config/env";
 
 export interface AccessTokenClaims extends JwtPayload {
   sub: string;
-  email: string | null;
+  email: string;
+  /** Owning tenant (14_tenancy.sql). Signed into the token so the tenant can never be spoofed
+   *  by a request field; falls back to the bootstrap tenant for tokens minted pre-tenancy. */
+  tid: string;
   roles: RoleCode[];
   permissions: PermissionCode[];
   sid: string;
   locale: "en" | "sw";
+  dev?: string; // device_id_hash (driver PIN path, B12)
 }
 
 export interface IssuedAccessToken {
@@ -31,19 +35,13 @@ export interface IssuedRefreshToken {
   expiresAt: Date;
 }
 
-/** Short-lived `mfa_bypass`-scoped token returned by `POST /auth/mfa/recover` (A3.7). */
-export interface IssuedBypassToken {
-  token: string;
-  expiresAt: Date;
-  expiresInSeconds: number;
-}
-
 export class TokenService {
   constructor(private readonly env: Env) {}
 
   issueAccessToken(input: {
     userId: string;
-    email: string | null;
+    email: string;
+    tenantId: string;
     roles: RoleCode[];
     permissions: PermissionCode[];
     sessionId: string;
@@ -54,6 +52,7 @@ export class TokenService {
     const payload: Omit<AccessTokenClaims, "iat" | "exp" | "iss"> = {
       sub: input.userId,
       email: input.email,
+      tid: input.tenantId,
       roles: input.roles,
       permissions: input.permissions,
       sid: input.sessionId,
@@ -135,51 +134,21 @@ export class TokenService {
       throw new Unauthenticated("MFA challenge expired or invalid");
     }
   }
-
-  /**
-   * Short-lived bypass token minted after a valid MFA recovery code (A3.7). Scoped `mfa_bypass`
-   * so `verifyAccessToken` can never mistake it for an access token, and it reuses the
-   * MFA-challenge TTL so a lost authenticator grants only a brief window.
-   */
-  issueMfaBypass(input: { userId: string; email: string }): IssuedBypassToken {
-    const expiresInSeconds = this.env.MFA_CHALLENGE_TTL_SECONDS;
-    const token = jwt.sign(
-      { sub: input.userId, email: input.email, scope: "mfa_bypass" },
-      this.env.JWT_SECRET,
-      {
-        algorithm: "HS256",
-        expiresIn: expiresInSeconds,
-        issuer: this.env.JWT_ISSUER,
-        keyid: this.env.JWT_KID,
-      },
-    );
-    return { token, expiresInSeconds, expiresAt: new Date(Date.now() + expiresInSeconds * 1000) };
-  }
-
-  verifyMfaBypass(token: string): { userId: string; email: string } {
-    try {
-      const decoded = jwt.verify(token, this.env.JWT_SECRET, {
-        algorithms: ["HS256"],
-        issuer: this.env.JWT_ISSUER,
-      }) as JwtPayload & { sub: string; email: string; scope?: string };
-      if (decoded.scope !== "mfa_bypass") throw new Unauthenticated("Invalid MFA bypass token");
-      return { userId: decoded.sub, email: decoded.email };
-    } catch (e) {
-      if (e instanceof Unauthenticated) throw e;
-      throw new Unauthenticated("MFA bypass token expired or invalid");
-    }
-  }
 }
 
-/** Principal built from verified claims (02 §1). */
+/** Principal built from verified claims (02 §1, 14_tenancy.sql). */
 export function principalFromClaims(claims: AccessTokenClaims): Principal {
   return {
     userId: claims.sub,
-    email: claims.email ?? "",
+    // A token minted before tenancy shipped carries no `tid`; it belongs to the bootstrap tenant,
+    // which is exactly what its rows were back-filled to.
+    tenantId: claims.tid ?? BOOTSTRAP_TENANT_ID,
+    email: claims.email,
     roles: claims.roles ?? [],
     permissions: new Set<PermissionCode>(claims.permissions ?? []),
     sessionId: claims.sid,
     locale: claims.locale ?? "en",
+    ...(claims.dev ? { deviceIdHash: claims.dev } : {}),
   };
 }
 

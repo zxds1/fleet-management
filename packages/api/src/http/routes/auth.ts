@@ -20,7 +20,7 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
-import { ConsentSchema, LoginSchema, MfaEnrollSchema } from "@fleet/shared";
+import { AcceptInviteSchema, ConsentSchema, LoginSchema, MfaEnrollSchema, SetPinSchema, SignupSchema } from "@fleet/shared";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 import type { IssuedSession } from "../../services/session";
@@ -41,32 +41,6 @@ const DeviceRegisterSchema = z.object({
 });
 const DeviceRevokeSchema = z.object({ device_id_hash: z.string().min(16) });
 
-/** B12: the PIN itself never leaves the device; the server only flips the "a PIN exists" flag. */
-const SetPinSchema = z.object({ pin_set: z.literal(true).optional() }).passthrough();
-
-/**
- * `POST /auth/mfa/recover` — recovery-code bypass when the authenticator is lost (A3.7).
- * Identify by email (admin) or user_id; exactly one is required.
- */
-const MfaRecoverSchema = z
-  .object({
-    email: z.string().email().optional(),
-    user_id: z.string().uuid().optional(),
-    recovery_code: z.string().min(4).max(64),
-  })
-  .refine((v) => !!v.email || !!v.user_id, {
-    message: "Provide either email or user_id",
-    path: ["email"],
-  });
-
-/** `POST /auth/admin-signup` — self-service ADMIN creation (A3.7). */
-const AdminSignupSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(12).max(200),
-  full_name: z.string().min(1).max(200),
-  phone: z.string().regex(/^\+?[1-9]\d{6,14}$/).optional(),
-});
-
 /** Casts a config-sourced permission code string to the generated union without widening errors. */
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
 
@@ -85,6 +59,14 @@ function sessionBody(s: IssuedSession) {
     refresh_token: s.refreshToken,
     refresh_token_expires_at: s.refreshTokenExpiresAt.toISOString(),
     session_id: s.sessionId,
+    // Mirrored identity so the mobile client can build its `Principal` from the trusted response
+    // body (it does not decode the access token). Drivers carry `phone`; admins carry `email`.
+    user_id: s.userId,
+    email: s.email,
+    phone: s.phone,
+    roles: s.roles,
+    permissions: s.permissions,
+    locale: s.locale,
   };
 }
 
@@ -106,11 +88,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const input = parseBody(LoginSchema, req);
         const svc = makeServices(tx.client, infra);
         const login = await svc.auth.login({
-          // LoginSchema guarantees email-or-phone: admins sign in by email, drivers by phone.
           email: input.email,
           phone: input.phone,
           password: input.password,
-          mfaCode: input.mfa_code,
           deviceIdHash: input.device_id_hash,
           ipAddress: ip(req),
           userAgent: ua(req),
@@ -150,52 +130,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           endpoint: req.path,
           http_method: req.method,
         });
-        // The client builds its Principal straight off this body, so the resolved identity
-        // (user_id + roles + the permission union + locale) ships with the tokens (N4 / C6.2).
-        return ok({
-          status: 200,
-          body: {
-            ...sessionBody(s),
-            mfa_required: false,
-            user_id: s.userId,
-            email: value.identity.email,
-            phone: input.phone ?? null,
-            roles: value.identity.roles,
-            permissions: value.identity.permissions,
-            locale: value.identity.locale,
-          },
-          resourceId: s.sessionId,
-        });
-      }),
-    ),
-  );
-
-  // ── Admin self-signup (public, idempotent) ──────────────────────────────────────────────
-  const AdminSignupSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(1),
-    full_name: z.string().min(1).max(200),
-    phone: z.string().max(40).optional(),
-  });
-  router.post(
-    "/admin-signup",
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx) => {
-        const input = parseBody(AdminSignupSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.auth.signupAdmin({
-          email: input.email,
-          password: input.password,
-          fullName: input.full_name,
-          phone: input.phone ?? null,
-        });
-        if (isErr(result)) return result.error as never;
-        const value = result.value;
-        return ok({
-          status: 201,
-          body: { user_id: value.userId, email: value.email, role: value.role },
-        });
+        return ok({ status: 200, body: sessionBody(s), resourceId: s.sessionId });
       }),
     ),
   );
@@ -223,122 +158,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           http_method: req.method,
           reason: "mfa",
         });
-        const identity = await svc.auth.resolve(s.userId);
-        return ok({
-          status: 200,
-          body: {
-            ...sessionBody(s),
-            mfa_required: false,
-            user_id: s.userId,
-            email: identity.email,
-            roles: identity.roles,
-            permissions: identity.permissions,
-            locale: identity.locale,
-          },
-          resourceId: s.sessionId,
-        });
-      }),
-    ),
-  );
-
-  // ── MFA recovery-code bypass (unauthenticated: the authenticator is what's lost) ────────
-  router.post(
-    "/mfa/recover",
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx) => {
-        const input = parseBody(MfaRecoverSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.mfa.recover(
-          {
-            ...(input.email ? { email: input.email } : {}),
-            ...(input.user_id ? { userId: input.user_id } : {}),
-          },
-          input.recovery_code,
-        );
-
-        if (isErr(result)) {
-          tx.audit({
-            action: "LOGIN_FAILED",
-            entity_table: "app.mfa_recovery_codes",
-            request_id: req.requestId,
-            ip_address: ip(req),
-            user_agent: ua(req),
-            endpoint: req.path,
-            http_method: req.method,
-            reason: "invalid_recovery_code",
-          });
-          return result.error as never;
-        }
-
-        const value = result.value;
-        tx.audit({
-          action: "CONFIG_CHANGE",
-          entity_table: "app.mfa_recovery_codes",
-          entity_id: value.userId,
-          actor_user_id: value.userId,
-          request_id: req.requestId,
-          ip_address: ip(req),
-          user_agent: ua(req),
-          endpoint: req.path,
-          http_method: req.method,
-          reason: "mfa_recovery_used",
-        });
-        return ok({
-          status: 200,
-          body: {
-            bypass_token: value.bypassToken,
-            expires_at: value.expiresAt.toISOString(),
-          },
-        });
-      }),
-    ),
-  );
-
-  // ── Self-service ADMIN signup (A3.7) ───────────────────────────────────────────────────
-  router.post(
-    "/admin-signup",
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx) => {
-        const input = parseBody(AdminSignupSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.auth.adminSignup({
-          email: input.email,
-          password: input.password,
-          fullName: input.full_name,
-          phone: input.phone ?? null,
-          ipAddress: ip(req),
-          userAgent: ua(req),
-        });
-        if (isErr(result)) return result.error as never;
-
-        const { session: s, identity } = result.value;
-        tx.audit({
-          action: "CREATE",
-          entity_table: "app.users",
-          entity_id: s.userId,
-          actor_user_id: s.userId,
-          request_id: req.requestId,
-          ip_address: ip(req),
-          user_agent: ua(req),
-          endpoint: req.path,
-          http_method: req.method,
-          reason: "admin_signup",
-        });
-        return ok({
-          status: 201,
-          body: {
-            ...sessionBody(s),
-            mfa_required: false,
-            user_id: s.userId,
-            email: identity.email,
-            roles: identity.roles,
-            permissions: identity.permissions,
-            locale: identity.locale,
-          },
-          resourceId: s.userId,
-        });
+        return ok({ status: 200, body: sessionBody(s), resourceId: s.sessionId });
       }),
     ),
   );
@@ -352,22 +172,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const svc = makeServices(tx.client, infra);
         const result = await svc.auth.refresh(input.refresh_token);
         if (isErr(result)) return result.error as never;
-        // Mirrors the /login body: the client rebuilds its Principal from a refresh too, so the
-        // rotated tokens ship with the freshly-resolved identity (roles may have changed).
-        const identity = await svc.auth.resolve(result.value.userId);
-        return ok({
-          status: 200,
-          body: {
-            ...sessionBody(result.value),
-            mfa_required: false,
-            user_id: result.value.userId,
-            email: identity.email,
-            roles: identity.roles,
-            permissions: identity.permissions,
-            locale: identity.locale,
-          },
-          resourceId: result.value.sessionId,
-        });
+        return ok({ status: 200, body: sessionBody(result.value), resourceId: result.value.sessionId });
       }),
     ),
   );
@@ -426,7 +231,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/mfa/enroll",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("manage_own_mfa")),
+    requirePermission(asPerm("MANAGE_OWN_MFA")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -446,7 +251,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/mfa/confirm",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("manage_own_mfa")),
+    requirePermission(asPerm("MANAGE_OWN_MFA")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -496,9 +301,49 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   );
 
   router.post(
+    "/devices/pin",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        parseBody(SetPinSchema, req); // PIN never leaves the device; the server only flips the flag (B12)
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.device.setPin(principal.userId, principal.deviceIdHash ?? "");
+        if (isErr(result)) return result.error as never;
+        return ok({ status: 200, body: { pin_set: true } });
+      }),
+    ),
+  );
+
+  router.post(
+    "/devices/refresh",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.device.bindRefresh({
+          userId: principal.userId,
+          deviceIdHash: principal.deviceIdHash ?? "",
+        });
+        if (isErr(result)) return result.error as never;
+        return ok({
+          status: 200,
+          body: {
+            refresh_token: result.value.refreshToken,
+            expires_at: result.value.expiresAt.toISOString(),
+            offline_until: result.value.offlineUntil.toISOString(),
+          },
+        });
+      }),
+    ),
+  );
+
+  router.post(
     "/devices/revoke",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("revoke_device")),
+    requirePermission(asPerm("REVOKE_DEVICE")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -555,6 +400,109 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const result = await svc.consent.revoke(principal.userId, input.consent_type);
         if (isErr(result)) return result.error as never;
         return ok({ status: 200, body: { accepted: false, revoked: result.value.revoked } });
+      }),
+    ),
+  );
+
+  // ── Self-service company signup: create the tenant + its first ADMIN (unauthenticated) ──────
+  //
+  // The account created here is a TENANT-SCOPED ADMIN — the company super-admin. It sees the whole
+  // company it just created and can invite further ADMIN / FLEET_MANAGER users, but it is NOT a
+  // cross-tenant SYSTEM_ADMIN: signup can never reach another company's data.
+  //
+  // Idempotent like /login (C5.1): a retried Idempotency-Key replays the original session body
+  // instead of creating a second company.
+  router.post(
+    "/signup",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx) => {
+        const input = parseBody(SignupSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.tenancy.signup(
+          {
+            companyName: input.company_name,
+            email: input.email,
+            password: input.password,
+            fullName: input.full_name,
+          },
+          tx.client,
+        );
+        if (isErr(result)) return result.error as never;
+
+        const { userId, tenantId } = result.value;
+        // The session is issued after the membership + role rows exist, so `resolveIdentity` signs
+        // the new tenant into the JWT `tid` claim and the very first request is already scoped.
+        const session = await svc.session.issue({
+          userId,
+          ipAddress: ip(req),
+          userAgent: ua(req),
+        });
+        if (isErr(session)) return session.error as never;
+
+        tx.audit({
+          action: "TENANT_CREATE",
+          entity_table: "app.tenants",
+          entity_id: tenantId,
+          actor_user_id: userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "self_signup",
+        });
+        tx.audit({
+          action: "MEMBERSHIP_GRANT",
+          entity_table: "app.user_roles",
+          entity_id: userId,
+          actor_user_id: userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "signup_admin",
+        });
+
+        return ok({
+          status: 201,
+          body: { ...sessionBody(session.value), tenant_id: tenantId },
+          resourceId: tenantId,
+        });
+      }),
+    ),
+  );
+
+  // ── Accept an invitation: claim it, set password, become a member of the inviter's tenant ──
+  // Registered as the bare segment because this router is already mounted at `${base}/auth`.
+  router.post(
+    "/accept-invite",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      executeWrite(req, res, { pool, idempotency: idem, releaseClaim }, async (tx, ctx) => {
+        const input = parseBody(AcceptInviteSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.tenancy.acceptInvite(input);
+        if (!result.ok) return result.error as never;
+        // The inviter's tenant becomes the user's primary tenant immediately, so the issued session
+        // is scoped to it without a second round-trip.
+        const session = await svc.session.issue({ userId: result.value.userId });
+        if (isErr(session)) return session.error as never;
+        const identity = session.value;
+        tx.audit({
+          action: "MEMBERSHIP_GRANT",
+          entity_table: "app.users",
+          entity_id: result.value.userId,
+          actor_user_id: result.value.userId,
+          request_id: req.requestId,
+          endpoint: req.path,
+          http_method: req.method,
+        });
+        return {
+          status: 200,
+          body: sessionBody(identity),
+        } as never;
       }),
     ),
   );

@@ -20,13 +20,6 @@ export interface ConfirmResult {
   recoveryCodes: string[];
 }
 
-export interface RecoverResult {
-  userId: string;
-  /** Short-lived `mfa_bypass`-scoped JWT; not an access token. */
-  bypassToken: string;
-  expiresAt: Date;
-}
-
 export class MfaService {
   constructor(
     private readonly users: UserRepository,
@@ -41,7 +34,7 @@ export class MfaService {
     if (!user) return err(new Unauthenticated());
     const secret = totp.generateSecret();
     await this.users.stageMfaSecret(userId, this.secretBox.encrypt(secret));
-    return ok({ secret, otpauthUri: totp.provisioningUri(user.email ?? userId, secret) });
+    return ok({ secret, otpauthUri: totp.provisioningUri(user.email ?? "", secret) });
   }
 
   async confirm(userId: string, code: string): Promise<Result<ConfirmResult>> {
@@ -75,56 +68,5 @@ export class MfaService {
       return err(session.error);
     }
     return err(new ValidationError("Invalid MFA code or recovery code"));
-  }
-
-  /**
-   * Validates a second factor supplied on the single-call `/auth/login` second leg. Accepts, in
-   * order: a TOTP code, an unused recovery code, or a `mfa_bypass` token minted by `recover()`
-   * for this same user. Returns false rather than throwing so the caller emits one generic
-   * `Invalid MFA code` and the endpoint cannot be used to probe which factor was wrong.
-   */
-  async assertSecondFactor(userId: string, code: string): Promise<boolean> {
-    const user = await this.users.getById(userId);
-    if (!user || !user.mfa_enabled || !user.mfa_secret_encrypted) return false;
-
-    const secret = this.secretBox.decrypt(user.mfa_secret_encrypted);
-    if (totp.verify(secret, code)) return true;
-    if (await this.recovery.consume(userId, sha256Hex(code.trim().toUpperCase()))) return true;
-    try {
-      return this.tokens.verifyMfaBypass(code).userId === userId;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Recovery-code bypass (A3.7): burns one stored recovery code and returns a short-lived
-   * `mfa_bypass` token instead of a full session, so the caller must still complete the normal
-   * sign-in leg. Codes live in app.mfa_recovery_codes as SHA-256 hashes (see generateRecoveryCodes)
-   * and `consume` is a single conditional UPDATE, so a code stays single-use under concurrency.
-   *
-   * Unknown-user and bad-code paths return the identical error so the endpoint cannot be used to
-   * enumerate accounts.
-   */
-  async recover(
-    identifier: { email?: string; userId?: string },
-    recoveryCode: string,
-  ): Promise<Result<RecoverResult>> {
-    const invalid = () => err(new ValidationError("Invalid recovery code"));
-
-    const user = identifier.userId
-      ? await this.users.getById(identifier.userId)
-      : identifier.email
-        ? await this.users.findByEmail(identifier.email)
-        : null;
-
-    if (!user || !user.is_active) return invalid();
-    if (!user.mfa_enabled) return err(new ValidationError("MFA is not enabled for this account"));
-
-    const normalised = recoveryCode.trim().toUpperCase();
-    if (!(await this.recovery.consume(user.id, sha256Hex(normalised)))) return invalid();
-
-    const bypass = this.tokens.issueMfaBypass({ userId: user.id, email: user.email ?? "" });
-    return ok({ userId: user.id, bypassToken: bypass.token, expiresAt: bypass.expiresAt });
   }
 }

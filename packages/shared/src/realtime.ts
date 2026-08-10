@@ -3,11 +3,6 @@
 // @fleet/ws gateway (07-websocket-gateway.md). Topic names are the single source of truth; payloads
 // are JSON-serialisable. Keeping this in @fleet/shared (no new runtime deps) lets both sides import
 // identical constants instead of duplicating string literals.
-//
-// Two namespaces live here and must not be confused:
-//   • `RealtimeChannels` — `ws:`-prefixed Redis pub/sub topics (producer → gateway).
-//   • `RealtimeEvents`   — unprefixed Socket.IO event names (gateway → connected client).
-// `EVENT_FOR_CHANNEL` translates between them.
 
 export const RealtimeChannels = {
   /** Recompute + diff the vehicle display-state view (triggered by tracker_health / shift / HOS change). */
@@ -16,16 +11,21 @@ export const RealtimeChannels = {
   notifications: "ws:notifications",
   /** Push a live accident event to the on-call roster (payload: accident event). */
   accidentLive: "ws:accident:live",
+  /** Driver-scoped shift events (clock-in/out accepted, HOS changes, close-out required). */
+  driverShift: "ws:driver:shift",
+  /** Driver-scoped vehicle display-state for the driver's own assignment. */
+  driverVehicle: "ws:driver:vehicle",
+  /** Driver-scoped accident events (acknowledgement, escalation tier changes on their own report). */
+  driverAccident: "ws:driver:accident",
 } as const;
 
 export type RealtimeChannel = (typeof RealtimeChannels)[keyof typeof RealtimeChannels];
 
 /**
- * Client-facing Socket.IO event names emitted by the @fleet/ws gateway (07 §3). These are a
- * DIFFERENT namespace from `RealtimeChannels`: the latter are Redis pub/sub topics between the
- * producers (@fleet/api, @fleet/worker) and the gateway, while these are what a connected client
- * listens for. The `ws:` prefix exists to namespace the Redis keyspace and must not leak onto the
- * wire, so the two maps are keyed identically and translated by the gateway.
+ * Wire event names the gateway actually emits over the socket. These are the *unprefixed*
+ * counterparts of `RealtimeChannels` (no `ws:` topic prefix) — the client subscribes to and
+ * listens on these, while callers address handlers by the `RealtimeChannel` constant. `EVENT_FOR_CHANNEL`
+ * bridges the two so a channel rename touches exactly one place.
  */
 export const RealtimeEvents = {
   vehicleStates: "map:vehicle-states",
@@ -36,17 +36,15 @@ export const RealtimeEvents = {
   driverAccident: "driver:accident",
 } as const;
 
-export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents];
-
-/** Maps a Redis bus topic to the client-facing event name the gateway emits. */
-export const EVENT_FOR_CHANNEL: Record<RealtimeChannel, RealtimeEvent> = {
+/** `RealtimeChannel` → wire event name. Keys mirror `RealtimeChannels` 1:1. */
+export const EVENT_FOR_CHANNEL = {
   [RealtimeChannels.vehicleStates]: RealtimeEvents.vehicleStates,
   [RealtimeChannels.notifications]: RealtimeEvents.notifications,
   [RealtimeChannels.accidentLive]: RealtimeEvents.accidentLive,
   [RealtimeChannels.driverShift]: RealtimeEvents.driverShift,
   [RealtimeChannels.driverVehicle]: RealtimeEvents.driverVehicle,
   [RealtimeChannels.driverAccident]: RealtimeEvents.driverAccident,
-};
+} as const satisfies Record<RealtimeChannel, string>;
 
 export interface EventPublisher {
   publish(channel: string, payload: unknown): Promise<void>;

@@ -12,7 +12,10 @@ import { hashToken } from "../security/tokens";
 import type { SessionRepository } from "../repositories/identity";
 
 export interface ResolvedIdentity {
-  email: string | null;
+  email: string;
+  phone: string | null;
+  /** Tenant membership resolved from app.user_tenants (14_tenancy.sql). Signed into the JWT. */
+  tenantId: string;
   roles: RoleCode[];
   permissions: PermissionCode[];
   locale: "en" | "sw";
@@ -23,10 +26,18 @@ export type IdentityResolver = (userId: string) => Promise<ResolvedIdentity>;
 export interface IssuedSession {
   sessionId: string;
   userId: string;
+  tenantId: string;
   accessToken: string;
   accessTokenExpiresAt: Date;
   refreshToken: string;
   refreshTokenExpiresAt: Date;
+  /** Identity mirrored into the JSON body so the mobile client can build its `Principal` without
+   * decoding the access token (C5.3: the client parses a trusted response, it does not trust JWTs). */
+  email: string | null;
+  phone: string | null;
+  roles: RoleCode[];
+  permissions: PermissionCode[];
+  locale: "en" | "sw";
 }
 
 export class SessionService {
@@ -59,20 +70,28 @@ export class SessionService {
 
     const access = this.tokens.issueAccessToken({
       userId: input.userId,
-      email: identity.email ?? "",
+      email: identity.email,
+      tenantId: identity.tenantId,
       roles: identity.roles,
       permissions: identity.permissions,
       sessionId: session.id,
       locale: identity.locale,
+      ...(input.deviceIdHash ? { deviceIdHash: input.deviceIdHash } : {}),
     });
 
     return ok({
       sessionId: session.id,
       userId: input.userId,
+      tenantId: identity.tenantId,
       accessToken: access.token,
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: refresh.token,
       refreshTokenExpiresAt: refresh.expiresAt,
+      email: identity.email,
+      phone: identity.phone,
+      roles: identity.roles,
+      permissions: identity.permissions,
+      locale: identity.locale,
     });
   }
 
@@ -94,6 +113,7 @@ export class SessionService {
     const access = this.tokens.issueAccessToken({
       userId: session.user_id,
       email: identity.email,
+      tenantId: identity.tenantId,
       roles: identity.roles,
       permissions: identity.permissions,
       sessionId: session.id,
@@ -103,10 +123,16 @@ export class SessionService {
     return ok({
       sessionId: session.id,
       userId: session.user_id,
+      tenantId: identity.tenantId,
       accessToken: access.token,
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: nextRefresh.token,
       refreshTokenExpiresAt: nextRefresh.expiresAt,
+      email: identity.email,
+      phone: identity.phone,
+      roles: identity.roles,
+      permissions: identity.permissions,
+      locale: identity.locale,
     });
   }
 

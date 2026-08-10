@@ -31,6 +31,7 @@ class TestConsumer extends IngestConsumer {
       shiftWindow: { start: new Date("2026-01-01T10:00:00Z"), end: new Date("2026-01-01T18:00:00Z") },
       recoveryModeActive: false,
       openAccident: false,
+      tenantId: "00000000-0000-0000-0000-000000000001",
     };
   }
   protected async shiftIdFor() {
@@ -57,7 +58,7 @@ describe("IngestConsumer.processPositions (04 §3)", () => {
   it("forces retention under an open accident even off-shift", async () => {
     class AccidentConsumer extends TestConsumer {
   protected async contextFor(): Promise<RetentionContextData> {
-        return { shiftWindow: null, recoveryModeActive: false, openAccident: true };
+        return { shiftWindow: null, recoveryModeActive: false, openAccident: true, tenantId: "00000000-0000-0000-0000-000000000001" };
       }
     }
     const c = new AccidentConsumer();

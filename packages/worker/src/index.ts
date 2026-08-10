@@ -18,7 +18,15 @@ import type { CsvParser, StatementLine } from "./jobs/reconciliation";
 
 const NoopVision: VisionAdapter = {
   async analyse() {
-    return { litres: null, totalCost: null, confidence: null };
+    return {
+      amount: null,
+      liters: null,
+      pricePerLiter: null,
+      receiptDate: null,
+      stationName: null,
+      confidence: null,
+      raw: null,
+    };
   },
 };
 

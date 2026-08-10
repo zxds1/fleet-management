@@ -33,13 +33,8 @@ tags:
   - name: Anomalies
   - name: Documents
   - name: Media
+  - name: Hardware
   - name: Vehicles
-  - name: Maintenance
-  - name: Training
-  - name: Reports
-  - name: Settings
-  - name: Notifications
-  - name: Onboarding
 
 security:
   - bearerAuth: []
@@ -70,6 +65,16 @@ components:
       in: query
       schema: { type: string, format: date }
       description: Kenyan operational date (A2.3).
+    analyticsFrom:
+      name: from
+      in: query
+      schema: { type: string, format: date-time }
+      description: Start of the analytics window. Defaults to 30 days before `to`.
+    analyticsTo:
+      name: to
+      in: query
+      schema: { type: string, format: date-time }
+      description: End of the analytics window. Defaults to now.
 
   schemas:
     Problem:
@@ -176,6 +181,306 @@ components:
         original_status: { type: integer, example: 201 }
         original_body: { type: object }
 
+    # ── Tenancy (14_tenancy.sql) ───────────────────────────────────────────────────────────────
+    InviteUserRequest:
+      type: object
+      description: Admin invite into the caller's tenant. Role is restricted to invitable roles (FLEET_MANAGER, ADMIN).
+      required: [email, role_code]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        role_code: { type: string, enum: [FLEET_MANAGER, ADMIN] }
+        full_name: { type: string, maxLength: 200 }
+
+    AcceptInviteRequest:
+      type: object
+      description: Unauthenticated. The single-use token is the credential; a password is set on first use.
+      required: [token, password]
+      properties:
+        token: { type: string, format: uuid }
+        password: { type: string, minLength: 12, maxLength: 200 }
+        full_name: { type: string, maxLength: 200 }
+
+    Invitation:
+      type: object
+      description: An outstanding invitation (app.invitations).
+      required: [id, tenant_id, email, role_code, status, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role_code: { type: string, enum: [DRIVER, DISPATCHER, FLEET_MANAGER, ADMIN, FINANCE, AUDITOR, SYSTEM_ADMIN] }
+        status: { type: string, enum: [PENDING, ACCEPTED, EXPIRED, REVOKED] }
+        invited_by: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    RevokeRoleRequest:
+      type: object
+      required: [role_code]
+      properties:
+        role_code: { type: string, enum: [DRIVER, DISPATCHER, FLEET_MANAGER, ADMIN, FINANCE, AUDITOR] }
+
+    AssignScopeRequest:
+      type: object
+      description: Replaces a manager's vehicle/driver scope within the tenant (app.manager_assignments).
+      properties:
+        vehicle_ids: { type: array, items: { type: string, format: uuid } }
+        driver_ids: { type: array, items: { type: string, format: uuid } }
+
+    TenantUserSummary:
+      type: object
+      required: [user_id, email, status, roles]
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string, nullable: true }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+        roles: { type: array, items: { type: string } }
+        assigned_vehicle_ids: { type: array, items: { type: string, format: uuid } }
+        assigned_driver_ids: { type: array, items: { type: string, format: uuid } }
+
+    # ------------------------------------------------------- Vehicles + admin/manager assignment
+    # The mobile admin console (packages/mobile/src/core/admin.ts) parses these tolerantly, so the
+    # server is free to return the superset of app.vehicles columns it already has.
+    VehicleCreateRequest:
+      type: object
+      description: >
+        Onboards a vehicle into the CALLER's tenant. license_plate is unique per tenant
+        (vehicles_tenant_plate_unique) and a duplicate is rejected with 409. tenant_id is bound to
+        the principal, status defaults to AVAILABLE, is_operational to true, and tracker_imei stays
+        NULL until the separate A1.1 pairing flow runs.
+      required: [license_plate]
+      properties:
+        license_plate: { type: string, minLength: 1, maxLength: 20 }
+        vehicle_class: { type: string, maxLength: 40 }
+        make: { type: string, maxLength: 60 }
+        model: { type: string, maxLength: 60 }
+        year: { type: integer, minimum: 1950, maximum: 2100 }
+        ownership_type: { type: string, maxLength: 40 }
+        fuel_tank_capacity_litres: { type: number, exclusiveMinimum: 0, maximum: 5000 }
+        notes: { type: string, maxLength: 2000 }
+
+    VehicleUpdateRequest:
+      type: object
+      description: Patches the narrow set of app.vehicles columns the console owns.
+      properties:
+        status: { type: string, maxLength: 40 }
+        is_operational: { type: boolean }
+        notes: { type: string, maxLength: 2000, nullable: true }
+        non_operational_reason: { type: string, maxLength: 2000, nullable: true }
+
+    VehicleRecord:
+      type: object
+      description: One app.vehicles row. Numeric columns are normalised from PG text to numbers.
+      required: [id, license_plate]
+      properties:
+        id: { type: string, format: uuid }
+        license_plate: { type: string }
+        vehicle_class: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        is_operational: { type: boolean, nullable: true }
+        non_operational_reason: { type: string, nullable: true }
+        make: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        ownership_type: { type: string, nullable: true }
+        current_odometer_km: { type: number, nullable: true }
+        current_odometer_at: { type: string, nullable: true }
+        engine_hours: { type: number, nullable: true }
+        fuel_tank_capacity_litres: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+
+    AssignVehicleRequest:
+      type: object
+      description: >
+        Links drivers and other vehicles to one vehicle. REPLACE semantics on both arrays (the
+        client sends the complete desired set; an empty array clears that dimension). vehicle_ids
+        means LINKED vehicles such as trailers — naming the target itself is rejected.
+      properties:
+        driver_ids: { type: array, items: { type: string, format: uuid }, maxItems: 500 }
+        vehicle_ids: { type: array, items: { type: string, format: uuid }, maxItems: 500 }
+
+    AssignAdminsRequest:
+      type: object
+      description: >
+        Replaces the vehicle + driver sets for one admin/manager (app.manager_assignments). Same
+        operation as AssignScopeRequest; both keys default to an empty array because the mobile
+        management screen always sends the full desired set.
+      properties:
+        vehicle_ids: { type: array, items: { type: string, format: uuid }, maxItems: 500 }
+        driver_ids: { type: array, items: { type: string, format: uuid }, maxItems: 500 }
+
+    AdminSummary:
+      type: object
+      description: One admin/manager with the vehicle/driver scope currently assigned to them.
+      required: [user_id, email, full_name, roles, status, assigned_vehicle_ids, assigned_driver_ids]
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, nullable: true }
+        full_name: { type: string, nullable: true }
+        roles: { type: array, items: { type: string } }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+        assigned_vehicle_ids: { type: array, items: { type: string, format: uuid } }
+        assigned_driver_ids: { type: array, items: { type: string, format: uuid } }
+
+    AdminRoster:
+      type: object
+      required: [managers]
+      properties:
+        managers:
+          type: array
+          items: { $ref: '#/components/schemas/AdminSummary' }
+
+    SignupRequest:
+      type: object
+      description: >
+        Unauthenticated self-service onboarding. Creates the company (app.tenants, TRIAL/BASIC) and
+        its first member, who is granted a TENANT-SCOPED ADMIN role — the company super-admin. That
+        account sees its whole company and may invite further ADMIN / FLEET_MANAGER users, but it is
+        never a cross-tenant SYSTEM_ADMIN. The tenant slug is derived from company_name server-side.
+      required: [company_name, email, password]
+      properties:
+        company_name: { type: string, minLength: 1, maxLength: 200 }
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 12, maxLength: 200 }
+        full_name: { type: string, minLength: 1, maxLength: 200 }
+
+    AnalyticsKpis:
+      type: object
+      description: Headline counters, already narrowed to the caller's resolved scope.
+      required: [vehicles, drivers, distanceKm, fuelCost, anomalies]
+      properties:
+        vehicles: { type: number }
+        drivers: { type: number }
+        distanceKm: { type: number }
+        fuelCost: { type: number }
+        anomalies: { type: number }
+
+    VehicleAnalytics:
+      type: object
+      required: [vehicle_id, plate, distanceKm, fuelCost, utilisationPct, anomalies]
+      properties:
+        vehicle_id: { type: string, format: uuid }
+        plate: { type: string, nullable: true }
+        distanceKm: { type: number }
+        fuelCost: { type: number }
+        utilisationPct: { type: number, description: Share of days in range with at least one shift. }
+        anomalies: { type: number }
+
+    DriverAnalytics:
+      type: object
+      required: [driver_id, name, distanceKm, shifts, anomalies]
+      properties:
+        driver_id: { type: string, format: uuid }
+        name: { type: string, nullable: true }
+        distanceKm: { type: number }
+        shifts: { type: number }
+        anomalies: { type: number }
+
+    ManagerAnalyticsSummary:
+      type: object
+      description: One FLEET_MANAGER row inside the company roll-up, scored against their own scope.
+      required: [user_id, email, assignedVehicleIds, assignedDriverIds, kpis]
+      properties:
+        user_id: { type: string, format: uuid }
+        full_name: { type: string, nullable: true }
+        email: { type: string }
+        assignedVehicleIds:
+          type: array
+          nullable: true
+          description: null = unrestricted on this dimension; [] = nothing assigned.
+          items: { type: string, format: uuid }
+        assignedDriverIds:
+          type: array
+          nullable: true
+          items: { type: string, format: uuid }
+        kpis: { $ref: '#/components/schemas/AnalyticsKpis' }
+
+    CompanyAnalytics:
+      type: object
+      description: >
+        Company roll-up plus one row per FLEET_MANAGER. The flat counters (active_fleet …
+        anomalies_open) mirror the mobile AnalyticsReportSchema so GET /reports/analytics parses
+        this body unchanged.
+      required: [tenant_id, from, to, kpis, managers, active_fleet, open_accidents, pending_dvir, expiring_docs, fuel_spend_30d, anomalies_open]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        kpis: { $ref: '#/components/schemas/AnalyticsKpis' }
+        managers:
+          type: array
+          items: { $ref: '#/components/schemas/ManagerAnalyticsSummary' }
+        active_fleet: { type: number }
+        open_accidents: { type: number }
+        pending_dvir: { type: number }
+        expiring_docs: { type: number }
+        fuel_spend_30d: { type: number }
+        anomalies_open: { type: number }
+
+    ManagerAnalytics:
+      type: object
+      description: One manager's slice, expanded per vehicle and per driver.
+      required: [user_id, email, from, to, assignedVehicleIds, assignedDriverIds, kpis, vehicles, drivers]
+      properties:
+        user_id: { type: string, format: uuid }
+        full_name: { type: string, nullable: true }
+        email: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        assignedVehicleIds:
+          type: array
+          nullable: true
+          items: { type: string, format: uuid }
+        assignedDriverIds:
+          type: array
+          nullable: true
+          items: { type: string, format: uuid }
+        kpis: { $ref: '#/components/schemas/AnalyticsKpis' }
+        vehicles:
+          type: array
+          items: { $ref: '#/components/schemas/VehicleAnalytics' }
+        drivers:
+          type: array
+          items: { $ref: '#/components/schemas/DriverAnalytics' }
+
+    VehicleAnalyticsDetail:
+      type: object
+      required: [from, to, vehicle, kpis]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        vehicle: { $ref: '#/components/schemas/VehicleAnalytics' }
+        kpis: { $ref: '#/components/schemas/AnalyticsKpis' }
+
+    DriverAnalyticsDetail:
+      type: object
+      required: [from, to, driver, kpis]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        driver: { $ref: '#/components/schemas/DriverAnalytics' }
+        kpis: { $ref: '#/components/schemas/AnalyticsKpis' }
+
+    LoginResponse:
+      type: object
+      description: Authenticated session (mirrors the mobile client's trusted response body).
+      required: [token_type, access_token, refresh_token, user_id, roles, permissions, locale]
+      properties:
+        token_type: { type: string, example: Bearer }
+        access_token: { type: string }
+        access_token_expires_at: { type: string, format: date-time }
+        refresh_token: { type: string }
+        refresh_token_expires_at: { type: string, format: date-time }
+        session_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+        locale: { type: string, enum: [en, sw] }
+        tenant_id: { type: string, format: uuid }
+
   responses:
     BadRequest:
       description: Malformed request (RFC7807).
@@ -212,15 +517,7 @@ paths:
   /auth/login:
     post:
       tags: [Auth]
-      summary: Authenticate by email (admin) or phone (driver) + password (+ MFA if enrolled).
-      description: >-
-        Drivers sign in with their phone number, admins with their email; exactly one of
-        `email`/`phone` is required. When the account has MFA enrolled the first call returns
-        `mfa_required: true` with an `mfa_challenge_token`; re-post the same credentials with
-        `mfa_code` (a TOTP code, a recovery code, or the bypass token from `/auth/mfa/recover`)
-        to complete the second leg in one call. The success body carries the resolved identity
-        (`user_id`, `roles`, the permission union and `locale`) so the client can build its
-        Principal without a second round-trip.
+      summary: Authenticate by email + password (+ MFA if enrolled).
       security: []
       requestBody:
         required: true
@@ -228,164 +525,28 @@ paths:
           application/json:
             schema:
               type: object
-              required: [password]
+              required: [email, password]
               properties:
-                email: { type: string, format: email, description: Admin sign-in identifier. }
-                phone: { type: string, description: Driver sign-in identifier (E.164). }
+                email: { type: string, format: email }
                 password: { type: string }
                 mfa_code: { type: string, description: Required when the user has MFA enrolled (A3.7). }
                 device_id_hash: { type: string, description: Required for driver PIN offline revocation path (B12). }
       responses:
         '200':
-          description: Tokens issued, or an MFA challenge when the account is enrolled.
+          description: Tokens issued.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  token_type: { type: string, enum: [Bearer] }
                   access_token: { type: string }
-                  access_token_expires_at: { type: string, format: date-time }
                   refresh_token: { type: string }
-                  refresh_token_expires_at: { type: string, format: date-time }
-                  session_id: { type: string, format: uuid }
                   mfa_required: { type: boolean }
-                  mfa_challenge_token: { type: string, description: Present only when mfa_required is true. }
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, nullable: true }
-                  phone: { type: string, nullable: true }
                   roles: { type: array, items: { type: string } }
-                  permissions: { type: array, items: { type: string } }
-                  locale: { type: string, enum: [en, sw] }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403':
           description: Account suspended (B13).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
-
-  /auth/admin-signup:
-    post:
-      tags: [Auth]
-      summary: Self-service ADMIN account creation (A3.7). Signs the caller straight in.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, password, full_name]
-              properties:
-                email: { type: string, format: email }
-                password: { type: string, minLength: 12, maxLength: 200 }
-                full_name: { type: string, minLength: 1, maxLength: 200 }
-                phone: { type: string }
-      responses:
-        '201':
-          description: Account created and a session issued (same body as /auth/login).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id, access_token]
-                properties:
-                  token_type: { type: string, enum: [Bearer] }
-                  access_token: { type: string }
-                  access_token_expires_at: { type: string, format: date-time }
-                  refresh_token: { type: string }
-                  refresh_token_expires_at: { type: string, format: date-time }
-                  session_id: { type: string, format: uuid }
-                  mfa_required: { type: boolean }
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, nullable: true }
-                  roles: { type: array, items: { type: string } }
-                  permissions: { type: array, items: { type: string } }
-                  locale: { type: string, enum: [en, sw] }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /auth/refresh:
-    post:
-      tags: [Auth]
-      summary: Rotate the opaque refresh token and mint a new access token.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [refresh_token]
-              properties:
-                refresh_token: { type: string }
-      responses:
-        '200':
-          description: Rotated tokens plus the freshly-resolved identity (same body as /auth/login).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id, access_token]
-                properties:
-                  token_type: { type: string, enum: [Bearer] }
-                  access_token: { type: string }
-                  access_token_expires_at: { type: string, format: date-time }
-                  refresh_token: { type: string }
-                  refresh_token_expires_at: { type: string, format: date-time }
-                  session_id: { type: string, format: uuid }
-                  mfa_required: { type: boolean }
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, nullable: true }
-                  roles: { type: array, items: { type: string } }
-                  permissions: { type: array, items: { type: string } }
-                  locale: { type: string, enum: [en, sw] }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
-  /auth/logout:
-    post:
-      tags: [Auth]
-      summary: Revoke the caller's current session.
-      responses:
-        '200':
-          description: Session revoked.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  logged_out: { type: boolean }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
-  /auth/mfa/recover:
-    post:
-      tags: [Auth]
-      summary: Burn a recovery code for a short-lived MFA bypass token (A3.7).
-      description: >-
-        Unauthenticated because the authenticator is what was lost. The returned `bypass_token` is
-        replayed as `mfa_code` on `/auth/login` to complete the second leg.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [recovery_code]
-              properties:
-                email: { type: string, format: email }
-                user_id: { type: string, format: uuid }
-                recovery_code: { type: string, minLength: 4, maxLength: 64 }
-      responses:
-        '200':
-          description: Bypass token issued.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [bypass_token]
-                properties:
-                  bypass_token: { type: string }
-                  expires_at: { type: string, format: date-time }
-        '400': { $ref: '#/components/responses/BadRequest' }
 
   /auth/mfa/enroll:
     post:
@@ -412,105 +573,26 @@ paths:
                   secret_encrypted_preview: { type: string }
                   recovery_codes: { type: array, items: { type: string } }
 
-  /auth/devices:
-    post:
+  /devices/{deviceId}/pin:
+    put:
       tags: [Auth]
-      summary: Register the calling user's device for push delivery (not used for authz).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
+      summary: Set / reset the local 4-digit driver PIN on a device (B12, M4).
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [device_id_hash]
+              required: [pin]
               properties:
-                device_id_hash: { type: string }
-                device_label: { type: string }
-                device_model: { type: string }
-                os_version: { type: string }
-                app_version: { type: string }
-                push_token: { type: string }
+                pin: { type: string, pattern: '^[0-9]{4}$' }
       responses:
-        '200':
-          description: The registered device.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [device_id]
-                properties:
-                  device_id: { type: string }
-                  push_token: { type: string, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
-  /auth/devices/pin:
-    post:
-      tags: [Auth]
-      summary: Set / reset the local 4-digit driver PIN on the calling device (B12, M4).
-      description: >-
-        The PIN never leaves the device: it is hashed and verified locally, and the server only
-        records that a PIN is set for the caller's device. The device is taken from the
-        authenticated principal, not from the path or the body.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: No PIN material is accepted; the flag is optional and the body may be empty.
-              properties:
-                pin_set: { type: boolean, enum: [true] }
-      responses:
-        '200':
-          description: The device is now marked as having a local PIN.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [pin_set]
-                properties:
-                  pin_set: { type: boolean, enum: [true] }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
-
-  /auth/consent:
-    post:
-      tags: [Auth]
-      summary: Record or revoke a consent for the calling user (C5.5).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [consent_type, policy_version, accepted]
-              properties:
-                consent_type:
-                  type: string
-                  enum: [GPS_TRACKING_WORKING_HOURS, PHONE_GPS_FALLBACK, DATA_PROCESSING_NOTICE]
-                policy_version: { type: string }
-                accepted: { type: boolean }
-      responses:
-        '200':
-          description: The recorded consent decision.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accepted]
-                properties:
-                  consent_id: { type: string, format: uuid }
-                  accepted: { type: boolean }
+        '204': { description: PIN hash stored on device. }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /devices/{deviceId}/revoke:
@@ -540,63 +622,6 @@ paths:
         '204': { description: All sessions for the target user invalidated. }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /admin/users/me:
-    get:
-      tags: [Admin]
-      summary: Read the calling user's own profile (user:manage). Always scoped to the resolved principal.
-      responses:
-        '200':
-          description: The caller's profile.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id]
-                properties:
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, nullable: true }
-                  full_name: { type: string, nullable: true }
-                  phone: { type: string, nullable: true }
-                  locale: { type: string, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    put:
-      tags: [Admin]
-      summary: Update the calling user's own profile (user:manage). Always scoped to the resolved principal.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                full_name: { type: string, minLength: 1, maxLength: 200 }
-                phone: { type: string, maxLength: 40, nullable: true }
-                locale: { type: string, enum: [en, sw] }
-      responses:
-        '200':
-          description: The updated profile.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id]
-                properties:
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, nullable: true }
-                  full_name: { type: string, nullable: true }
-                  phone: { type: string, nullable: true }
-                  locale: { type: string, nullable: true }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
-
   /drivers:
     get:
       tags: [Admin]
@@ -623,327 +648,6 @@ paths:
                   next_cursor: { type: string, nullable: true }
                   has_more: { type: boolean }
         '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [Admin]
-      summary: Create / invite a driver (user:manage). The account starts PENDING until approved.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, full_name]
-              properties:
-                email: { type: string, format: email }
-                full_name: { type: string, minLength: 1 }
-                phone: { type: string, nullable: true }
-                roles:
-                  type: array
-                  minItems: 1
-                  items: { type: string }
-                  description: Role codes to grant. Defaults to the DRIVER role when omitted.
-      responses:
-        '201':
-          description: Driver account created, awaiting approval.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [user_id, email, status]
-                properties:
-                  user_id: { type: string, format: uuid }
-                  email: { type: string, format: email }
-                  status: { type: string, enum: [PENDING] }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
-
-  # ------------------------------------------------------------------ Onboarding
-  # `/drivers/me/...` are literal paths, distinct from the admin `/drivers/{id}` surface.
-  /drivers/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-        description: The driver's user id.
-    get:
-      tags: [Admin]
-      summary: Driver detail (user:read) — roster shape plus the RBAC union and devices.
-      responses:
-        '200':
-          description: Driver detail.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/DriverSummary'
-                  - type: object
-                    properties:
-                      roles: { type: array, items: { type: string } }
-                      permissions: { type: array, items: { type: string } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /drivers/{id}/approve:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Admin]
-      summary: Approve a pending driver account (user:manage).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      responses:
-        '200':
-          description: Account activated.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  user_id: { type: string, format: uuid }
-                  status: { type: string, enum: [ACTIVE] }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /admin/users/{id}/suspend:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Admin]
-      summary: Suspend a user and drop their live sessions (user:manage).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      responses:
-        '200':
-          description: Account suspended.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  user_id: { type: string, format: uuid }
-                  status: { type: string, enum: [SUSPENDED] }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /admin/users/{id}/reinstate:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Admin]
-      summary: Reinstate a suspended user (user:manage).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      responses:
-        '200':
-          description: Account reinstated.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  user_id: { type: string, format: uuid }
-                  status: { type: string, enum: [ACTIVE] }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /drivers/me/onboarding:
-    get:
-      tags: [Onboarding]
-      summary: Read the signed-in driver's onboarding record, creating a NOT_SUBMITTED one on first read.
-      responses:
-        '200':
-          description: The driver's onboarding record. The stored SSN ciphertext is never returned; `ssn_on_file` reports only whether one exists.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, driver_id, background_check_status, consent_given, onboarding_complete]
-                properties:
-                  id: { type: string, format: uuid }
-                  driver_id: { type: string, format: uuid }
-                  full_name: { type: string, nullable: true }
-                  licence_number: { type: string, nullable: true }
-                  licence_class: { type: string, nullable: true }
-                  emergency_contact_name: { type: string, nullable: true }
-                  emergency_contact_phone: { type: string, nullable: true }
-                  address_json: { type: object, nullable: true }
-                  dob: { type: string, format: date, nullable: true }
-                  previous_addresses_json: { type: array, nullable: true, items: { type: object } }
-                  ssn_on_file: { type: boolean }
-                  background_check_status:
-                    type: string
-                    enum: [NOT_SUBMITTED, SUBMITTED, CLEARED, FLAGGED, EXPIRED]
-                  background_check_submitted_at: { type: string, format: date-time, nullable: true }
-                  background_check_cleared_at: { type: string, format: date-time, nullable: true }
-                  consent_given: { type: boolean }
-                  consent_at: { type: string, format: date-time, nullable: true }
-                  assigned_vehicle_id: { type: string, format: uuid, nullable: true }
-                  onboarding_complete: { type: boolean }
-                  created_at: { type: string, format: date-time }
-                  updated_at: { type: string, format: date-time }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /drivers/me/onboarding/profile:
-    post:
-      tags: [Onboarding]
-      summary: Save the onboarding profile step. Partial saves are supported; omitted fields are preserved.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                full_name: { type: string, maxLength: 200 }
-                licence_number: { type: string, maxLength: 80 }
-                licence_class: { type: string, maxLength: 40 }
-                emergency_contact_name: { type: string, maxLength: 200 }
-                emergency_contact_phone: { type: string, maxLength: 40 }
-                address_json: { type: object, description: Free-form structured address. }
-      responses:
-        '200':
-          description: The updated onboarding record (same projection as GET /drivers/me/onboarding).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, driver_id, background_check_status, consent_given, onboarding_complete]
-                properties:
-                  id: { type: string, format: uuid }
-                  driver_id: { type: string, format: uuid }
-                  full_name: { type: string, nullable: true }
-                  licence_number: { type: string, nullable: true }
-                  licence_class: { type: string, nullable: true }
-                  emergency_contact_name: { type: string, nullable: true }
-                  emergency_contact_phone: { type: string, nullable: true }
-                  address_json: { type: object, nullable: true }
-                  dob: { type: string, format: date, nullable: true }
-                  previous_addresses_json: { type: array, nullable: true, items: { type: object } }
-                  ssn_on_file: { type: boolean }
-                  background_check_status:
-                    type: string
-                    enum: [NOT_SUBMITTED, SUBMITTED, CLEARED, FLAGGED, EXPIRED]
-                  background_check_submitted_at: { type: string, format: date-time, nullable: true }
-                  background_check_cleared_at: { type: string, format: date-time, nullable: true }
-                  consent_given: { type: boolean }
-                  consent_at: { type: string, format: date-time, nullable: true }
-                  assigned_vehicle_id: { type: string, format: uuid, nullable: true }
-                  onboarding_complete: { type: boolean }
-                  created_at: { type: string, format: date-time }
-                  updated_at: { type: string, format: date-time }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/SemanticViolation' }
-
-  /drivers/me/background-check:
-    post:
-      tags: [Onboarding]
-      summary: Submit the background check. Consent is mandatory (C5.5); the SSN is supplied already encrypted.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [consent_given]
-              properties:
-                ssn_encrypted:
-                  type: string
-                  maxLength: 4000
-                  description: Client-side ciphertext of the national ID / SSN. The plaintext is never transmitted or stored.
-                dob: { type: string, format: date }
-                previous_addresses_json:
-                  type: array
-                  maxItems: 20
-                  items: { type: object }
-                consent_given:
-                  type: boolean
-                  description: Must be true. A false value is rejected with ONBOARDING_CONSENT_REQUIRED.
-      responses:
-        '200':
-          description: Background check submitted.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [onboarding_id, driver_id, status, consent_given]
-                properties:
-                  onboarding_id: { type: string, format: uuid }
-                  driver_id: { type: string, format: uuid }
-                  status:
-                    type: string
-                    enum: [NOT_SUBMITTED, SUBMITTED, CLEARED, FLAGGED, EXPIRED]
-                  background_check_submitted_at: { type: string, format: date-time, nullable: true }
-                  consent_given: { type: boolean }
-                  consent_at: { type: string, format: date-time, nullable: true }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/SemanticViolation' }
-
-  /drivers/me/assignment:
-    get:
-      tags: [Onboarding]
-      summary: The signed-in driver's most recent dispatch assignment, with the vehicle plate.
-      responses:
-        '200':
-          description: The current assignment, or null when the driver has never been dispatched.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [assignment]
-                properties:
-                  assignment:
-                    type: object
-                    nullable: true
-                    required: [assignment_id, assigned_date, status, vehicle_id]
-                    properties:
-                      assignment_id: { type: string, format: uuid }
-                      assigned_date: { type: string, format: date }
-                      status: { type: string, enum: [PLANNED, ACTIVE, COMPLETED, CANCELLED] }
-                      vehicle_id: { type: string, format: uuid }
-                      vehicle_plate: { type: string, nullable: true }
-                      trailer_id: { type: string, format: uuid, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------------ Shifts
   /shifts/clock-in:
@@ -1024,10 +728,6 @@ paths:
     get:
       tags: [Shifts]
       summary: Get the driver's currently open shift, if any.
-      description: >-
-        Returns the open shift as a bare object (not an envelope), or JSON `null` when the caller
-        has no open shift. `shift_id` is `app.shifts.id` and `trailer_id` is
-        `app.shifts.assigned_trailer_id`.
       responses:
         '200':
           description: Active shift or null.
@@ -1036,47 +736,11 @@ paths:
               schema:
                 type: object
                 nullable: true
-                required: [shift_id, vehicle_id, clock_in_at]
                 properties:
                   shift_id: { type: string, format: uuid }
                   vehicle_id: { type: string, format: uuid }
                   trailer_id: { type: string, format: uuid, nullable: true }
                   clock_in_at: { type: string, format: date-time }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /shifts/me:
-    get:
-      tags: [Shifts]
-      summary: Driver's own shift history (B7). Server-scoped to the caller; paged.
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of the caller's shifts (see app.v_shift_verification_inbox, scoped to DRIVER).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, next_cursor, has_more]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      required: [shift_id]
-                      properties:
-                        shift_id: { type: string, format: uuid }
-                        vehicle_id: { type: string, format: uuid, nullable: true }
-                        vehicle_plate: { type: string, nullable: true }
-                        clock_in_at: { type: string, format: date-time, nullable: true }
-                        clock_out_at: { type: string, format: date-time, nullable: true }
-                        duration_seconds: { type: integer, nullable: true }
-                        distance_km: { type: number, nullable: true }
-                        state: { type: string, nullable: true }
-                        verification_status: { type: string, nullable: true }
-                  next_cursor: { type: string, nullable: true }
-                  has_more: { type: boolean }
 
   /shifts/verification-inbox:
     get:
@@ -1099,23 +763,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CursorPage' }
         '403': { $ref: '#/components/responses/Forbidden' }
-
-  /shifts/{shiftId}/verification:
-    parameters:
-      - name: shiftId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Shifts]
-      summary: Verification detail for one shift (shift:read_all) — the C.9 review screen.
-      responses:
-        '200':
-          description: Shift verification detail (see app.v_shift_verification_inbox plus evidence).
-          content: { application/json: { schema: { type: object } } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   /shifts/{shiftId}/verify:
     post:
@@ -1188,41 +835,6 @@ paths:
           description: Missing mandatory gauge pair for a driver entry (B3) — database rejects.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
-  /fuel/refuel/me:
-    get:
-      tags: [Fuel]
-      summary: Driver's own fuel purchases (B9). Server-scoped to the caller; paged.
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of the caller's purchases (see app.v_fuel_reconciliation_inbox, scoped to DRIVER).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, next_cursor, has_more]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      required: [purchase_id]
-                      properties:
-                        purchase_id: { type: string, format: uuid }
-                        purchased_at: { type: string, format: date-time }
-                        vehicle_id: { type: string, format: uuid }
-                        vehicle_plate: { type: string, nullable: true }
-                        litres: { type: string, nullable: true, example: "62.40", description: PG numeric, serialised as a decimal string like Money.amount. }
-                        total_cost: { $ref: '#/components/schemas/Money' }
-                        supplier_name: { type: string, nullable: true }
-                        odometer_km: { type: integer, nullable: true }
-                        reconciliation_status: { type: string, nullable: true, enum: [PENDING, VERIFIED, REJECTED, CLEARED, FLAGGED] }
-                        rejection_reason: { type: string, nullable: true }
-                  next_cursor: { type: string, nullable: true }
-                  has_more: { type: boolean }
-
   /fuel/purchases/{purchaseId}/verify:
     post:
       tags: [Fuel]
@@ -1247,106 +859,226 @@ paths:
                 adjusted_litres: { type: number, description: Fleets Manager only (C6.1). }
                 rejection_reason: { type: string }
       responses:
-        '200':
-          description: Updated.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  fuel_purchase_id: { type: string, format: uuid }
-                  status: { type: string, description: Resulting verification status. }
+        '200': { description: Updated. }
         '403': { $ref: '#/components/responses/Forbidden' }
-
-  /fuel/purchases/{purchaseId}:
-    parameters:
-      - name: purchaseId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Fuel]
-      summary: Fuel purchase detail (2.5). Own-scoped for drivers (fuel:read).
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Purchase detail.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  purchase_id: { type: string, format: uuid }
-                  purchased_at: { type: string, format: date-time }
-                  vehicle_id: { type: string, format: uuid, nullable: true }
-                  vehicle_plate: { type: string, nullable: true }
-                  litres: { type: string, nullable: true, example: "62.40", description: PG numeric, serialised as a decimal string like Money.amount. }
-                  total_cost: { $ref: '#/components/schemas/Money' }
-                  supplier_name: { type: string, nullable: true }
-                  odometer_km: { type: integer, nullable: true }
-                  reconciliation_status: { type: string }
-                  rejection_reason: { type: string, nullable: true }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   /fuel/reconciliation-inbox:
     get:
       tags: [Fuel]
-      summary: Paged fuel reconciliation inbox (2.7). Admin surface (fuel:verify).
+      summary: Paged fuel reconciliation inbox (2.7).
       parameters:
         - $ref: '#/components/parameters/cursor'
         - $ref: '#/components/parameters/limit'
         - name: unverified_only
           in: query
-          description: Shorthand for `verified=false` (the outstanding queue). `verified` wins when both are sent.
           schema: { type: boolean, default: true }
-        - name: verified
-          in: query
-          schema: { type: boolean }
-        - name: vehicle_id
-          in: query
-          schema: { type: string, format: uuid }
       responses:
         '200':
           description: Page (see app.v_fuel_reconciliation_inbox).
           content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
 
-  # ------------------------------------------------------------------ Accidents
-  /accidents/me:
+  # ------------------------------------------- Fuel (photo-first capture, A1.4)
+  /driver/fuel/purchase:
+    post:
+      tags: [Fuel]
+      summary: Photo-first refuel submission — receipt + odometer photographs (A1.4).
+      description: >-
+        The driver submits two photographs and the odometer reading only. Litres,
+        amount, station and receipt date are extracted server-side by OCR and stay
+        advisory until an Admin verifies the purchase.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receipt_media_object_id, odometer_photo_media_object_id, odometer_reading, shift_id, vehicle_id, purchased_at]
+              properties:
+                receipt_media_object_id: { type: string, format: uuid }
+                odometer_photo_media_object_id: { type: string, format: uuid }
+                odometer_reading: { type: integer, minimum: 0 }
+                shift_id: { type: string, format: uuid, nullable: true, description: null when Admin back-entry (A1.5). }
+                vehicle_id: { type: string, format: uuid }
+                fuel_card_last_four: { type: string, pattern: '^[0-9]{4}$' }
+                purchased_at: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Purchase recorded; OCR queued (ocr_status = PENDING).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fuelPurchaseId]
+                properties:
+                  fuelPurchaseId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/SemanticViolation' }
+
+  /driver/fuel/correct:
+    post:
+      tags: [Fuel]
+      summary: Driver correction of OCR-extracted values (A1.4). Sets driver_corrected.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purchase_id]
+              properties:
+                purchase_id: { type: string, format: uuid }
+                corrected_amount: { type: number, exclusiveMinimum: 0 }
+                corrected_liters: { type: number, exclusiveMinimum: 0 }
+                corrected_date: { type: string, format: date }
+                corrected_station: { type: string, maxLength: 255 }
+                corrected_odometer: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Correction stored; the purchase is flagged for review. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /admin/fuel/pending:
     get:
-      tags: [Accidents]
-      summary: Driver's own accident reports (B14). Server-scoped to the caller; paged.
+      tags: [Fuel]
+      summary: Photo-first purchases awaiting verification, with the anomaly badge (2.7).
       parameters:
         - $ref: '#/components/parameters/cursor'
         - $ref: '#/components/parameters/limit'
       responses:
         '200':
-          description: Page of the caller's accident summaries.
+          description: Pending purchases. costPerKm is compared against app.fuel_efficiency_records (is_approximate = false).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, vehiclePlate, badges]
+                  properties:
+                    id: { type: string, format: uuid }
+                    vehiclePlate: { type: string }
+                    amount: { type: number, nullable: true }
+                    liters: { type: number, nullable: true }
+                    odometer: { type: integer, nullable: true }
+                    distanceSinceLastRefuel: { type: number, nullable: true, description: Kilometres since the previous verified purchase for this vehicle. }
+                    costPerKm: { type: number, nullable: true }
+                    badges:
+                      type: array
+                      items: { type: string, enum: [AUTO, REVIEW, FLAGGED] }
+                    ocr_raw_data: { type: object, nullable: true, description: app.fuel_purchases.ocr_raw. }
+                    driver_corrected: { type: boolean }
+                    confidence_score: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/fuel/verify/{id}:
+    put:
+      tags: [Fuel]
+      summary: Verify, reject or adjust a photo-first purchase (2.5, C6.1).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [VERIFY, REJECT, CLEAR_PAYMENT] }
+                adjusted_amount: { type: number, exclusiveMinimum: 0, description: Fleets Manager only (C6.1). }
+                adjusted_liters: { type: number, exclusiveMinimum: 0, description: Fleets Manager only (C6.1). }
+                adjusted_odometer: { type: integer, minimum: 0 }
+                admin_notes: { type: string, maxLength: 1000 }
+      responses:
+        '200': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------------ Hardware
+  /admin/hardware/pair:
+    post:
+      tags: [Hardware]
+      summary: Pair a tracker IMEI to a vehicle and mint the configuration SMS (A1.1).
+      description: >-
+        Registers the device in Traccar, stamps vehicles.tracker_paired_at and
+        returns the SMS the installer must send to the tracker SIM. The server
+        address in the command comes from system_config traccar.public_ip /
+        traccar.h02_port (C2.4).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicleId, trackerImei]
+              properties:
+                vehicleId: { type: string, format: uuid }
+                trackerImei: { type: string, pattern: '^[0-9]{15}$' }
+                trackerBrand: { type: string, maxLength: 40, default: GENERIC_H02 }
+                trackerSimNumber: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: Paired.
           content:
             application/json:
               schema:
                 type: object
-                required: [data, next_cursor, has_more]
+                required: [success, message, smsCommand, vehiclePlate]
                 properties:
-                  data:
+                  success: { type: boolean }
+                  message: { type: string }
+                  smsCommand: { type: string }
+                  simNumber: { type: string, nullable: true }
+                  vehiclePlate: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: IMEI already paired to another vehicle, or the vehicle already has a tracker.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /admin/hardware/pending:
+    get:
+      tags: [Hardware]
+      summary: Paired trackers and their first-contact / liveness state (N5).
+      responses:
+        '200':
+          description: Tracker provisioning inbox.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackers]
+                properties:
+                  trackers:
                     type: array
                     items:
                       type: object
-                      required: [accident_id]
+                      required: [vehiclePlate, imei, status]
                       properties:
-                        accident_id: { type: string, format: uuid }
-                        reference: { type: string, nullable: true }
-                        occurred_at: { type: string, format: date-time, nullable: true }
-                        location_label: { type: string, nullable: true }
-                        severity: { type: string, nullable: true, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
-                        status: { type: string, nullable: true, enum: [REPORTED, OPEN, ACKNOWLEDGED, RESOLVED, CLOSED] }
-                        mayday: { type: boolean, nullable: true }
-                        escalation_tier: { type: integer, nullable: true }
-                  next_cursor: { type: string, nullable: true }
-                  has_more: { type: boolean }
+                        vehiclePlate: { type: string }
+                        imei: { type: string }
+                        brand: { type: string, nullable: true }
+                        pairedAt: { type: string, format: date-time, nullable: true }
+                        lastPing: { type: string, format: date-time, nullable: true }
+                        status: { type: string, enum: [PENDING, ONLINE, OFFLINE, LOST] }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ------------------------------------------------------------------ Accidents
   /accidents/mayday:
     post:
       tags: [Accidents]
@@ -1407,78 +1139,6 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { accident_id: { type: string, format: uuid } } }
-
-  /accidents/{accidentId}:
-    get:
-      tags: [Accidents]
-      summary: Accident detail (B15) — read model incl. media gallery + escalation state.
-      parameters:
-        - name: accidentId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        '200':
-          description: Accident detail.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [accident_id]
-                properties:
-                  accident_id: { type: string, format: uuid }
-                  reference: { type: string, nullable: true }
-                  occurred_at: { type: string, format: date-time, nullable: true }
-                  reported_at: { type: string, format: date-time, nullable: true }
-                  status: { type: string, nullable: true, enum: [REPORTED, OPEN, ACKNOWLEDGED, RESOLVED, CLOSED] }
-                  severity: { type: string, nullable: true, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
-                  mayday: { type: boolean, nullable: true }
-                  description: { type: string, nullable: true }
-                  driver_statement: { type: string, nullable: true }
-                  location_label: { type: string, nullable: true }
-                  vehicle_label: { type: string, nullable: true }
-                  escalation_tier: { type: integer, nullable: true }
-                  acknowledged_by: { type: string, nullable: true }
-                  seconds_to_escalation: { type: integer, nullable: true }
-                  chain_valid: { type: boolean, nullable: true }
-                  media:
-                    type: array
-                    nullable: true
-                    items:
-                      type: object
-                      properties:
-                        media_id: { type: string }
-                        slot: { type: string, nullable: true }
-                        kind: { type: string, nullable: true }
-                        pending: { type: boolean, nullable: true }
-                  can_acknowledge: { type: boolean, nullable: true }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /accidents/{accidentId}/acknowledge:
-    parameters:
-      - name: accidentId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Accidents]
-      summary: Acknowledge an accident, cancelling the escalation timer (accident:acknowledge, C6.3).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      responses:
-        '200':
-          description: Acknowledged.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  accident_id: { type: string, format: uuid }
-                  acknowledged_at: { type: string, format: date-time, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   /accidents/{accidentId}/media:
     post:
@@ -1576,104 +1236,6 @@ paths:
               schema: { type: object, properties: { inspection_id: { type: string, format: uuid }, block_shift: { type: boolean } } }
         '422': { $ref: '#/components/responses/SemanticViolation' }
 
-  /inspections/templates:
-    get:
-      tags: [Inspections]
-      summary: Checklists the driver may start an inspection from (B10).
-      responses:
-        '200':
-          description: List of inspection templates.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        template_id: { type: string, format: uuid }
-                        name: { type: string }
-                        label: { type: string, nullable: true }
-
-  /inspections/me:
-    get:
-      tags: [Inspections]
-      summary: Driver's own DVIR submissions with review status (B10). Server-scoped; paged.
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of the caller's DVIR submissions.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, next_cursor, has_more]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      required: [inspection_id]
-                      properties:
-                        inspection_id: { type: string, format: uuid }
-                        template_label: { type: string, nullable: true }
-                        vehicle_id: { type: string, format: uuid, nullable: true }
-                        vehicle_plate: { type: string, nullable: true }
-                        status: { type: string, nullable: true, enum: [SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED] }
-                        submitted_at: { type: string, format: date-time, nullable: true }
-                        defect_count: { type: integer, nullable: true }
-                        quarantined: { type: boolean, nullable: true }
-                        block_shift: { type: boolean, nullable: true }
-                  next_cursor: { type: string, nullable: true }
-                  has_more: { type: boolean }
-
-  /inspections/{inspectionId}:
-    get:
-      tags: [Inspections]
-      summary: DVIR detail with per-item results, notes and photo counts (B12).
-      parameters:
-        - name: inspectionId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        '200':
-          description: DVIR detail.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [inspection_id]
-                properties:
-                  inspection_id: { type: string, format: uuid }
-                  template_label: { type: string, nullable: true }
-                  vehicle_label: { type: string, nullable: true }
-                  trailer_label: { type: string, nullable: true }
-                  submitted_at: { type: string, format: date-time, nullable: true }
-                  status: { type: string, nullable: true, enum: [SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED] }
-                  review_note: { type: string, nullable: true }
-                  quarantined: { type: boolean, nullable: true }
-                  odometer_km: { type: integer, nullable: true }
-                  signature_name: { type: string, nullable: true }
-                  items:
-                    type: array
-                    nullable: true
-                    items:
-                      type: object
-                      properties:
-                        template_item_id: { type: string, format: uuid }
-                        label: { type: string, nullable: true }
-                        result: { type: string, nullable: true, enum: [PASS, FAIL, NA] }
-                        notes: { type: string, nullable: true }
-                        photo_count: { type: integer, nullable: true }
-                        photo_media_object_id: { type: string, nullable: true }
-                        blocker: { type: boolean, nullable: true }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   # ------------------------------------------------------------------ Trailer
   /trailer/swap:
     post:
@@ -1709,13 +1271,6 @@ paths:
     get:
       tags: [Dashboard]
       summary: Live map marker states (N5). Streamed over WebSocket in prod; REST snapshot for polling.
-      description: >-
-        Callers with `report:read` see the whole fleet. A driver (`asset:read` only) is narrowed
-        server-side to the vehicle on their open shift or most recent assignment (B.10).
-        Fields are sourced from `app.v_vehicle_display_state`, plus the odometer and engine hours
-        from `app.vehicles` (C4.2). Gauge telemetry (fuel/DEF level, battery volts, estimated
-        range), the coupled trailer and the upcoming-service list are not modelled in the schema
-        and are therefore not part of this snapshot.
       responses:
         '200':
           description: One entry per vehicle.
@@ -1731,18 +1286,10 @@ paths:
                       properties:
                         vehicle_id: { type: string, format: uuid }
                         display_state: { type: string, enum: [QUARANTINED, OFFLINE, HOS_ALERT, SPEEDING, MOVING, IDLING, PARKED] }
-                        latitude: { type: number, nullable: true }
-                        longitude: { type: number, nullable: true }
+                        latitude: { type: number }
+                        longitude: { type: number }
                         driver_name: { type: string, nullable: true }
                         next_eligible_clock_in_at: { type: string, format: date-time, nullable: true }
-                        plate: { type: string, nullable: true }
-                        odometer_km: { type: number, nullable: true }
-                        engine_hours: { type: number, nullable: true }
-                        vehicle_class: { type: string, nullable: true }
-                        asset_status: { type: string, nullable: true }
-                        is_online: { type: boolean, nullable: true }
-                        last_position_at: { type: string, format: date-time, nullable: true }
-                        last_speed_kph: { type: number, nullable: true }
 
   # ------------------------------------------------------------------ Reconciliation
   /reconciliation/statements:
@@ -1775,75 +1322,22 @@ paths:
     get:
       tags: [Anomalies]
       summary: Unified open-anomaly feed (fuel, HOS, accident, maintenance, security).
-      description: >-
-        Callers with `report:read` see the whole fleet. A driver (`asset:read` only) is narrowed
-        server-side to their own anomalies and those of the vehicle on their open shift.
       parameters:
         - $ref: '#/components/parameters/cursor'
         - $ref: '#/components/parameters/limit'
         - name: domains
           in: query
-          description: >-
-            Comma-separated list (`?domains=FUEL,HOS`) or a repeated key
-            (`?domains=FUEL&domains=HOS`); both forms are accepted.
-          style: form
-          explode: false
           schema: { type: array, items: { type: string, enum: [FUEL, HOS, ACCIDENT, MAINTENANCE, SECURITY] } }
       responses:
         '200':
           description: Page (see app.v_open_anomalies).
           content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
 
-  /anomalies/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Anomalies]
-      summary: Anomaly detail (C.14 admin detail screen). Own-scoped for drivers (asset:read).
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Anomaly detail.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id: { type: string, format: uuid }
-                  domain: { type: string, enum: [FUEL, HOS, ACCIDENT, MAINTENANCE, SECURITY] }
-                  severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
-                  title: { type: string }
-                  body: { type: string }
-                  created_at: { type: string, format: date-time }
-                  kind: { type: string }
-                  status: { type: string }
-                  recommended_action: { type: string, nullable: true }
-                  linked_entity_type: { type: string, nullable: true, enum: [VEHICLE, DRIVER] }
-                  linked_entity_id: { type: string, nullable: true }
-                  linked_asset: { type: string, nullable: true }
-                  vehicle_id: { type: string, format: uuid, nullable: true }
-                  vehicle_plate: { type: string, nullable: true }
-                  driver_id: { type: string, format: uuid, nullable: true }
-                  driver_name: { type: string, nullable: true }
-                  location_text: { type: string, nullable: true }
-                  latitude: { type: number, nullable: true }
-                  longitude: { type: number, nullable: true }
-                  signal: { type: object, nullable: true, description: Raw per-domain detail payload. }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   # ------------------------------------------------------------------ Documents
   /documents/expiring:
     get:
       tags: [Documents]
       summary: Documents expiring within the configured window (3.5 / B8).
-      description: >-
-        Callers with `document:read` see every asset. A driver (`asset:read` only) is narrowed
-        server-side to their own documents and those of the vehicle on their open shift (B.19).
       parameters:
         - $ref: '#/components/parameters/cursor'
         - name: within_days
@@ -1853,105 +1347,6 @@ paths:
         '200':
           description: Page of expiring documents.
           content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
-
-  /documents/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Documents]
-      summary: Single document detail for the admin detail screen (document:read).
-      description: >-
-        Resolves the subject from whichever owner column of `app.asset_documents` is populated
-        (vehicle, trailer or driver). Soft-deleted rows are invisible (C.16).
-      responses:
-        '200':
-          description: Document detail.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [document_id, document_type]
-                properties:
-                  document_id: { type: string, format: uuid }
-                  document_type: { type: string }
-                  subject_id: { type: string, format: uuid, nullable: true }
-                  subject_name: { type: string, nullable: true }
-                  subject_type: { type: string, enum: [VEHICLE, TRAILER, DRIVER], nullable: true }
-                  linked_asset: { type: string, nullable: true }
-                  issuer: { type: string, nullable: true }
-                  issued_on: { type: string, format: date, nullable: true }
-                  expires_on: { type: string, format: date, nullable: true }
-                  days_remaining: { type: integer, nullable: true }
-                  verified_at: { type: string, format: date-time, nullable: true }
-                  document_number: { type: string, nullable: true }
-                  is_blocking: { type: boolean }
-                  renewal_note: { type: string, nullable: true }
-                  notes: { type: string, nullable: true }
-                  scan_media_id: { type: string, format: uuid, nullable: true }
-                  metadata:
-                    type: array
-                    items:
-                      type: object
-                      required: [key, value]
-                      properties:
-                        key: { type: string }
-                        value: { type: string, nullable: true }
-                  created_at: { type: string, format: date-time }
-                  updated_at: { type: string, format: date-time }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /documents/{id}/renewal-note:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Documents]
-      summary: Record the admin renewal note against a document (document:manage). Writes app.asset_documents.notes.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [note]
-              properties:
-                note: { type: string, minLength: 1, maxLength: 2000 }
-      responses:
-        '200':
-          description: The updated document detail (same projection as GET /documents/{id}).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [document_id, document_type]
-                properties:
-                  document_id: { type: string, format: uuid }
-                  document_type: { type: string }
-                  subject_id: { type: string, format: uuid, nullable: true }
-                  subject_name: { type: string, nullable: true }
-                  subject_type: { type: string, nullable: true }
-                  linked_asset: { type: string, nullable: true }
-                  issuer: { type: string, nullable: true }
-                  issued_on: { type: string, format: date, nullable: true }
-                  expires_on: { type: string, format: date, nullable: true }
-                  days_remaining: { type: integer, nullable: true }
-                  renewal_note: { type: string, nullable: true }
-                  notes: { type: string, nullable: true }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
 
   # ------------------------------------------------------------------ Media
   /media/upload-url:
@@ -2002,23 +1397,57 @@ paths:
         '202': { description: Accepted into the ingestion stream. }
         '400': { $ref: '#/components/responses/BadRequest' }
 
-  # ------------------------------------------------------------------ Vehicles
-  /vehicles:
-    get:
-      tags: [Vehicles]
-      summary: Vehicle master-data list (asset:read). Keyset paginated on (license_plate, id).
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
+  # ------------------------------------------------------------------ Tenancy (14_tenancy.sql)
+  /auth/signup:
+    post:
+      tags: [Tenancy]
+      summary: Create a company and its first tenant-scoped ADMIN (self-service).
+      description: >
+        Unauthenticated and idempotent. Creates app.tenants (TRIAL/BASIC) with a slug derived from
+        company_name, creates the user, and grants ADMIN inside that new tenant. The response is the
+        standard session body plus the created tenant_id, so the client is signed in immediately.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignupRequest' }
+      responses:
+        '201':
+          description: Company created; session issued for its first ADMIN.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/LoginResponse'
+                  - type: object
+                    properties:
+                      tenant_id: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/accept-invite:
+    post:
+      tags: [Tenancy]
+      summary: Accept an invitation, set a password, join the inviter's tenant.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInviteRequest' }
       responses:
         '200':
-          description: Page of vehicles (app.vehicles).
-          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+          description: Session issued for the newly created member.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /admin/users/invite:
     post:
-      tags: [Vehicles]
-      summary: Register a vehicle (asset:create).
+      tags: [Tenancy]
+      summary: Invite a FLEET_MANAGER or ADMIN into the caller's tenant.
       security:
         - bearerAuth: []
         - idempotencyKey: []
@@ -2026,590 +1455,358 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [license_plate, vehicle_class]
-              properties:
-                license_plate: { type: string, maxLength: 20 }
-                vehicle_class: { type: string, enum: [TRACTOR, RIGID, VAN, PICKUP] }
-                make: { type: string, nullable: true }
-                model: { type: string, nullable: true }
-                year: { type: integer, nullable: true }
-                ownership_type: { type: string, enum: [OWNED, LEASED, EXTERNAL], default: OWNED }
-                fuel_tank_capacity_litres: { type: number, nullable: true }
+            schema: { $ref: '#/components/schemas/InviteUserRequest' }
+      responses:
+        '201':
+          description: Invitation created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Invitation' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /admin/users:
+    get:
+      tags: [Tenancy]
+      summary: Users of the caller's tenant with roles and assignment scope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: role_code
+          in: query
+          schema: { type: string, enum: [DRIVER, DISPATCHER, FLEET_MANAGER, ADMIN, FINANCE, AUDITOR] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [ACTIVE, SUSPENDED] }
+      responses:
+        '200':
+          description: Page of tenant users.
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TenantUserSummary' } } } }
+
+  /admin/invitations:
+    get:
+      tags: [Tenancy]
+      summary: Pending invitations for the caller's tenant.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Pending invitations.
+          content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Invitation' } } } } } }
+
+  /admin/users/{userId}/roles/revoke:
+    post:
+      tags: [Tenancy]
+      summary: Revoke a role from a user in the caller's tenant.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevokeRoleRequest' }
+      responses:
+        '204': { description: Role revoked. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/{userId}/assign:
+    post:
+      tags: [Tenancy]
+      summary: Assign a manager to vehicles/drivers in the caller's tenant.
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignScopeRequest' }
+      responses:
+        '204': { description: Scope updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------- Admin/manager roster + assignment
+  # The surface the mobile AdminManagementScreen binds to. GET /admin/managers is a projection of
+  # the GET /admin/users read model narrowed to ADMIN/FLEET_MANAGER; the POST is the same operation
+  # as /admin/users/{userId}/assign, exposed under the path the client calls.
+  /admin/managers:
+    get:
+      tags: [Tenancy]
+      summary: Admins and fleet managers in the caller's tenant, with their assigned scope.
+      description: >
+        Tenant-scoped. An ADMIN or SYSTEM_ADMIN sees every manager in the company; a FLEET_MANAGER
+        sees only themselves, mirroring the self-scoping the analytics surface already applies.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The admin/manager roster.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminRoster' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/managers/{userId}/assign:
+    post:
+      tags: [Tenancy]
+      summary: Replace one admin/manager's vehicle + driver scope.
+      description: >
+        Both arrays are REPLACE, not append. The target must belong to the caller's tenant; a
+        cross-tenant target is rejected server-side (the mobile role gating is presentational only).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignAdminsRequest' }
+      responses:
+        '204': { description: Scope updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------- Vehicle master data (Pillar 4)
+  /vehicles:
+    get:
+      tags: [Vehicles]
+      summary: The caller's fleet (tenant-scoped, cursor-paged).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Page of vehicles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, has_more]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/VehicleRecord' }
+                  next_cursor: { type: string, nullable: true }
+                  has_more: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Vehicles]
+      summary: Onboard a vehicle into the caller's tenant (A1.3).
+      security:
+        - bearerAuth: []
+        - idempotencyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VehicleCreateRequest' }
       responses:
         '201':
           description: Vehicle created.
-          content: { application/json: { schema: { type: object, properties: { id: { type: string, format: uuid }, license_plate: { type: string } } } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/VehicleRecord' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
 
-  /vehicles/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+  /vehicles/{vehicleId}:
     get:
       tags: [Vehicles]
-      summary: Single vehicle (asset:read).
+      summary: One vehicle in the caller's tenant.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Vehicle detail.
-          content: { application/json: { schema: { type: object } } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
+          description: The vehicle.
+          content: { application/json: { schema: { $ref: '#/components/schemas/VehicleRecord' } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Vehicles]
-      summary: Update vehicle master data (asset:update).
+      summary: Edit the vehicle columns the console owns.
       security:
         - bearerAuth: []
         - idempotencyKey: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                license_plate: { type: string, maxLength: 20 }
-                make: { type: string }
-                model: { type: string }
-                year: { type: integer }
-                status: { type: string, enum: [AVAILABLE, IN_USE, MAINTENANCE, QUARANTINED, RETIRED, EXTERNAL] }
-                is_operational: { type: boolean }
-                notes: { type: string, maxLength: 2000 }
+            schema: { $ref: '#/components/schemas/VehicleUpdateRequest' }
       responses:
         '200':
-          description: Vehicle updated.
-          content: { application/json: { schema: { type: object } } }
+          description: The updated vehicle.
+          content: { application/json: { schema: { $ref: '#/components/schemas/VehicleRecord' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
 
-  /vehicles/{vehicleId}/issues:
-    parameters:
-      - name: vehicleId
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Vehicles]
-      summary: Issues reported against a vehicle (asset:read or maintenance:read). Keyset paginated on (created_at, id) DESC.
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of driver-reported vehicle issues (app.vehicle_issues).
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          type: object
-                          required: [id, vehicle_id, category, severity, status, description, created_at]
-                          properties:
-                            id: { type: string, format: uuid }
-                            vehicle_id: { type: string, format: uuid }
-                            vehicle_plate: { type: string, nullable: true }
-                            category: { type: string, enum: [MECHANICAL, ELECTRICAL, TYRE, BODY, OTHER] }
-                            severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
-                            status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED, DISMISSED] }
-                            description: { type: string }
-                            photo_media_object_id: { type: string, format: uuid, nullable: true }
-                            reported_by_driver_id: { type: string, format: uuid }
-                            reported_by_name: { type: string, nullable: true }
-                            created_at: { type: string, format: date-time }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
+  /vehicles/{vehicleId}/assign:
     post:
       tags: [Vehicles]
-      summary: >-
-        Report a vehicle issue / defect (vehicle:report). Non-accident defect report raised by the
-        driver from the "My Vehicle" screen; collisions and SOS use /accidents instead.
+      summary: Assign drivers and linked vehicles to one vehicle.
+      description: >
+        Drivers are written to app.assignments for the current operational date, so an assigned
+        driver can actually clock in on the car (C1.8). Linked vehicles widen the scope of every
+        manager already assigned to the target. Both arrays are REPLACE; every referenced id must
+        belong to the caller's tenant.
       security:
         - bearerAuth: []
         - idempotencyKey: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [category, description]
-              properties:
-                category: { type: string, enum: [MECHANICAL, ELECTRICAL, TYRE, BODY, OTHER] }
-                severity: { type: string, enum: [LOW, MEDIUM, HIGH], default: LOW }
-                description: { type: string, minLength: 1, maxLength: 2000 }
-                shift_id: { type: string, format: uuid, nullable: true }
-                photo_media_object_id:
-                  type: string
-                  format: uuid
-                  nullable: true
-                  description: Optional single evidence photo registered via POST /media/upload-url.
+            schema: { $ref: '#/components/schemas/AssignVehicleRequest' }
       responses:
-        '201':
-          description: Issue recorded and queued for maintenance triage.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [issue_id, vehicle_id, status, severity, created_at]
-                properties:
-                  issue_id: { type: string, format: uuid }
-                  vehicle_id: { type: string, format: uuid }
-                  status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED, DISMISSED] }
-                  severity: { type: string, enum: [LOW, MEDIUM, HIGH] }
-                  created_at: { type: string, format: date-time }
+        '204': { description: Assignment updated. }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/SemanticViolation' }
 
-  # ------------------------------------------------------------------ Maintenance
-  /maintenance:
+  # ------------------------------------------------------- Scope-aware analytics (/analytics/*)
+  # Every response is already narrowed to the caller's resolved scope: ADMIN sees the whole tenant,
+  # FLEET_MANAGER only their app.manager_assignments slice, DRIVER only themselves. The same
+  # operations are also mounted under /reports/* for the existing mobile ReportsScreen.
+  /analytics/company:
     get:
-      tags: [Maintenance]
-      summary: Completed maintenance records (maintenance:read). Keyset paginated on (performed_at, id) DESC.
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of maintenance records joined to the task catalogue and asset.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          type: object
-                          required: [id, task_name, performed_at]
-                          properties:
-                            id: { type: string, format: uuid }
-                            vehicle_plate: { type: string, nullable: true }
-                            task_name: { type: string }
-                            performed_at: { type: string, format: date-time }
-                            odometer_km: { type: integer, nullable: true }
-                            cost: { type: string, nullable: true }
-                            vendor: { type: string, nullable: true }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /maintenance/work-orders:
-    post:
-      tags: [Maintenance]
-      summary: Record a completed work order (maintenance:record). Exactly one of vehicle_id / trailer_id.
+      tags: [Analytics]
+      summary: Company KPIs plus a per-manager breakdown.
+      description: >
+        Also served at GET /reports/analytics. The flat AnalyticsReport counters are included in the
+        body, so the mobile AnalyticsReportSchema parses this response unchanged.
       security:
         - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [task_code, performed_at]
-              properties:
-                vehicle_id: { type: string, format: uuid, nullable: true }
-                trailer_id: { type: string, format: uuid, nullable: true }
-                task_code: { type: string, maxLength: 80, description: Code of an active app.maintenance_tasks row. }
-                performed_at: { type: string, format: date-time }
-                odometer_km: { type: integer, nullable: true }
-                vendor: { type: string, nullable: true }
-                cost: { type: number, nullable: true }
-                currency: { type: string, minLength: 3, maxLength: 3, nullable: true }
-                notes: { type: string, maxLength: 2000, nullable: true }
-      responses:
-        '201':
-          description: Maintenance record created.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, task_id, performed_at]
-                properties:
-                  id: { type: string, format: uuid }
-                  task_id: { type: string, format: uuid }
-                  performed_at: { type: string, format: date-time }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/SemanticViolation' }
-
-  /maintenance/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Maintenance]
-      summary: Single maintenance record (maintenance:read).
-      responses:
-        '200':
-          description: Maintenance record.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, task_name, performed_at]
-                properties:
-                  id: { type: string, format: uuid }
-                  vehicle_plate: { type: string, nullable: true }
-                  task_name: { type: string }
-                  performed_at: { type: string, format: date-time }
-                  odometer_km: { type: integer, nullable: true }
-                  cost: { type: string, nullable: true }
-                  vendor: { type: string, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  # ------------------------------------------------------------------ Training
-  /training/lessons:
-    get:
-      tags: [Training]
-      summary: Training lesson catalogue joined to its course (training:read).
       parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/analyticsFrom'
+        - $ref: '#/components/parameters/analyticsTo'
       responses:
         '200':
-          description: Page of lessons ordered by curriculum sequence.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          type: object
-                          required: [id, course_id, code, title]
-                          properties:
-                            id: { type: string, format: uuid }
-                            course_id: { type: string, format: uuid }
-                            course_code: { type: string }
-                            course_title: { type: string }
-                            is_mandatory: { type: boolean }
-                            code: { type: string }
-                            title: { type: string }
-                            description: { type: string, nullable: true }
-                            content_url: { type: string, nullable: true }
-                            duration_minutes: { type: integer, nullable: true }
-                            order_index: { type: integer }
-        '400': { $ref: '#/components/responses/BadRequest' }
+          description: Company roll-up scoped to the caller.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CompanyAnalytics' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /training/roster:
+  /analytics/manager/{userId}:
     get:
-      tags: [Training]
-      summary: Enrolment roster with driver name, lesson title and status (training:review).
-      parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
-      responses:
-        '200':
-          description: Page of enrolments.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          type: object
-                          required: [id, driver_id, lesson_id, status]
-                          properties:
-                            id: { type: string, format: uuid }
-                            driver_id: { type: string, format: uuid }
-                            driver_name: { type: string, nullable: true }
-                            lesson_id: { type: string, format: uuid }
-                            lesson_title: { type: string }
-                            course_title: { type: string }
-                            status: { type: string, enum: [NOT_STARTED, IN_PROGRESS, COMPLETED, EXPIRED] }
-                            quiz_score: { type: integer, nullable: true }
-                            completed_at: { type: string, format: date-time, nullable: true }
-                            created_at: { type: string, format: date-time }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /training/lessons/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Training]
-      summary: Single training lesson (training:read).
-      responses:
-        '200':
-          description: Lesson joined to its course.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, course_id, code, title]
-                properties:
-                  id: { type: string, format: uuid }
-                  course_id: { type: string, format: uuid }
-                  course_code: { type: string }
-                  course_title: { type: string }
-                  is_mandatory: { type: boolean }
-                  code: { type: string }
-                  title: { type: string }
-                  description: { type: string, nullable: true }
-                  content_url: { type: string, nullable: true }
-                  duration_minutes: { type: integer, nullable: true }
-                  order_index: { type: integer }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /training/lessons/{id}/complete:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Training]
-      summary: Mark a lesson complete for the calling driver (training:complete). Upsert; safe to retry.
+      tags: [Analytics]
+      summary: One manager's KPIs, expanded per vehicle and per driver.
+      description: Authorised for an ADMIN of the tenant, or for that manager themselves.
       security:
         - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                quiz_score: { type: integer, minimum: 0, maximum: 100, nullable: true }
-      responses:
-        '200':
-          description: Enrolment marked COMPLETED.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, lesson_id, status]
-                properties:
-                  id: { type: string, format: uuid }
-                  lesson_id: { type: string, format: uuid }
-                  status: { type: string, enum: [NOT_STARTED, IN_PROGRESS, COMPLETED, EXPIRED] }
-                  completed_at: { type: string, format: date-time, nullable: true }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
-
-  # ------------------------------------------------------------------ Reports
-  /reports/fuel-efficiency:
-    get:
-      tags: [Reports]
-      summary: Fleet fuel-efficiency aggregate (report:read) from fuel_purchases + fuel_efficiency_records.
-      responses:
-        '200':
-          description: Fleet totals plus a per-vehicle breakdown.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [total_litres, total_cost, total_co2_kg, per_vehicle]
-                properties:
-                  total_litres: { type: number }
-                  total_cost: { type: number }
-                  avg_efficiency_l_per_100km: { type: number, nullable: true }
-                  total_co2_kg: { type: number, description: Litres x 2.68 kg CO2 per litre of diesel. }
-                  per_vehicle:
-                    type: array
-                    items:
-                      type: object
-                      required: [litres, cost]
-                      properties:
-                        vehicle_plate: { type: string, nullable: true }
-                        litres: { type: number }
-                        cost: { type: number }
-                        efficiency: { type: number, nullable: true }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /reports/analytics:
-    get:
-      tags: [Reports]
-      summary: Operational headline counters for the analytics dashboard (report:read).
-      responses:
-        '200':
-          description: Counters derived from existing views and tables.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [active_fleet, open_accidents, pending_dvir, expiring_docs, fuel_spend_30d, anomalies_open]
-                properties:
-                  active_fleet: { type: integer }
-                  open_accidents: { type: integer }
-                  pending_dvir: { type: integer }
-                  expiring_docs: { type: integer }
-                  fuel_spend_30d: { type: number }
-                  anomalies_open: { type: integer }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  # ------------------------------------------------------------------ Settings
-  /admin/settings/triggers:
-    get:
-      tags: [Settings]
-      summary: Read the editable trigger thresholds from app.system_config (config:read).
-      responses:
-        '200':
-          description: The curated trigger allow-list. Sensitive values are redacted.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      type: object
-                      required: [key, value_type, description]
-                      properties:
-                        key: { type: string, example: accident.ack_timeout_minutes }
-                        value: { description: Typed per value_type; redacted when is_sensitive. }
-                        value_type: { type: string, enum: [number, string, boolean, json, array] }
-                        description: { type: string }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    put:
-      tags: [Settings]
-      summary: Update one trigger threshold (config:manage). Validated against value_type and min/max.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [key, value]
-              properties:
-                key: { type: string, description: Must be one of the editable trigger keys. }
-                value: { description: Must satisfy the row value_type and min/max bounds. }
-      responses:
-        '200':
-          description: Updated setting.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [key, value_type, description]
-                properties:
-                  key: { type: string }
-                  value: {}
-                  value_type: { type: string, enum: [number, string, boolean, json, array] }
-                  description: { type: string }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/SemanticViolation' }
-
-  # ------------------------------------------------------------------ Notifications
-  /notifications:
-    get:
-      tags: [Notifications]
-      summary: The caller's notification inbox (notification:read). Keyset paginated on (queued_at, id) DESC.
       parameters:
-        - $ref: '#/components/parameters/cursor'
-        - $ref: '#/components/parameters/limit'
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/analyticsFrom'
+        - $ref: '#/components/parameters/analyticsTo'
       responses:
         '200':
-          description: Page of notifications addressed to the calling principal.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          type: object
-                          required: [id, title, body, priority, status, created_at]
-                          properties:
-                            id: { type: string, format: uuid }
-                            title: { type: string }
-                            body: { type: string }
-                            priority: { type: string, enum: [LOW, NORMAL, HIGH, CRITICAL] }
-                            status: { type: string, enum: [QUEUED, SENT, DELIVERED, FAILED, SUPPRESSED_DND] }
-                            created_at: { type: string, format: date-time }
-                            payload: { type: object }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /notifications/{id}/read:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Notifications]
-      summary: Acknowledge a notification (notification:manage). Scoped to the recipient; safe to retry.
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      responses:
-        '200':
-          description: Notification acknowledged (status DELIVERED).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [id, status]
-                properties:
-                  id: { type: string, format: uuid }
-                  status: { type: string, enum: [QUEUED, SENT, DELIVERED, FAILED, SUPPRESSED_DND] }
-                  delivered_at: { type: string, format: date-time, nullable: true }
+          description: Manager analytics.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ManagerAnalytics' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/IdempotencyConflict' }
+
+  /analytics/vehicle/{vehicleId}:
+    get:
+      tags: [Analytics]
+      summary: Per-vehicle KPIs (tenant- and scope-checked).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/analyticsFrom'
+        - $ref: '#/components/parameters/analyticsTo'
+      responses:
+        '200':
+          description: Vehicle analytics.
+          content: { application/json: { schema: { $ref: '#/components/schemas/VehicleAnalyticsDetail' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /analytics/driver/{driverId}:
+    get:
+      tags: [Analytics]
+      summary: Per-driver KPIs. Authorised for the driver, their manager, or an ADMIN.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/analyticsFrom'
+        - $ref: '#/components/parameters/analyticsTo'
+      responses:
+        '200':
+          description: Driver analytics.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DriverAnalyticsDetail' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /analytics/me:
+    get:
+      tags: [Analytics]
+      summary: The signed-in driver's own KPIs.
+      description: >
+        Returns DriverAnalyticsDetail for a DRIVER. A caller with no driver row (ADMIN, manager)
+        receives the CompanyAnalytics view of their own scope instead.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/analyticsFrom'
+        - $ref: '#/components/parameters/analyticsTo'
+      responses:
+        '200':
+          description: The caller's own analytics.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DriverAnalyticsDetail'
+                  - $ref: '#/components/schemas/CompanyAnalytics'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }

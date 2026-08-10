@@ -63,7 +63,12 @@ export type AuditAction =
   | "CONFIG_CHANGE"
   | "DEVICE_REVOKE"
   | "RECOVERY_MODE_ENABLE"
-  | "RECOVERY_MODE_DISABLE";
+  | "RECOVERY_MODE_DISABLE"
+  | "TENANT_CREATE"
+  | "MEMBERSHIP_GRANT"
+  | "MEMBERSHIP_REVOKE"
+  | "INVITATION_CREATE"
+  | "SCOPE_ASSIGN";
 
 export type ConsentType =
   | "GPS_TRACKING_WORKING_HOURS"
@@ -270,7 +275,21 @@ export type RoleCode =
   | "FLEET_MANAGER"
   | "ADMIN"
   | "FINANCE"
-  | "AUDITOR";
+  | "AUDITOR"
+  | "SYSTEM_ADMIN";
+
+/** app.tenant_status (14_tenancy.sql). */
+export type TenantStatus =
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "TRIAL"
+  | "EXPIRED";
+
+/** app.subscription_tier (14_tenancy.sql). */
+export type SubscriptionTier =
+  | "BASIC"
+  | "PROFESSIONAL"
+  | "ENTERPRISE";
 
 export type ShiftEventSource =
   | "DRIVER"
@@ -492,6 +511,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
 // ----------------------------------------------------------- row types
 /** app.accident_media */
 export interface AccidentMediaRow {
+  tenant_id: string;
   id: string;
   report_id: string;
   slot: AccidentMediaSlot;
@@ -503,6 +523,7 @@ export interface AccidentMediaRow {
 
 /** app.accident_reports */
 export interface AccidentReportRow {
+  tenant_id: string;
   id: string;
   shift_id: string | null;
   driver_id: string;
@@ -567,6 +588,7 @@ export interface AccidentTelemetryRow {
 
 /** app.asset_documents */
 export interface AssetDocumentRow {
+  tenant_id: string;
   id: string;
   vehicle_id: string | null;
   trailer_id: string | null;
@@ -588,6 +610,7 @@ export interface AssetDocumentRow {
 
 /** app.assignments */
 export interface AssignmentRow {
+  tenant_id: string;
   id: string;
   assigned_date: string;
   driver_id: string;
@@ -616,6 +639,12 @@ export interface DriverDeviceRow {
   push_provider: string;
   push_token_updated_at: string | null;
   biometric_enrolled: boolean;
+  pin_set_at: string | null;
+  refresh_token_hash: string | null;
+  refresh_token_expires_at: string | null;
+  offline_window_expires_at: string | null;
+  offline_pin_failures: number;
+  offline_locked_until: string | null;
   last_seen_online_at: string | null;
   revoked_at: string | null;
   revoked_by: string | null;
@@ -626,6 +655,7 @@ export interface DriverDeviceRow {
 
 /** app.driver_duty_segments */
 export interface DriverDutySegmentRow {
+  tenant_id: string;
   id: string;
   driver_id: string;
   shift_id: string | null;
@@ -646,6 +676,7 @@ export interface DriverDutySegmentRow {
 
 /** app.driver_hos_state */
 export interface DriverHosStateRow {
+  tenant_id: string;
   driver_id: string;
   policy_id: string;
   driving_seconds_today: number;
@@ -691,6 +722,7 @@ export interface DriverOnboardingRow {
 
 /** app.drivers */
 export interface DriverRow {
+  tenant_id: string;
   id: string;
   user_id: string;
   employee_number: string | null;
@@ -714,6 +746,7 @@ export interface DriverRow {
 
 /** app.escalation_timers */
 export interface EscalationTimerRow {
+  tenant_id: string;
   id: string;
   incident_kind: string;
   incident_id: string;
@@ -727,6 +760,7 @@ export interface EscalationTimerRow {
 
 /** app.expenses */
 export interface ExpenseRow {
+  tenant_id: string;
   id: string;
   shift_id: string | null;
   vehicle_id: string;
@@ -750,6 +784,7 @@ export interface ExpenseRow {
 
 /** app.fuel_card_statement_lines */
 export interface FuelCardStatementLineRow {
+  tenant_id: string;
   id: string;
   statement_id: string;
   line_number: number;
@@ -769,6 +804,7 @@ export interface FuelCardStatementLineRow {
 
 /** app.fuel_card_statements */
 export interface FuelCardStatementRow {
+  tenant_id: string;
   id: string;
   provider: string;
   period_start: string;
@@ -785,6 +821,7 @@ export interface FuelCardStatementRow {
 
 /** app.fuel_cards */
 export interface FuelCardRow {
+  tenant_id: string;
   id: string;
   label: string;
   last_four: string;
@@ -804,6 +841,7 @@ export interface FuelCardRow {
 
 /** app.fuel_efficiency_records */
 export interface FuelEfficiencyRecordRow {
+  tenant_id: string;
   id: string;
   shift_id: string;
   vehicle_id: string;
@@ -823,6 +861,7 @@ export interface FuelEfficiencyRecordRow {
 
 /** app.fuel_purchase_anomalies */
 export interface FuelPurchaseAnomalyRow {
+  tenant_id: string;
   id: string;
   fuel_purchase_id: string | null;
   shift_id: string | null;
@@ -845,6 +884,7 @@ export interface FuelPurchaseAnomalyRow {
 
 /** app.fuel_purchases */
 export interface FuelPurchaseRow {
+  tenant_id: string;
   id: string;
   shift_id: string | null;
   vehicle_id: string;
@@ -884,6 +924,7 @@ export interface FuelPurchaseRow {
 
 /** app.fuel_records */
 export interface FuelRecordRow {
+  tenant_id: string;
   id: string;
   shift_id: string;
   vehicle_id: string;
@@ -907,6 +948,7 @@ export interface FuelRecordRow {
 
 /** app.geofences */
 export interface GeofenceRow {
+  tenant_id: string;
   id: string;
   name: string;
   kind: GeofenceKind;
@@ -943,6 +985,7 @@ export interface HosPolicyRow {
 
 /** app.hos_violations */
 export interface HosViolationRow {
+  tenant_id: string;
   id: string;
   driver_id: string;
   shift_id: string | null;
@@ -1026,6 +1069,7 @@ export interface InspectionTemplateRow {
 
 /** app.inspections */
 export interface InspectionRow {
+  tenant_id: string;
   id: string;
   shift_id: string;
   template_id: string;
@@ -1046,6 +1090,7 @@ export interface InspectionRow {
 
 /** app.maintenance_records */
 export interface MaintenanceRecordRow {
+  tenant_id: string;
   id: string;
   schedule_id: string | null;
   task_id: string;
@@ -1067,6 +1112,7 @@ export interface MaintenanceRecordRow {
 
 /** app.maintenance_schedules */
 export interface MaintenanceScheduleRow {
+  tenant_id: string;
   id: string;
   task_id: string;
   vehicle_id: string | null;
@@ -1148,6 +1194,7 @@ export interface MaintenanceTaskRow {
 
 /** app.media_objects */
 export interface MediaObjectRow {
+  tenant_id: string;
   id: string;
   bucket: string;
   object_key: string;
@@ -1198,6 +1245,7 @@ export interface NotificationTemplateRow {
 
 /** app.notifications */
 export interface NotificationRow {
+  tenant_id: string;
   id: string;
   template_code: string | null;
   recipient_user_id: string | null;
@@ -1225,6 +1273,7 @@ export interface NotificationRow {
 
 /** app.on_call_roster */
 export interface OnCallRosterRow {
+  tenant_id: string;
   id: string;
   user_id: string;
   incident_kind: string;
@@ -1254,6 +1303,7 @@ export interface OutboxEventRow {
 
 /** app.payroll_exports */
 export interface PayrollExportRow {
+  tenant_id: string;
   id: string;
   period_start: string;
   period_end: string;
@@ -1274,6 +1324,7 @@ export interface PermissionRow {
 
 /** app.quarantine_events */
 export interface QuarantineEventRow {
+  tenant_id: string;
   id: string;
   vehicle_id: string | null;
   trailer_id: string | null;
@@ -1294,6 +1345,7 @@ export interface QuarantineEventRow {
 
 /** app.recovery_modes */
 export interface RecoveryModeRow {
+  tenant_id: string;
   id: string;
   vehicle_id: string;
   reason: string;
@@ -1321,6 +1373,7 @@ export interface RoleRow {
 
 /** app.shifts */
 export interface ShiftRow {
+  tenant_id: string;
   id: string;
   driver_id: string;
   vehicle_id: string;
@@ -1386,6 +1439,7 @@ export interface SystemConfigRow {
 
 /** app.tracker_health */
 export interface TrackerHealthRow {
+  tenant_id: string;
   vehicle_id: string;
   traccar_device_id: number | null;
   last_position_at: string | null;
@@ -1402,6 +1456,7 @@ export interface TrackerHealthRow {
 
 /** app.trailer_assignments */
 export interface TrailerAssignmentRow {
+  tenant_id: string;
   id: string;
   trailer_id: string;
   vehicle_id: string;
@@ -1420,6 +1475,7 @@ export interface TrailerAssignmentRow {
 
 /** app.trailer_last_known_location */
 export interface TrailerLastKnownLocationRow {
+  tenant_id: string;
   trailer_id: string;
   via_vehicle_id: string | null;
   position: string;
@@ -1431,6 +1487,7 @@ export interface TrailerLastKnownLocationRow {
 
 /** app.trailers */
 export interface TrailerRow {
+  tenant_id: string;
   id: string;
   license_plate: string;
   trailer_type: TrailerType;
@@ -1690,6 +1747,8 @@ export interface VehicleDisplayStateViewRow {
   limit_reached_at: string | null;
   warning_sent_at: string | null;
   display_state: VehicleDisplayState | null;
+  /** Owning tenant (14_tenancy.sql); used to scope the real-time feed per tenant. */
+  tenant_id: string | null;
 }
 
 /** app.vehicle_issues */
@@ -1714,6 +1773,7 @@ export interface VehicleIssueRow {
 
 /** app.vehicle_movement_events */
 export interface VehicleMovementEventRow {
+  tenant_id: string;
   id: string;
   vehicle_id: string;
   event_type: string;
@@ -1728,6 +1788,7 @@ export interface VehicleMovementEventRow {
 
 /** app.vehicles */
 export interface VehicleRow {
+  tenant_id: string;
   id: string;
   license_plate: string;
   vehicle_class: VehicleClass;
@@ -1768,6 +1829,7 @@ export interface WorkLogPhotoRow {
 
 /** app.work_logs */
 export interface WorkLogRow {
+  tenant_id: string;
   id: string;
   shift_id: string;
   planned_notes: string | null;
@@ -1802,6 +1864,7 @@ export interface AuditLogRow {
 
 /** telemetry.location_summaries */
 export interface LocationSummaryRow {
+  tenant_id: string;
   vehicle_id: string;
   bucket_start: string;
   bucket_seconds: number;
@@ -1820,6 +1883,7 @@ export interface LocationSummaryRow {
 
 /** telemetry.location_updates */
 export interface LocationUpdateRow {
+  tenant_id: string;
   id: string;
   vehicle_id: string;
   shift_id: string | null;
@@ -1845,3 +1909,49 @@ export interface LocationUpdateRow {
   retention_reason: string;
 }
 
+// ---------------------------------------------------------------- tenancy (14_tenancy.sql)
+
+export interface TenantRow {
+  id: string;
+  name: string;
+  slug: string;
+  status: TenantStatus;
+  subscription_tier: SubscriptionTier;
+  max_vehicles: number;
+  max_drivers: number;
+  settings: unknown;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface InvitationRow {
+  id: string;
+  tenant_id: string;
+  email: string;
+  role_code: RoleCode;
+  invited_by: string | null;
+  token: string;
+  accepted_at: string | null;
+  accepted_user_id: string | null;
+  revoked_at: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface UserTenantRow {
+  user_id: string;
+  tenant_id: string;
+  is_primary: boolean;
+  created_at: string;
+}
+
+export interface ManagerAssignmentRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  vehicle_id: string | null;
+  driver_id: string | null;
+  assigned_by: string | null;
+  created_at: string;
+}

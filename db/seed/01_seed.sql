@@ -15,6 +15,13 @@
 
 SET search_path = app, telemetry, audit, public;
 
+-- 14_tenancy.sql enables and FORCES row-level security on every tenant table.
+-- Seed rows are reference data (roles, permissions, policies, fixtures) that have
+-- no tenant, so without this the FORCE RLS policy would reject every insert under a
+-- NULL tenant GUC. Lift the isolation for the duration of this session only — this
+-- is a one-off bootstrap, not a request path, and the seed touches no tenant data.
+SET app.current_role = 'SYSTEM_ADMIN';
+
 -- -----------------------------------------------------------------------------
 -- Roles  (C6.1, N4)
 -- -----------------------------------------------------------------------------

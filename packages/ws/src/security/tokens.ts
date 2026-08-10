@@ -56,6 +56,7 @@ export function principalFromClaims(claims: AccessTokenClaims): Principal {
     permissions: new Set<PermissionCode>(claims.permissions ?? []),
     sessionId: claims.sid,
     locale: claims.locale ?? "en",
+    tenantId: claims.tid ?? "",
     ...(claims.dev ? { deviceIdHash: claims.dev } : {}),
   };
 }

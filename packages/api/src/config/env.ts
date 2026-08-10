@@ -67,6 +67,8 @@ const EnvSchema = z.object({
   TRUST_PROXY: z.string().default("false").transform((v) => v === "true"),
   WEBHOOK_SECRET: z.string().optional(), // Traccar webhook HMAC (S-1); unset = unprotected
   ALLOWED_ORIGINS: z.string().default(""), // comma-separated CORS allow-list
+  // Base URL of the web/admin console, used to build the invitation accept link sent by email.
+  FRONTEND_URL: z.string().default("http://localhost:3000"),
   RATE_LIMIT_GLOBAL_PER_MINUTE: z.coerce.number().int().positive().default(120),
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_MEDIA_PER_MINUTE: z.coerce.number().int().positive().default(30),

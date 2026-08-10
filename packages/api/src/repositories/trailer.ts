@@ -30,3 +30,6 @@ export class TrailerAssignmentRepository extends BaseRepository<TrailerAssignmen
     return res.rows[0] ?? null;
   }
 }
+
+
+

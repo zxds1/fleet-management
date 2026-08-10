@@ -91,7 +91,7 @@ describe("authenticate middleware", () => {
 });
 
 describe("requirePermission middleware", () => {
-  const principal: Principal = { userId: "u1", email: "a@b.c", roles: [], permissions: new Set<PermissionCode>(["fuel:verify"]), locale: "en" };
+  const principal: Principal = { userId: "u1", email: "a@b.c", tenantId: "00000000-0000-0000-0000-000000000001", roles: [], permissions: new Set<PermissionCode>(["fuel:verify"]), locale: "en" };
 
   it("passes when a required permission is held", (done) => {
     const req: any = { principal };

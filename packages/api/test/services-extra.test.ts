@@ -117,7 +117,7 @@ describe("SessionService", () => {
     issueAccessToken: jest.fn(() => ({ token: "at", expiresAt: new Date() })),
   };
   const config: any = { numeric: jest.fn(async () => 10) };
-  const resolveIdentity = jest.fn(async () => ({ email: "a@b.c", roles: ["DRIVER"] as any, permissions: [], locale: "en" as const }));
+  const resolveIdentity = jest.fn(async () => ({ email: "a@b.c", phone: null, tenantId: "00000000-0000-0000-0000-000000000001", roles: ["DRIVER"] as any, permissions: [], locale: "en" as const }));
   const svc = new SessionService(sessionsRepo, store, tokens, config, resolveIdentity);
 
   beforeEach(() => jest.clearAllMocks());
@@ -171,9 +171,16 @@ describe("DeviceService", () => {
     register: jest.fn(async (i: any) => ({ id: "d1", push_token: i.pushToken })),
     getById: jest.fn(async (id: string) => ({ id })),
     findAnyByHash: jest.fn(async () => ({ id: "d1" })),
+    findLive: jest.fn(async () => ({ id: "d1", revoked_at: null })),
+    markPinSet: jest.fn(async () => undefined),
+    bindRefreshToken: jest.fn(async () => undefined),
     revoke: jest.fn(async () => undefined),
   };
-  const svc = new DeviceService(devices);
+  const deviceTokens: any = {
+    issueRefreshToken: jest.fn(() => ({ token: "rt", tokenHash: "rth", expiresAt: new Date("2030-01-01T00:00:00Z") })),
+  };
+  const deviceConfig: any = { numeric: jest.fn(async (_k: string, d: number) => d) };
+  const svc = new DeviceService(devices, deviceTokens, deviceConfig);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -181,6 +188,37 @@ describe("DeviceService", () => {
     const r = await svc.register({ userId: "u1", deviceIdHash: "h" });
     expect(r.ok).toBe(true);
     expect((r as any).value.deviceId).toBe("d1");
+  });
+
+  it("refuses to register onto a revoked device (B12)", async () => {
+    devices.findAnyByHash.mockResolvedValueOnce({ id: "d1", revoked_at: "2026-01-01T00:00:00Z" });
+    const r = await svc.register({ userId: "u1", deviceIdHash: "h" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBeInstanceOf(DeviceRevoked);
+  });
+
+  it("records that a local PIN exists without storing it", async () => {
+    const r = await svc.setPin("u1", "h");
+    expect(r.ok).toBe(true);
+    expect(devices.markPinSet).toHaveBeenCalledWith("d1");
+  });
+
+  it("reports NotFound when setting a PIN on an unregistered device", async () => {
+    devices.findLive.mockResolvedValueOnce(null);
+    const r = await svc.setPin("u1", "h");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBeInstanceOf(NotFound);
+  });
+
+  it("binds a device refresh token and caps the offline window", async () => {
+    const r = await svc.bindRefresh({ userId: "u1", deviceIdHash: "h" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.refreshToken).toBe("rt");
+    expect(deviceConfig.numeric).toHaveBeenCalledWith("auth.device_offline_max_hours", 24);
+    expect(devices.bindRefreshToken).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: "d1", offlineWindowExpiresAt: r.value.offlineUntil }),
+    );
   });
 
   it("revokes a device by id", async () => {

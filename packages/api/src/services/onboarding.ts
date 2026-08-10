@@ -177,6 +177,6 @@ export class OnboardingService {
 
   /** Resolves the driver profile behind a user id; used by the `/drivers/me` router surface. */
   async findDriverByUserId(userId: string) {
-    return this.drivers.getByUserId(userId);
+    return this.drivers.findByUserId(userId);
   }
 }
