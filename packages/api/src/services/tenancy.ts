@@ -12,6 +12,7 @@ import {
   ValidationError,
   err,
   ok,
+  logger,
   type AdminSummary,
   type DbClient,
   type Result,
@@ -233,7 +234,7 @@ export class TenancyService {
         acceptUrl,
         expiresAt,
       })
-      .catch(() => undefined);
+      .catch((e) => logger.warn("tenancy.invite email send failed (invitation still created)", { service_name: "api", tenantId: input.tenantId, message: (e as Error).message }));
 
     return ok({
       invitationId: invitation.id,

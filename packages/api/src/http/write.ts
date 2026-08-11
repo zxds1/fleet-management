@@ -12,6 +12,7 @@ import {
   isErr,
   isSystemAdmin,
   BOOTSTRAP_TENANT_ID,
+  logger,
   type IdempotencyService,
   type PoolLike,
   type Principal,
@@ -137,7 +138,7 @@ export async function executeWrite<T>(
     res.status(settled.status).json(settled.body);
   } catch (e) {
     if (claim) {
-      await deps.releaseClaim(ctx.subject, claim.key).catch(() => undefined);
+      await deps.releaseClaim(ctx.subject, claim.key).catch((e) => logger.error("write.releaseClaim failed", { service_name: "api", subject: ctx.subject, key: claim.key, message: (e as Error).message }, e));
     }
     throw unwrap(e);
   }

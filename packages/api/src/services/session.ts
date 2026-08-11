@@ -5,7 +5,7 @@
 // durable record; evicted sessions are revoked there too.
 
 import type { ConfigClient, PermissionCode, Result, RoleCode } from "@fleet/shared";
-import { err, ok, Unauthenticated } from "@fleet/shared";
+import { err, ok, Unauthenticated, logger } from "@fleet/shared";
 import type { SessionStore } from "../config/redis";
 import type { TokenService } from "../security/tokens";
 import { hashToken } from "../security/tokens";
@@ -64,8 +64,8 @@ export class SessionService {
 
     const evicted = await this.evictBeyondCap(input.userId, session.id, refresh.expiresAt, maxSessions);
     for (const id of evicted) {
-      await this.sessions.revoke(id, "SESSION_LIMIT_EXCEEDED").catch(() => undefined);
-      await this.store.remove(input.userId, id).catch(() => undefined);
+      await this.sessions.revoke(id, "SESSION_LIMIT_EXCEEDED").catch((e) => logger.error("session.revoke failed", { service_name: "api", id, message: (e as Error).message }, e));
+      await this.store.remove(input.userId, id).catch((e) => logger.error("session.store.remove failed", { service_name: "api", userId: input.userId, id, message: (e as Error).message }, e));
     }
 
     const access = this.tokens.issueAccessToken({
@@ -107,7 +107,7 @@ export class SessionService {
     if (this.store.available) {
       await this.store
         .add(session.user_id, session.id, nextRefresh.expiresAt, await this.config.numeric("auth.max_concurrent_sessions", 10))
-        .catch(() => undefined);
+        .catch((e) => logger.error("session.store.add failed", { service_name: "api", userId: session.user_id, message: (e as Error).message }, e));
     }
 
     const access = this.tokens.issueAccessToken({
@@ -157,6 +157,6 @@ export class SessionService {
 
   /** Idle-timeout touch (A1.6): bump the DB session's last_seen_at on activity. */
   async touch(userId: string, sessionId: string): Promise<void> {
-    await this.sessions.touch(sessionId).catch(() => undefined);
+    await this.sessions.touch(sessionId).catch((e) => logger.error("session.touch failed", { service_name: "api", userId, sessionId, message: (e as Error).message }, e));
   }
 }

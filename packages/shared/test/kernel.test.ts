@@ -57,7 +57,7 @@ describe("logging", () => {
     const line = JSON.parse(out[0]!);
     expect(line.password).toBe("[redacted]");
     expect(line.nested.pin).toBe("[redacted]");
-    expect(line.email).toBe("a@b.co");
+    expect(line.email).toBe("[redacted]");
   });
 });
 

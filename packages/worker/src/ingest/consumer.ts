@@ -5,10 +5,9 @@
 // core `processPositions` is dependency-injected so it can be unit-tested with a fake repo.
 
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
-import { TRACCAR_POSITIONS_GROUP, TRACCAR_POSITIONS_STREAM } from "@fleet/shared";
+import { TRACCAR_POSITIONS_GROUP, TRACCAR_POSITIONS_STREAM, logger, metrics } from "@fleet/shared";
 import { transaction } from "@fleet/db";
 import type { Redis } from "ioredis";
-import { logger } from "@fleet/shared";
 import { parseTraccarPosition, type TraccarPosition } from "./traccar";
 import { decideRetention, type RetentionContext, type RetentionDecision } from "./retention";
 import { computeTrackerHealth, OffShiftMovementDetector, type HealthConfig } from "./derive";
@@ -94,13 +93,24 @@ export class IngestConsumer {
         const positions: TraccarPosition[] = [];
         for (const [id, fields] of entries) {
           this.lastId = id;
-          const raw = this.decode(fields);
+          const raw = this.decode(fields, id);
           if (raw) positions.push(parseTraccarPosition(raw));
+          else metrics.increment("worker.ingest_discarded_position", 1);
         }
         if (positions.length) {
           const result = await this.processPositions(positions);
           await this.deps.redis!.xack(this.stream, this.groupName, ...entries.map((e: any) => e[0]));
-          void result;
+          logger.info("ingest batch processed", {
+            service_name: "worker",
+            stream: this.stream,
+            processed: result.processed,
+            retained: result.retained,
+            discarded: result.discarded,
+            movements: result.movements,
+          });
+          metrics.increment("worker.ingest_processed", result.processed);
+          metrics.increment("worker.ingest_retained", result.retained);
+          metrics.increment("worker.ingest_discarded", result.discarded);
         }
       }
     } catch (e) {
@@ -108,19 +118,24 @@ export class IngestConsumer {
     }
   }
 
-  private decode(fields: string[]): Record<string, unknown> | null {
+  private decode(fields: string[], id?: string): Record<string, unknown> | null {
     // Traccar forwards the position as a JSON string under the `data` field.
     for (let i = 0; i + 1 < fields.length; i += 2) {
       if (fields[i] === "data") {
         try {
           return JSON.parse(fields[i + 1] as string) as Record<string, unknown>;
-        } catch {
+        } catch (e) {
+          logger.warn("ingest: discarded malformed position payload", { service_name: "worker", stream: this.stream, id, message: (e as Error).message });
+          metrics.increment("worker.ingest_malformed_payload", 1);
           return null;
         }
       }
     }
+    logger.warn("ingest: discarded position with no data field", { service_name: "worker", stream: this.stream, id });
+    metrics.increment("worker.ingest_missing_data_field", 1);
     return null;
   }
+
 
   /** Core pipeline. Dependency-injected for tests; wraps per-vehicle writes in one transaction. */
   async processPositions(positions: TraccarPosition[]): Promise<IngestResult> {

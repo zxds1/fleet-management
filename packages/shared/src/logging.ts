@@ -1,16 +1,30 @@
 // packages/shared/src/logging.ts
 // Structured JSON logger with PII/secret redaction (01-shared-kernel.md §9).
 
-const SENSITIVE_RE = /(pin|password|secret|token|apikey|api_key|key)$/i;
+const SENSITIVE_RE = /(pin|password|secret|token|apikey|api_key|key|authorization|cookie|set-cookie|email|phone|ssn|passwordhash)([\s_-]*(value|hash|token))?$/i;
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
+
+/**
+ * Structured context attached to every derived logger. `service_name` is mandatory so that
+ * every emitted entry carries its origin (Layer 2 observability). The remaining fields are optional
+ * trace/flow correlation metadata.
+ */
+export interface LogContext {
+  service_name: string;
+  trace_id?: string;
+  session_id?: string;
+  user_cohort?: string;
+  flow_step?: string;
+  [key: string]: unknown;
+}
 
 export interface Logger {
   debug(msg: string, meta?: Record<string, unknown>): void;
   info(msg: string, meta?: Record<string, unknown>): void;
   warn(msg: string, meta?: Record<string, unknown>): void;
   error(msg: string, meta?: Record<string, unknown>, err?: unknown): void;
-  child(defaultMeta: Record<string, unknown>): Logger;
+  child(defaultMeta: LogContext): Logger;
 }
 
 function redact(value: unknown, seen: WeakSet<object>): unknown {
@@ -30,8 +44,12 @@ function redact(value: unknown, seen: WeakSet<object>): unknown {
 export class ConsoleLogger implements Logger {
   constructor(
     private level: LogLevel = "info",
-    private defaultMeta: Record<string, unknown> = {},
-  ) {}
+    private defaultMeta: Record<string, unknown> = { service_name: "unknown" },
+    private serviceName: string = "unknown",
+  ) {
+    if (!defaultMeta.service_name) defaultMeta.service_name = this.serviceName;
+    else this.serviceName = String(defaultMeta.service_name);
+  }
 
   private log(level: LogLevel, msg: string, meta?: Record<string, unknown>, err?: unknown): void {
     const entry = redact(
@@ -39,6 +57,7 @@ export class ConsoleLogger implements Logger {
         level,
         msg,
         time: new Date().toISOString(),
+        service_name: this.serviceName,
         ...this.defaultMeta,
         ...(meta ?? {}),
         ...(err ? { error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err } : {}),
@@ -60,8 +79,8 @@ export class ConsoleLogger implements Logger {
   error(msg: string, meta?: Record<string, unknown>, err?: unknown): void {
     this.log("error", msg, meta, err);
   }
-  child(defaultMeta: Record<string, unknown>): Logger {
-    return new ConsoleLogger(this.level, { ...this.defaultMeta, ...defaultMeta });
+  child(defaultMeta: LogContext): Logger {
+    return new ConsoleLogger(this.level, { ...this.defaultMeta, ...defaultMeta }, defaultMeta.service_name ?? this.serviceName);
   }
 }
 

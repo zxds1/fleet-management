@@ -2,7 +2,7 @@
 // Scheduled job registry (05 §2). Builds the 13 jobs at their documented cadences and runs them
 // on intervals. The outbox relay (outbox/relay.ts) drains event-driven work separately.
 
-import { logger } from "@fleet/shared";
+import { logger, metrics, reportError } from "@fleet/shared";
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
 import type { Env } from "../config/env";
 import type { VisionAdapter } from "./ocr";
@@ -149,12 +149,20 @@ export class JobScheduler {
     for (const job of this.jobs) {
       logger.info("scheduling job", { name: job.name, intervalMs: job.intervalMs });
       const t = setInterval(() => {
-        job.run().catch((e) => logger.error("job failed", { name: job.name, message: (e as Error).message }));
+        job.run().catch((e) => {
+          logger.error("job failed", { service_name: "worker", name: job.name, message: (e as Error).message });
+          metrics.increment("worker.job_failed", 1);
+          reportError(e, { route: job.name, serviceName: "worker" });
+        });
       }, job.intervalMs);
       if (typeof (t as { unref?: () => void }).unref === "function") (t as { unref: () => void }).unref();
       this.timers.push(t);
       // Kick the first run shortly after boot.
-      setTimeout(() => job.run().catch((e) => logger.error("job failed", { name: job.name, message: (e as Error).message })), 1000);
+      setTimeout(() => job.run().catch((e) => {
+        logger.error("job failed", { service_name: "worker", name: job.name, message: (e as Error).message });
+        metrics.increment("worker.job_failed", 1);
+        reportError(e, { route: job.name, serviceName: "worker" });
+      }), 1000);
     }
   }
 

@@ -184,7 +184,7 @@ describe("logging redaction (01 §9)", () => {
   });
 
   it("attaches an error object on error() and merges child meta", () => {
-    const child = new ConsoleLogger("info").child({ scope: "ws" });
+    const child = new ConsoleLogger("info").child({ service_name: "ws", scope: "ws" });
     const entry = capture(new ConsoleLogger("info"), () =>
       child.error("boom", { extra: 1 }, new Error("boom")),
     ) as {

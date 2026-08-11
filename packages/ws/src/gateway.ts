@@ -8,7 +8,7 @@
 // be unit-tested with a fake socket (test/gateway.test.ts).
 
 import type { ConfigClient, NotificationRow, Principal, VehicleDisplayStateViewRow } from "@fleet/shared";
-import { RealtimeEvents } from "@fleet/shared";
+import { RealtimeEvents, logger } from "@fleet/shared";
 import type { Env } from "./config/env";
 import type { SessionStore } from "./config/redis";
 import type { AccountStatus, AccountStatusRepository } from "./repositories/identity";
@@ -74,6 +74,17 @@ const EVENT_DRIVER_ACCIDENT = RealtimeEvents.driverAccident;
 export const roomDriver = (driverId: string) => `driver:${driverId}`;
 
 /**
+ * Logs a failed async operation at error level (with the operation name) instead of silently
+ * swallowing it, then returns `fallback` so degrade-to-safe call sites keep their semantics.
+ */
+function onFail<T>(operation: string, fallback: T): (e: unknown) => T {
+  return (e: unknown) => {
+    logger.error(`ws: ${operation} failed`, { service_name: "ws", operation, message: (e as Error)?.message }, e);
+    return fallback;
+  };
+}
+
+/**
  * Verifies the token + account status. Returns the Principal on success, or an `error_code` string
  * (08 §1 catalogue) when the connection must be rejected. The caller maps that to a disconnect.
  */
@@ -132,8 +143,8 @@ export async function handleConnection(socket: WsSocket, deps: GatewayDeps, stat
       if (overflow > 0) evicted = active.slice(0, overflow).filter((id) => id !== sessionId);
     }
     for (const evictedId of evicted) {
-      await deps.accountStatus.revokeSession(userId, evictedId, "SESSION_LIMIT_EXCEEDED").catch(() => undefined);
-      await deps.store.remove(userId, evictedId).catch(() => undefined);
+      await deps.accountStatus.revokeSession(userId, evictedId, "SESSION_LIMIT_EXCEEDED").catch(onFail("revokeSession", undefined));
+      await deps.store.remove(userId, evictedId).catch(onFail("store.remove", undefined));
       state.sockets.get(evictedId)?.disconnect(true); // security alert: oldest session booted
       state.sockets.delete(evictedId);
     }
@@ -145,7 +156,7 @@ export async function handleConnection(socket: WsSocket, deps: GatewayDeps, stat
   const isDriver = principal.roles.includes("DRIVER" as Principal["roles"][number]);
 
   if (isDriver) {
-    const scope = await deps.driverScope(userId).catch(() => null);
+    const scope = await deps.driverScope(userId).catch(onFail("driverScope", null));
     if (scope) {
       socket.join(roomDriver(scope.driverId));
       if (scope.vehicleId) state.driverVehicles.set(scope.driverId, scope.vehicleId);
@@ -154,20 +165,20 @@ export async function handleConnection(socket: WsSocket, deps: GatewayDeps, stat
 
     // Snapshot on (re)connect so the driver never shows stale state (07 §5).
     if (scope?.vehicleId) {
-      const vehicle = await deps.driverVehicleState(scope.vehicleId).catch(() => null);
+      const vehicle = await deps.driverVehicleState(scope.vehicleId).catch(onFail("driverVehicleState", null));
       if (vehicle) socket.emit(EVENT_DRIVER_VEHICLE, vehicle);
     }
     if (scope) {
-      const shift = await deps.driverShiftState(scope.driverId).catch(() => null);
+      const shift = await deps.driverShiftState(scope.driverId).catch(onFail("driverShiftState", null));
       if (shift) socket.emit(EVENT_DRIVER_SHIFT, shift);
     }
-    const driverNotifications = await deps.notificationsFor(userId).catch(() => []);
+    const driverNotifications = await deps.notificationsFor(userId).catch(onFail("notificationsFor", [] as NotificationRow[]));
     socket.emit(EVENT_NOTIFICATIONS, driverNotifications);
 
     socket.on("disconnect", () => {
       if (sessionId) {
         state.sockets.delete(sessionId);
-        void deps.store.remove(userId, sessionId).catch(() => undefined);
+        void deps.store.remove(userId, sessionId).catch(onFail("store.remove", undefined));
       }
     });
     return;
@@ -175,19 +186,19 @@ export async function handleConnection(socket: WsSocket, deps: GatewayDeps, stat
 
   socket.join(ROOM_VEHICLES); // all authed admins
   socket.join(roomNotifications(userId));
-  if (await deps.isAccidentOnCall(userId).catch(() => false)) socket.join(ROOM_ACCIDENT);
+  if (await deps.isAccidentOnCall(userId).catch(onFail("isAccidentOnCall", false))) socket.join(ROOM_ACCIDENT);
 
   // --- Snapshot on (re)connect so the client never shows stale state (07 §5) ---
-  const snapshot = await deps.vehicleSnapshot().catch(() => []);
+  const snapshot = await deps.vehicleSnapshot().catch(onFail("vehicleSnapshot", [] as VehicleDisplayStateViewRow[]));
   for (const row of snapshot) if (row.vehicle_id) state.vehicleCache.set(row.vehicle_id, row);
   socket.emit(EVENT_VEHICLES, snapshot);
-  const notifications = await deps.notificationsFor(userId).catch(() => []);
+  const notifications = await deps.notificationsFor(userId).catch(onFail("notificationsFor", [] as NotificationRow[]));
   socket.emit(EVENT_NOTIFICATIONS, notifications);
 
   socket.on("disconnect", () => {
     if (sessionId) {
       state.sockets.delete(sessionId);
-      void deps.store.remove(userId, sessionId).catch(() => undefined);
+      void deps.store.remove(userId, sessionId).catch(onFail("store.remove", undefined));
     }
   });
 }
@@ -213,7 +224,7 @@ export function attachGateway(io: MinimalIo, deps: GatewayDeps, state: GatewaySt
   });
 
   const offVehicles = subscribeBus(deps.bus, Channels.vehicleStates, async () => {
-    const snapshot = await deps.vehicleSnapshot().catch(() => []);
+    const snapshot = await deps.vehicleSnapshot().catch(onFail("vehicleSnapshot", [] as VehicleDisplayStateViewRow[]));
     const changed = diffVehicleStates(state.vehicleCache, snapshot);
     for (const row of snapshot) if (row.vehicle_id) state.vehicleCache.set(row.vehicle_id, row);
     if (changed.length > 0) emitTo(io, ROOM_VEHICLES, EVENT_VEHICLES, changed);
@@ -253,7 +264,7 @@ export function attachGateway(io: MinimalIo, deps: GatewayDeps, state: GatewaySt
         : [];
     for (const driverId of targets) {
       const vehicleId = scope.vehicleId ?? state.driverVehicles.get(driverId);
-      const row = vehicleId ? await deps.driverVehicleState(vehicleId).catch(() => null) : null;
+      const row = vehicleId ? await deps.driverVehicleState(vehicleId).catch(onFail("driverVehicleState", null)) : null;
       emitTo(io, roomDriver(driverId), EVENT_DRIVER_VEHICLE, row ?? payload);
     }
   });

@@ -20,6 +20,7 @@ export interface ErrorContext {
   requestId?: string;
   principalId?: string;
   route?: string;
+  serviceName?: string;
 }
 
 let initialised = false;
@@ -55,6 +56,7 @@ export function reportError(err: unknown, ctx: ErrorContext = {}): void {
   const tags: Record<string, string> = {};
   if (ctx.error_code) tags.error_code = ctx.error_code;
   if (ctx.route) tags.route = ctx.route;
+  if (ctx.serviceName) tags.serviceName = ctx.serviceName;
   Sentry.captureException(toError(err), {
     tags,
     user: ctx.principalId ? { id: ctx.principalId } : undefined,
