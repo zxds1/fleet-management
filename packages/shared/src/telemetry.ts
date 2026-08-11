@@ -47,6 +47,10 @@ export function isErrorReporterEnabled(): boolean {
  * principal id (no PII). No-op when Sentry is uninitialised.
  */
 export function reportError(err: unknown, ctx: ErrorContext = {}): void {
+  // Always feed the metrics collector (independent of Sentry init) so error_code volume is observed
+  // even in dev/test processes where the Sentry DSN is absent. This wires the otherwise-orphaned
+  // `Metrics` producer (09 §1).
+  recordErrorMetric(ctx.error_code);
   if (!initialised) return;
   const tags: Record<string, string> = {};
   if (ctx.error_code) tags.error_code = ctx.error_code;
@@ -56,6 +60,25 @@ export function reportError(err: unknown, ctx: ErrorContext = {}): void {
     user: ctx.principalId ? { id: ctx.principalId } : undefined,
     extra: { requestId: ctx.requestId },
   });
+}
+
+/** Increments the per-error_code counters on the shared `Metrics` collector. */
+export function recordErrorMetric(error_code: string | undefined, by = 1): void {
+  metrics.increment("error.total", by);
+  metrics.increment(`error.code.${error_code ?? "UNKNOWN"}`, by);
+}
+
+/**
+ * Records the current outbox/offline-queue lag in milliseconds. Called from the mobile drainer when
+ * it measures how long the oldest pending write has been queued (B13 / D-7).
+ */
+export function recordOutboxLagMs(ms: number): void {
+  metrics.gauge("outbox.lag_ms", ms);
+}
+
+/** Records a request/operation latency in milliseconds (e.g. API round-trip). */
+export function recordLatencyMs(name: string, ms: number): void {
+  metrics.gauge(`latency.${name}_ms`, ms);
 }
 
 /** Drains buffered Sentry events before process exit. No-op when uninitialised. */
