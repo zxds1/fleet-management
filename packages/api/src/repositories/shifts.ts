@@ -11,6 +11,7 @@ import type {
   ShiftRow,
   ShiftVerificationInboxViewRow,
   TrailerRow,
+  WorkLogPhotoRow,
   WorkLogRow,
   VehicleRow,
 } from "@fleet/shared";
@@ -332,6 +333,76 @@ export class WorkLogRepository extends BaseRepository<WorkLogRow> {
   constructor(client: DbClient) {
     super(client, "app.work_logs", { deletedAtColumn: null });
   }
+  async insertWithPhotos(
+    workLog: Omit<WorkLogRow, "id" | "created_at" | "updated_at" | "tenant_id"> & { tenant_id?: string },
+    photoMediaIds: string[],
+  ): Promise<WorkLogRow> {
+    const client = this.client;
+    const res = await client.query<WorkLogRow>(
+      `INSERT INTO app.work_logs (shift_id, planned_notes, debrief_notes)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [workLog.shift_id, workLog.planned_notes ?? null, workLog.debrief_notes ?? null],
+    );
+    const log = res.rows[0]!;
+    if (photoMediaIds.length > 0) {
+      const values: string[] = [];
+      const params: unknown[] = [log.id];
+      photoMediaIds.forEach((mid, i) => {
+        values.push(`($1, $${i + 2}, $${i + 2})`);
+        params.push(mid);
+      });
+      await client.query(
+        `INSERT INTO app.work_log_photos (work_log_id, media_object_id, sequence)
+         VALUES ${values.join(", ")}`,
+        params,
+      );
+    }
+    return log;
+  }
+
+  async getForShift(shiftId: string): Promise<WorkLogWithPhotos | null> {
+    const logRes = await this.client.query<WorkLogRow & { media_object_id: string; sequence: number }>(
+      `SELECT wl.*, wlp.media_object_id, wlp.sequence
+       FROM app.work_logs wl
+       LEFT JOIN app.work_log_photos wlp ON wlp.work_log_id = wl.id
+       WHERE wl.shift_id = $1`,
+      [shiftId],
+    );
+    if (logRes.rows.length === 0) return null;
+    const first = logRes.rows[0]!;
+    const photos: WorkLogPhotoRow[] = [];
+    for (const row of logRes.rows) {
+      if (row.media_object_id) {
+        photos.push({ id: "", work_log_id: first.id, media_object_id: row.media_object_id, sequence: row.sequence, created_at: "" });
+      }
+    }
+    photos.sort((a, b) => a.sequence - b.sequence);
+    return {
+      id: first.id,
+      shift_id: first.shift_id,
+      tenant_id: first.tenant_id,
+      planned_notes: first.planned_notes,
+      debrief_notes: first.debrief_notes,
+      created_at: first.created_at,
+      updated_at: first.updated_at,
+      photos,
+    };
+  }
+
+  /** Update (or create) the debrief_notes on the work_log for a shift. */
+  async upsertDebrief(shiftId: string, debriefNotes: string): Promise<void> {
+    await this.client.query(
+      `INSERT INTO app.work_logs (shift_id, debrief_notes)
+       VALUES ($1, $2)
+       ON CONFLICT (shift_id) DO UPDATE SET debrief_notes = $2`,
+      [shiftId, debriefNotes],
+    );
+  }
+}
+
+export interface WorkLogWithPhotos extends WorkLogRow {
+  photos: WorkLogPhotoRow[];
 }
 
 export class FuelRecordRepository extends BaseRepository<FuelRecordRow> {

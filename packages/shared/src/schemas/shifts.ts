@@ -14,6 +14,8 @@ export const ClockInSchema = z.object({
   start_media_object_id: z.string().uuid(),
   phone_gps_fallback_enabled: z.boolean().default(false),
   consent_version: z.string().min(1),
+  planned_notes: z.string().max(2000).optional(),
+  work_plan_media_object_ids: z.array(z.string().uuid()).max(5).optional(),
 });
 export type ClockInInput = z.infer<typeof ClockInSchema>;
 
@@ -31,7 +33,20 @@ export const VerifyShiftSchema = z.object({
   flag_reason: z.string().min(1).max(500).optional(),
   corrected_end_odometer_km: z.number().int().nonnegative().optional(),
 });
-export type VerifyShiftInput = z.infer<typeof VerifyShiftSchema>;
+export type VerifyShiftInput = z.infer<typeof VerifyShiftSchema>
+
+export const WorkPlanMediaItemSchema = z.object({
+  media_object_id: z.string().uuid(),
+  sequence: z.number().int().min(1).max(5),
+})
+
+export const WorkPlanSchema = z.object({
+  shift_id: z.string().uuid(),
+  planned_notes: z.string().nullable(),
+  photos: z.array(WorkPlanMediaItemSchema),
+  debrief_notes: z.string().nullable().optional(),
+})
+export type WorkPlan = z.infer<typeof WorkPlanSchema>;
 
 // Cursor pagination envelope shared by every list endpoint (D7).
 export const CursorPageSchema = <T extends z.ZodTypeAny>(item: T) =>

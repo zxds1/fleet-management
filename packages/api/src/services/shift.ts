@@ -13,7 +13,7 @@ import {
   type Tx,
   violation,
 } from "@fleet/shared";
-import type { ClockInInput, ClockOutInput, ConsentType, VerifyShiftInput } from "@fleet/shared";
+import type { ClockInInput, ClockOutInput, ConsentType, VerifyShiftInput, WorkPlan } from "@fleet/shared";
 import { ConsentRequired } from "@fleet/shared";
 import type {
   AssignmentRow,
@@ -100,15 +100,24 @@ export class ShiftService {
       distance_source: "UNAVAILABLE",
     });
 
-    await this.fuel.insert({
-      shift_id: shift.id,
-      vehicle_id: assignment.vehicle_id,
-      driver_id: driverId,
-      purpose: "SHIFT_START",
-      media_object_id: input.start_media_object_id,
-      odometer_km: input.start_odometer_km,
-      gauge_level: input.start_fuel_gauge,
-    });
+     await this.fuel.insert({
+       shift_id: shift.id,
+       vehicle_id: assignment.vehicle_id,
+       driver_id: driverId,
+       purpose: "SHIFT_START",
+       media_object_id: input.start_media_object_id,
+       odometer_km: input.start_odometer_km,
+       gauge_level: input.start_fuel_gauge,
+     });
+
+     if (input.planned_notes || (input.work_plan_media_object_ids?.length ?? 0) > 0) {
+       await this.workLogs.insertWithPhotos(
+         { shift_id: shift.id, planned_notes: input.planned_notes ?? null, debrief_notes: null },
+         input.work_plan_media_object_ids ?? [],
+       );
+     } else {
+       await this.workLogs.insert({ shift_id: shift.id, planned_notes: null, debrief_notes: null });
+     }
 
     tx.audit({
       action: "CREATE",
@@ -172,9 +181,9 @@ export class ShiftService {
       closeout_missing: [],
     });
 
-    if (input.debrief_notes && input.debrief_notes.trim().length > 0) {
-      await this.workLogs.insert({ shift_id: shift.id, debrief_notes: input.debrief_notes });
-    }
+     if (input.debrief_notes && input.debrief_notes.trim().length > 0) {
+       await this.workLogs.upsertDebrief(shift.id, input.debrief_notes);
+     }
 
     tx.audit({
       action: "UPDATE",
@@ -270,6 +279,10 @@ export class ShiftService {
 
   async getActive(driverId: string): Promise<ShiftRow | null> {
     return this.shifts.findOpenByDriver(driverId);
+  }
+
+  async getWorkPlan(shiftId: string): Promise<WorkPlan | null> {
+    return this.workLogs.getForShift(shiftId);
   }
 }
 

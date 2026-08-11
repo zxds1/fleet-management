@@ -227,6 +227,29 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
     ),
   );
 
+  // ── Work plan (read, admin/dispatcher) ──────────────────────────────────────────────────────
+  router.get(
+    "/:id/work-plan",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("shift:read_all")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const result = await svc.shift.getWorkPlan(req.params.id!);
+        if (!result) {
+          res.status(404).json({ error_code: "NOT_FOUND", status: 404, title: "No work plan for this shift" });
+          return;
+        }
+        res.status(200).json({
+          shift_id: result.shift_id,
+          planned_notes: result.planned_notes,
+          photos: result.photos.map((p) => ({ media_object_id: p.media_object_id, sequence: p.sequence })),
+          debrief_notes: result.debrief_notes,
+        });
+      }),
+    ),
+  );
+
   // ── Verify / flag ────────────────────────────────────────────────────────────────────────
   router.post(
     "/:id/verify",

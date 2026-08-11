@@ -653,7 +653,7 @@ paths:
   /shifts/clock-in:
     post:
       tags: [Shifts]
-      summary: Start a shift (1.1). Requires start odometer photo + gauge (B1).
+      summary: Start a shift (1.1). Requires start odometer photo + gauge (B1) and work plan evidence (1.1).
       security:
         - bearerAuth: []
         - idempotencyKey: []
@@ -671,6 +671,8 @@ paths:
                 start_media_object_id: { type: string, format: uuid }
                 phone_gps_fallback_enabled: { type: boolean, default: false }
                 consent_version: { type: string, description: Required GPS tracking consent version (C5.5). }
+                planned_notes: { type: string, description: Day's work plan notes (1.1)., maxLength: 2000 }
+                work_plan_media_object_ids: { type: array, items: { type: string, format: uuid }, description: Photos for the work plan (1.1)., maxItems: 5 }
       responses:
         '201':
           description: Shift opened.
@@ -686,7 +688,7 @@ paths:
           description: A prior shift is awaiting close-out; the missing artefacts are listed.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
-          description: HOS rest block (C3.3) or odometer decreased (C4.2) or consent missing (C5.5).
+          description: HOS rest block (C3.3) or odometer decreased (C4.2) or consent missing (C5.5) or work-plan evidence missing (1.1).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -792,6 +794,37 @@ paths:
         '409':
           description: Acknowledge-based unlock required before correction (B18).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /shifts/{shiftId}/work-plan:
+    get:
+      tags: [Shifts]
+      summary: Get the driver's work plan (planned notes + photos) for a shift (1.1). Fleets Manager / Dispatcher.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Work plan for the shift.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shift_id: { type: string, format: uuid }
+                  planned_notes: { type: string, nullable: true }
+                  photos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        media_object_id: { type: string, format: uuid }
+                        sequence: { type: integer }
+                  debrief_notes: { type: string, nullable: true }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------------ Fuel
   /fuel/refuel:

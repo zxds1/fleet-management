@@ -51,7 +51,11 @@ function makeService(state: {
   } as unknown as import("../src/repositories/shifts").HosRepository;
 
   const fuel = { insert: async () => ({}) as never } as unknown as import("../src/repositories/shifts").FuelRecordRepository;
-  const workLogs = {} as unknown as import("../src/repositories/shifts").WorkLogRepository;
+  const workLogs = {
+    insert: async () => ({}) as unknown as import("@fleet/shared").WorkLogRow,
+    insertWithPhotos: async () => ({}) as unknown as import("@fleet/shared").WorkLogRow,
+    getForShift: async () => null,
+  } as unknown as import("../src/repositories/shifts").WorkLogRepository;
 
   return new ShiftService(shifts, assignments, vehicles, fuel, workLogs, hos, consents);
 }
@@ -142,6 +146,23 @@ describe("ShiftService.clockIn", () => {
     const r: Result<{ shiftId: string }> = await svc.clockIn(tx, "driver-1", baseInput, actor);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.shiftId).toBe("new-shift");
+  });
+
+  it("opens a shift and inserts a work log when planned_notes are provided", async () => {
+    const inserted: unknown[] = [];
+    const svc = makeService({
+      assignment: { id: "assign-1", vehicle_id: "veh-1", trailer_id: null } as AssignmentRow,
+      vehicle: { id: "veh-1", current_odometer_km: 900 } as VehicleRow,
+      consent: true,
+      insertedShiftId: "new-shift",
+    });
+    // Override workLogs with a spy
+    (svc as unknown as { workLogs: { insertWithPhotos: (w: unknown, p: string[]) => Promise<unknown> } }).workLogs.insertWithPhotos = async (w) => { inserted.push(w); return {} as never };
+    const withPlan = { ...baseInput, planned_notes: "Check 5 pallets", work_plan_media_object_ids: ["media-plan-1"] };
+    const r = await svc.clockIn(tx, "driver-1", withPlan, actor);
+    expect(r.ok).toBe(true);
+    expect(inserted).toHaveLength(1);
+    expect((inserted[0] as { planned_notes: string | undefined })?.planned_notes).toBe("Check 5 pallets");
   });
 
   void ok; void err; void NotFound; void Forbidden;
