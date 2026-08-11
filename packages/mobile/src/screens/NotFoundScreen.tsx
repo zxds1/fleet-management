@@ -1,4 +1,4 @@
-// packages/mobile/src/screens/NotFoundScreen.tsx
+﻿// packages/mobile/src/screens/NotFoundScreen.tsx
 //
 // Custom 404 / not-found page (A.3). Shown when the user navigates to a route or
 // entity that does not exist, or when a deep link targets something that has been
@@ -54,19 +54,19 @@ export function NotFoundScreen({
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: theme.space.xl,
+    padding: theme.spacing.xl,
     justifyContent: "center",
     backgroundColor: theme.colors.background,
   },
   iconWrapper: {
     alignItems: "center",
-    marginBottom: theme.space.lg,
+    marginBottom: theme.spacing.lg,
   },
   title: {
-    marginBottom: theme.space.md,
+    marginBottom: theme.spacing.md,
   },
   description: {
-    marginBottom: theme.space.xl,
+    marginBottom: theme.spacing.xl,
     maxWidth: 280,
     alignSelf: "center",
   },
