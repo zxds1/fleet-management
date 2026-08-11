@@ -34,7 +34,7 @@ export function createAnalyticsRouter(deps: AnalyticsRouterDeps): Router {
   const router = Router();
   const { pool, infra } = deps;
 
-  const auth = authenticate({ tokens: infra.tokens, sessions: infra.store });
+  const auth = authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" });
   // Reuses the existing fleet-read permission rather than minting a new one: analytics exposes no
   // fact a `fuel:read` holder could not already reach through the fuel and insights surfaces.
   const perm = requirePermission(asPerm("fuel:read"));

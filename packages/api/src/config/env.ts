@@ -21,6 +21,8 @@ const EnvSchema = z.object({
     .transform((v) => v !== "false"),
 
   // A3.7 — HS256, current + previous key for a 24 h rotation overlap (02 §1).
+  // Automated 90-day secret rotation (security Layer 3, MED) is a follow-up; rotation is
+  // currently operator-driven via the platform secret store and enforced out-of-band.
   JWT_SECRET: z.string().min(16).default("dev-only-insecure-jwt-secret-change-me"),
   JWT_SECRET_PREVIOUS: z.string().optional(),
   JWT_KID: z.string().default("k1"),
@@ -91,6 +93,10 @@ const EnvSchema = z.object({
   RATE_LIMIT_AUTH_PER_MINUTE: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_MEDIA_PER_MINUTE: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_TELEMETRY_PER_MINUTE: z.coerce.number().int().positive().default(120),
+  // Dedicated scopes for high-value, abuse-prone endpoints (security Layer 4).
+  // `password-reset` covers reset/initiation flows; `financial` covers reports/billing/export.
+  RATE_LIMIT_PASSWORD_RESET_PER_MINUTE: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_FINANCIAL_PER_MINUTE: z.coerce.number().int().positive().default(20),
   IP_BLOCK_THRESHOLD: z.coerce.number().int().positive().default(100), // abuse hits per window to auto-block
   IP_BLOCK_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),
   IP_BLOCK_TTL_SECONDS: z.coerce.number().int().positive().default(3600),

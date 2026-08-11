@@ -96,6 +96,26 @@ export class AuthService {
     await this.sessions.revokeAll(userId);
   }
 
+  /**
+   * Self-service password change. Verifies the current password, stores the new argon2id hash,
+   * then globally revokes every active session so a leaked/known old password cannot keep prior
+   * sessions alive (Security Layer 2 — Session Termination). Runs inside the caller's transaction.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<Result<undefined>> {
+    const user = await this.users.getById(userId);
+    if (!user) return err(new Unauthenticated());
+    const valid = await argon2idHasher.verify(user.password_hash, currentPassword);
+    if (!valid) return err(new Unauthenticated("Current password is incorrect"));
+    const newHash = await argon2idHasher.hash(newPassword);
+    await this.users.updatePassword(userId, newHash);
+    await this.logoutAll(userId);
+    return ok(undefined);
+  }
+
   /** Resolves the precomputed permission union + roles + locale for a user id (N4 / C6.2). */
   async resolve(userId: string): Promise<{ email: string; phone: string | null; roles: ResolvedPermissions["roles"]; permissions: ResolvedPermissions["permissions"]; locale: "en" | "sw" }> {
     const user = await this.users.getById(userId);

@@ -28,6 +28,25 @@ export interface RedisBundle {
 
 const sessionKey = (userId: string) => `user:${userId}:sessions`;
 
+/**
+ * TLS enforcement for Redis. `rediss://` enables TLS with certificate verification
+ * (rejectUnauthorized: true). In production (or SECURITY_ENFORCE=always) a plaintext
+ * `redis://` URL is rejected at boot (fail-closed) so session/cache traffic is never
+ * sent in the clear (security Layer 3). Dev uses plaintext redis:// localhost.
+ */
+function resolveRedisTls(url: string): { tls: { rejectUnauthorized: boolean } } | undefined {
+  if (url.startsWith("rediss://")) return { tls: { rejectUnauthorized: true } };
+  const mode = (process.env.SECURITY_ENFORCE ?? "production").toLowerCase();
+  const enforce = mode === "always" || (mode !== "off" && process.env.NODE_ENV === "production");
+  if (enforce && url.startsWith("redis://")) {
+    throw new Error(
+      "Refusing to start with a plaintext REDIS_URL in production. Use rediss:// to encrypt " +
+        "the connection (security Layer 3).",
+    );
+  }
+  return undefined;
+}
+
 export function createRedis(env: Env): RedisBundle {
   if (!env.REDIS_ENABLED) return memoryBundle();
 
@@ -36,6 +55,7 @@ export function createRedis(env: Env): RedisBundle {
     maxRetriesPerRequest: 2,
     enableOfflineQueue: false,
     retryStrategy: (times) => Math.min(times * 200, 5_000),
+    ...resolveRedisTls(env.REDIS_URL),
   });
   client.on("error", (err) => logger.warn("redis error", { message: err.message }));
 

@@ -53,7 +53,7 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // ── Lesson catalogue (cursor) ────────────────────────────────────────────────────────────
   router.get(
     "/lessons",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -77,7 +77,7 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // parameterised lesson route for readability.
   router.get(
     "/roster",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:review")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -99,7 +99,7 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // ── Complete a lesson (current driver) ───────────────────────────────────────────────────
   router.post(
     "/lessons/:id/complete",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:complete")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -133,7 +133,7 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // MUST stay after `/lessons` and `/lessons/:id/complete`.
   router.get(
     "/lessons/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

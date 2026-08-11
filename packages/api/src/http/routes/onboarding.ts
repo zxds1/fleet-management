@@ -69,7 +69,7 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
   // ── Own onboarding record (create-on-read) ────────────────────────────────────────────
   router.get(
     "/onboarding",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("onboarding:read")),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -87,7 +87,7 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
   // ── Save the profile step ─────────────────────────────────────────────────────────────
   router.post(
     "/onboarding/profile",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("onboarding:submit")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -120,7 +120,7 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
   // ── Submit the background check ───────────────────────────────────────────────────────
   router.post(
     "/background-check",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("onboarding:submit")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -153,7 +153,7 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
   // ── Current dispatch assignment (contract status endpoint) ────────────────────────────
   router.get(
     "/assignment",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("assignment:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -188,7 +188,7 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
   // ── Training completion status (contract status endpoint) ─────────────────────────────
   router.get(
     "/training-status",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

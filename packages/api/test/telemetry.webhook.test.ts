@@ -8,7 +8,9 @@ import type { Redis as RedisClient } from "ioredis";
 
 function makeClient(overrides: Partial<Container> = {}): Container {
   const base = {
-    env: env(),
+    // Default to off so payload-processing tests exercise the ingest path without HMAC; the
+    // explicit HMAC describe block below sets WEBHOOK_SECRET to test the fail-closed/signed contract.
+    env: { ...env(), SECURITY_ENFORCE: "off" },
     pool: { connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }), release: () => undefined }), close: async () => undefined } as never,
     redis: { client: null, cache: { get: async () => null, set: async () => undefined, del: async () => undefined }, sessions: {} as never, close: async () => undefined },
     config: { numeric: async () => 0, string: async () => null, boolean: async () => false } as never,

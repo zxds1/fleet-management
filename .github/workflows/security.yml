@@ -32,7 +32,6 @@ jobs:
   trivy:
     name: Trivy container scan
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses:actions/checkout@v4
 
@@ -57,7 +56,6 @@ jobs:
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +84,6 @@ jobs:
   gitleaks:
     name: Gitleaks secret scanning
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +106,6 @@ jobs:
   checkov:
     name: Checkov IaC scan
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -119,7 +115,7 @@ jobs:
           directory: 'deploy'
           framework: 'kubernetes'
           output_file: 'checkov-results.json'
-          soft_fail: true
+          soft_fail: false
 
       - name: Upload Checkov results
         if: always()

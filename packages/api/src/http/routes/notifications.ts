@@ -40,7 +40,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // ── The caller's inbox (cursor) ──────────────────────────────────────────────────────────
   router.get(
     "/",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -66,7 +66,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // ── Acknowledge one notification (contract: 204 No Content) ─────────────────────────────
   router.post(
     "/:id/read",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -96,7 +96,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // ── Acknowledge all notifications (contract: 204 No Content) ────────────────────────────
   router.post(
     "/read-all",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

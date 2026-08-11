@@ -63,7 +63,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Vehicle list (cursor) ─────────────────────────────────────────────────────────────
   router.get(
     "/vehicles",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);
@@ -84,7 +84,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Single vehicle ───────────────────────────────────────────────────────────────────
   router.get(
     "/vehicles/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);
@@ -104,7 +104,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Create ──────────────────────────────────────────────────────────────────────────
   router.post(
     "/vehicles",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:create")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -143,7 +143,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Update ──────────────────────────────────────────────────────────────────────────
   router.patch(
     "/vehicles/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:update")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -180,7 +180,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Assign drivers / linked vehicles (REPLACE semantics) ──────────────────────────────
   router.post(
     "/vehicles/:id/assign",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:update")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);

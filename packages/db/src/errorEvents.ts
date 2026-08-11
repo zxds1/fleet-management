@@ -3,7 +3,7 @@
 // error_code into app.error_events so a single issue can be correlated by request_id / route / tenant
 // / flow_step and aggregated by fingerprint (audit #7). Append-only: no update/delete.
 
-import type { DbClient } from "@fleet/shared";
+import { redactString, type DbClient } from "@fleet/shared";
 
 export type ErrorSeverity = "debug" | "info" | "warn" | "error" | "critical";
 
@@ -47,7 +47,7 @@ export class ErrorEventsRepository {
       input.tenant_id ?? null,
       input.geography ?? null,
       input.severity ?? "error",
-      input.message ?? null,
+      input.message ? redactString(input.message) : null,
       input.fingerprint,
     ]);
     return res.rows[0]!;

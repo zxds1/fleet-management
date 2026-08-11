@@ -39,7 +39,7 @@ export interface Logger {
   child(defaultMeta: LogContext): Logger;
 }
 
-function redact(value: unknown, seen: WeakSet<object>): unknown {
+export function redact(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
   if (seen.has(value as object)) return "[circular]";
@@ -95,6 +95,21 @@ export class ConsoleLogger implements Logger {
   child(defaultMeta: LogContext): Logger {
     return new ConsoleLogger(this.level, { ...this.defaultMeta, ...defaultMeta }, defaultMeta.service_name ?? this.serviceName);
   }
+}
+
+/**
+ * Redacts secrets/PII from a single free-text string (e.g. an error message) by masking common
+ * credential patterns. Use before persisting free-text into the audit store (db/errorEvents) so
+ * passwords/keys/SQL don't leak into app.error_events.
+ */
+export function redactString(input: string): string {
+  if (!input) return input;
+  return input
+    .replace(/(password\s*[=:]\s*)\S+/gi, "$1[redacted]")
+    .replace(/(authorization|token|api[_-]?key|secret|apikey)\s*[=:]\s*\S+/gi, "$1=[redacted]")
+    .replace(/postgres:\/\/[^:@\s]+:[^@\s]+@/g, "postgres://[redacted]:[redacted]@")
+    .replace(/redis:\/\/:[^@\s]+@/g, "redis://:[redacted]@")
+    .replace(/([A-Za-z0-9+/]{40,})/g, "[redacted]");
 }
 
 export const logger: Logger = new ConsoleLogger();

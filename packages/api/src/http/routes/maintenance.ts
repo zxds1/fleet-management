@@ -62,7 +62,7 @@ export function createMaintenanceRouter(deps: MaintenanceRouterDeps): Router {
   // ── Maintenance history (cursor) ─────────────────────────────────────────────────────────
   router.get(
     "/",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("maintenance:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -85,7 +85,7 @@ export function createMaintenanceRouter(deps: MaintenanceRouterDeps): Router {
   // Declared before `/:id` so the literal path is not shadowed.
   router.post(
     "/work-orders",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("maintenance:record")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -115,7 +115,7 @@ export function createMaintenanceRouter(deps: MaintenanceRouterDeps): Router {
   // ── Single maintenance record ────────────────────────────────────────────────────────────
   router.get(
     "/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("maintenance:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

@@ -85,7 +85,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Driver roster (read, cursor) ──────────────────────────────────────────────────────────
   router.get(
     "/drivers",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -114,7 +114,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Driver detail (read): roster shape + RBAC union + devices ─────────────────────────────
   router.get(
     "/drivers/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -137,7 +137,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Create / invite a driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -178,7 +178,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Approve a pending driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers/:id/approve",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -211,7 +211,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // `:id`. The target is always the resolved principal, so this cannot read another user.
   router.get(
     "/admin/users/me",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -237,7 +237,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Update the caller's own profile ────────────────────────────────────────────────────────
   router.put(
     "/admin/users/me",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -283,7 +283,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Suspend a user (also drops live sessions) ──────────────────────────────────────────────
   router.post(
     "/admin/users/:id/suspend",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -314,7 +314,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Reinstate a suspended user ─────────────────────────────────────────────────────────────
   router.post(
     "/admin/users/:id/reinstate",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -345,7 +345,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Revoke a device (forces re-auth) ───────────────────────────────────────────────────────
   router.post(
     "/devices/:deviceId/revoke",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("device:revoke")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -373,7 +373,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Force global sign-out for a user ────────────────────────────────────────────────────────
   router.post(
     "/sessions/revoke",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -403,7 +403,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Photo-first fuel review queue (2.7, A1.4) ─────────────────────────────────────────────
   router.get(
     "/admin/fuel/pending",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:read")),
     asyncHandler((req, res) => {
       const principal = (req as { principal?: Principal }).principal as Principal;
@@ -424,7 +424,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // PUT mirror of POST /fuel/purchases/{id}/verify, carrying the photo-first adjustments.
   router.put(
     "/admin/fuel/verify/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:verify")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -455,7 +455,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: list users in the caller's tenant (14_tenancy.sql) ──────────────────────────
   router.get(
     "/admin/users",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -475,7 +475,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: list pending invitations (14_tenancy.sql) ──────────────────────────────────
   router.get(
     "/admin/invitations",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -494,7 +494,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: invite a user into the caller's tenant (14_tenancy.sql) ────────────────────
   router.post(
     "/admin/users/invite",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -521,7 +521,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: revoke a role from a user in the caller's tenant (14_tenancy.sql) ──────────
   router.post(
     "/admin/users/:userId/roles/revoke",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -544,7 +544,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: assign a manager to vehicles/drivers (14_tenancy.sql) ─────────────────────
   router.post(
     "/admin/users/:userId/assign",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -572,7 +572,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // service, since the mobile role gating is presentational only).
   router.get(
     "/admin/managers",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) => {
       const principal = req.principal as Principal;
@@ -599,7 +599,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // and svc.tenancy.assign rejects a target outside the caller's tenant, which is the IDOR guard.
   router.post(
     "/admin/managers/:userId/assign",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

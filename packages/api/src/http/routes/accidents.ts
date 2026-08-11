@@ -37,7 +37,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Mayday (B17 escape hatch) ──────────────────────────────────────────────────────────
   router.post(
     "/mayday",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -69,7 +69,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Create a report (evidence follows) ─────────────────────────────────────────────────
   router.post(
     "/",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -97,7 +97,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Attach media (append-only) ─────────────────────────────────────────────────────────
   router.post(
     "/:id/media",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -119,7 +119,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Own reports (read, cursor) ──────────────────────────────────────────────────────────
   router.get(
     "/me",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -143,7 +143,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Verify telemetry hash chain (read) ──────────────────────────────────────────────────
   router.get(
     "/:id/telemetry/verify",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -161,7 +161,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Acknowledge (cancels escalation) ─────────────────────────────────────────────────────
   router.post(
     "/:id/acknowledge",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:acknowledge")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -188,7 +188,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // report; anything else 404s rather than leaking another driver's incident.
   router.get(
     "/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

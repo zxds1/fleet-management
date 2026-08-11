@@ -9,6 +9,20 @@ import { createApp } from "./app/app";
 
 export function start(): void {
   const container = buildContainer();
+
+  // Fail-closed: refuse to boot in production (or when edge enforcement is on) if the signing
+  // secrets are still the well-known insecure dev defaults. A leaked default key would let an
+  // attacker forge tokens (Security Layer 2/3).
+  const insecureJwt = container.env.JWT_SECRET === "dev-only-insecure-jwt-secret-change-me";
+  const insecureMfa = container.env.MFA_ENCRYPTION_KEY === Buffer.alloc(32, 7).toString("base64");
+  const mustEnforce = container.env.SECURITY_ENFORCE === "always" || container.env.NODE_ENV === "production";
+  if (mustEnforce && (insecureJwt || insecureMfa || !container.env.JWT_SECRET)) {
+    throw new Error(
+      "Refusing to boot: JWT_SECRET / MFA_ENCRYPTION_KEY use the insecure dev default or are unset. " +
+        "Set real secrets via the platform secret store before running in production.",
+    );
+  }
+
   initErrorReporter({
     SENTRY_DSN: container.env.SENTRY_DSN,
     SENTRY_ENVIRONMENT: container.env.SENTRY_ENVIRONMENT,

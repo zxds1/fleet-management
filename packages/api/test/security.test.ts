@@ -55,19 +55,24 @@ const JSON_HEADERS = { "content-type": "application/json" };
 
 describe("rate limiting + IP blocking", () => {
   it("rate limits the telemetry webhook after the per-minute cap", async () => {
+    const secret = "test-secret";
     const container = makeClient({
-      env: withEnv({ SECURITY_ENFORCE: "always", RATE_LIMIT_TELEMETRY_PER_MINUTE: 3 }),
+      env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret, RATE_LIMIT_TELEMETRY_PER_MINUTE: 3 }),
     });
     const { port, close } = await listen(createApp(container));
     try {
       const results: number[] = [];
       // Send more than the cap so the limiter is guaranteed to engage even if a
-      // prior test left the shared in-memory window partially consumed.
+      // prior test left the shared in-memory window partially consumed. Requests are
+      // HMAC-signed so they clear webhook auth and reach the body validator (400) or limiter (429).
       for (let i = 0; i < 8; i++) {
+        const body = JSON.stringify({ lat: 1 });
+        const ts = String(Date.now());
+        const sig = "sha256=" + createHmac("sha256", secret).update(Buffer.from(body)).digest("hex");
         const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
           method: "POST",
-          headers: JSON_HEADERS,
-          body: JSON.stringify({ lat: 1 }),
+          headers: { ...JSON_HEADERS, "x-signature": sig, "x-timestamp": ts },
+          body,
         });
         results.push(res.status);
       }
@@ -151,7 +156,7 @@ describe("telemetry webhook HMAC (S-1)", () => {
 
 describe("safe JSON body parsing", () => {
   it("rejects prototype-pollution payloads", async () => {
-    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always" }) });
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
     const { port, close } = await listen(createApp(container));
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
@@ -166,7 +171,7 @@ describe("safe JSON body parsing", () => {
   });
 
   it("rejects over-deep payloads", async () => {
-    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always" }) });
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
     const { port, close } = await listen(createApp(container));
     try {
       let deep: unknown = { a: 1 };
@@ -185,7 +190,7 @@ describe("safe JSON body parsing", () => {
 
 describe("security headers", () => {
   it("sets hardening headers on responses", async () => {
-    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always" }) });
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
     const { port, close } = await listen(createApp(container));
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {

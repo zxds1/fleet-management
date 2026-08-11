@@ -31,7 +31,7 @@ export function createMediaRouter(deps: MediaRouterDeps): Router {
 
   router.post(
     "/upload-url",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
         const principal = ctx.principal as Principal;
@@ -56,7 +56,7 @@ export function createMediaRouter(deps: MediaRouterDeps): Router {
   // presigned URL for another company's receipt/photo.
   router.get(
     "/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     asyncHandler(async (req, res) => {
       const principal = (req as { principal?: Principal }).principal as Principal;
       const id = req.params.id;

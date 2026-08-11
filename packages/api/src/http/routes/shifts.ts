@@ -46,7 +46,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Clock-in ───────────────────────────────────────────────────────────────────────────
   router.post(
     "/clock-in",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:clock_in")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -92,7 +92,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Clock-out ───────────────────────────────────────────────────────────────────────────
   router.post(
     "/clock-out",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:clock_out")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -130,7 +130,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Active shift (read) ──────────────────────────────────────────────────────────────────
   router.get(
     "/me/active",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_own")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -161,7 +161,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Verification inbox (read, cursor) ─────────────────────────────────────────────────────
   router.get(
     "/verification-inbox",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -187,7 +187,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Own shift history (read, cursor) ──────────────────────────────────────────────────────
   router.get(
     "/me",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_own")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -211,7 +211,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Verification detail for one shift (read) ───────────────────────────────────────────────
   router.get(
     "/:id/verification",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -230,7 +230,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Work plan (read, admin/dispatcher) ──────────────────────────────────────────────────────
   router.get(
     "/:id/work-plan",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -253,7 +253,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Verify / flag ────────────────────────────────────────────────────────────────────────
   router.post(
     "/:id/verify",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:verify")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -290,7 +290,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Force-close (admin override) ──────────────────────────────────────────────────────────
   router.post(
     "/:id/force-close",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:force_close")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

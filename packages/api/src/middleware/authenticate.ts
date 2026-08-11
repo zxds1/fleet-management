@@ -14,6 +14,12 @@ export interface AuthenticateDeps {
   tokens: TokenService;
   sessions: SessionStore;
   touchSession?: (userId: string, sessionId: string) => Promise<void>;
+  /**
+   * When true, a Redis outage does NOT degrade to the stateless check — the request is denied
+   * instead of silently accepting a possibly-revoked token (Security Layer 2, fail-secure-closed).
+   * Set from `SECURITY_ENFORCE === "always"`.
+   */
+  strictSessionCheck?: boolean;
 }
 
 export function authenticate(deps: AuthenticateDeps) {
@@ -28,9 +34,15 @@ export function authenticate(deps: AuthenticateDeps) {
       const claims = deps.tokens.verifyAccessToken(token);
       const principal = principalFromClaims(claims);
 
-      if (principal.sessionId && deps.sessions.available) {
-        const live = await deps.sessions.has(principal.userId, principal.sessionId);
-        if (!live) throw new Unauthenticated("Session revoked");
+      if (principal.sessionId) {
+        if (!deps.sessions.available) {
+          if (deps.strictSessionCheck) {
+            throw new Unauthenticated("Session store unavailable");
+          }
+        } else {
+          const live = await deps.sessions.has(principal.userId, principal.sessionId);
+          if (!live) throw new Unauthenticated("Session revoked");
+        }
       }
 
       // Idle timeout (A1.6): refresh the session's last_seen_at on every successful auth.

@@ -179,7 +179,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   // ── Logout / logout-all ───────────────────────────────────────────────────────────────
   router.post(
     "/logout",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -203,7 +203,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
   router.post(
     "/logout-all",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -226,10 +226,47 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     ),
   );
 
+  // ── Password change (self-service; revokes all sessions on success) ──────────────────
+  const ChangePasswordSchema = z.object({
+    current_password: z.string().min(1),
+    new_password: z.string().min(8).max(200),
+  });
+  router.post(
+    "/change-password",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const input = parseBody(ChangePasswordSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.auth.changePassword(
+          principal.userId,
+          input.current_password,
+          input.new_password,
+        );
+        if (isErr(result)) return result.error as never;
+        tx.audit({
+          action: "CONFIG_CHANGE",
+          entity_table: "app.users",
+          entity_id: principal.userId,
+          actor_user_id: principal.userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+          reason: "password_change_logout_all_sessions",
+        });
+        return ok({ status: 200, body: { changed: true } });
+      }),
+    ),
+  );
+
   // ── MFA enrolment (self-service) ──────────────────────────────────────────────────────
   router.post(
     "/mfa/enroll",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("MANAGE_OWN_MFA")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -257,7 +294,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   // ── Driver device registration / PIN / refresh / revoke (B12) ─────────────────────────
   router.post(
     "/devices",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -281,7 +318,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
   router.post(
     "/devices/pin",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -297,7 +334,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
   router.post(
     "/devices/refresh",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
         const principal = ctx.principal as Principal;
@@ -321,7 +358,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
   router.post(
     "/devices/revoke",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("REVOKE_DEVICE")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -347,7 +384,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   // ── Consent ledger ────────────────────────────────────────────────────────────────────
   router.post(
     "/consent",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {

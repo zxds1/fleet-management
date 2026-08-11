@@ -15,6 +15,10 @@ export function securityHeaders(): RequestHandler {
       "geolocation=(), camera=(), microphone=(), interest-cohort=()",
     );
     res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    // Force HTTPS for two years, including subdomains, and mark the host as preload-eligible.
+    // Only meaningful behind TLS; dev/HTTP is unaffected but the header is still set so it is
+    // already present once prod terminates TLS (security Layer 3 — in-transit).
+    res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
     next();
   };
 }

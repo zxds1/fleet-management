@@ -76,7 +76,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `report:read` sees the whole fleet; a DRIVER (asset:read) is narrowed to their own rows (B.16).
   router.get(
     "/anomalies",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("report:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -102,7 +102,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `document:read` sees every asset; a DRIVER (asset:read) sees only their own documents (B.19).
   router.get(
     "/documents/expiring",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -128,7 +128,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // MUST stay declared after `/documents/expiring`, otherwise `:id` would swallow "expiring".
   router.get(
     "/documents/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -150,7 +150,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // note and its audit entry commit together (D8).
   router.post(
     "/documents/:id/renewal-note",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -185,7 +185,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // Declared after `/anomalies` list so `:id` does not shadow the feed.
   router.get(
     "/anomalies/:id",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("anomaly:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -205,7 +205,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `report:read` sees the whole map; a DRIVER (asset:read) sees only their own vehicle (B.10).
   router.get(
     "/dashboard/vehicle-states",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("report:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

@@ -279,7 +279,7 @@ export function createApp(container: Container): Express {
   // Public Traccar webhook accept (A1.1) — no auth/idempotency; front of the ingest pipeline.
   // Hardened: rate-limited + HMAC-verified when WEBHOOK_SECRET is set (security.md S-1).
   app.use(`${base}/telemetry`, rateLimiter.middleware({ scope: "telemetry", max: container.env.RATE_LIMIT_TELEMETRY_PER_MINUTE }));
-  app.use(`${base}/telemetry`, webhookAuth(container.env.WEBHOOK_SECRET));
+  app.use(`${base}/telemetry`, webhookAuth(container.env.WEBHOOK_SECRET, secure));
   app.use(`${base}/telemetry`, createTelemetryRouter({
     pool: container.pool,
     redis: container.redis.client,

@@ -117,7 +117,7 @@ export function createHardwareRouter(deps: HardwareRouterDeps): Router {
   // ── Pair a tracker to a vehicle ────────────────────────────────────────────────────────────
   router.post(
     "/pair",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:update")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -216,7 +216,7 @@ export function createHardwareRouter(deps: HardwareRouterDeps): Router {
   // ── Provisioning inbox: has each paired tracker phoned home? ────────────────────────────────
   router.get(
     "/pending",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler((req, res) => {
       const principal = (req as { principal?: Principal }).principal as Principal;

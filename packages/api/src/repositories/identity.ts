@@ -90,6 +90,14 @@ export class UserRepository extends BaseRepository<UserRow> {
     );
   }
 
+  /** Replaces the user's password hash (used by self-service password change). */
+  async updatePassword(userId: string, passwordHash: string): Promise<void> {
+    await this.client.query(
+      `UPDATE app.users SET password_hash = $2, failed_login_count = 0, locked_until = NULL WHERE id = $1`,
+      [userId, passwordHash],
+    );
+  }
+
   /**
    * Inserts a live user and its role grants (A3.7 self-service admin signup). Runs inside the
    * caller's transaction (D8) so the user row and its role rows commit together — a user with no
