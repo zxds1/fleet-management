@@ -154,4 +154,9 @@ export class SessionService {
     await this.sessions.revokeAllForUser(userId, "LOGOUT_ALL");
     if (this.store.available) await this.store.removeAll(userId);
   }
+
+  /** Idle-timeout touch (A1.6): bump the DB session's last_seen_at on activity. */
+  async touch(userId: string, sessionId: string): Promise<void> {
+    await this.sessions.touch(sessionId).catch(() => undefined);
+  }
 }

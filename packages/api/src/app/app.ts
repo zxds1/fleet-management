@@ -26,6 +26,7 @@ import { createTrainingRouter } from "../http/routes/training";
 import { createReportsRouter } from "../http/routes/reports";
 import { createSettingsRouter } from "../http/routes/settings";
 import { createNotificationRouter } from "../http/routes/notifications";
+import { createPrivacyRouter } from "../http/routes/privacy";
 import { createTelemetryRouter } from "../http/routes/telemetry";
 import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
@@ -238,6 +239,14 @@ export function createApp(container: Container): Express {
   }));
 
   app.use(`${base}/notifications`, createNotificationRouter({
+    pool: container.pool,
+    idempotency: container.idempotency,
+    releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Data Subject Access Request (DSAR) / privacy requests (15_privacy_requests.sql).
+  app.use(`${base}/privacy`, createPrivacyRouter({
     pool: container.pool,
     idempotency: container.idempotency,
     releaseClaim: container.releaseClaim,

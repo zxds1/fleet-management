@@ -114,7 +114,10 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('onboarding:submit',       'Submit onboarding + background check',                 1),
     ('onboarding:review',       'Review and clear driver background checks',            3),
     -- Driver-reported vehicle issues (14_vehicle_issues.sql)
-    ('vehicle:report',          'Report a vehicle issue / defect (non-accident)',       3)
+    ('vehicle:report',          'Report a vehicle issue / defect (non-accident)',       3),
+    -- Data Subject Access Requests (15_privacy_requests.sql)
+    ('privacy:request_own',     'Submit and view own DSAR export/deletion requests',    1),
+    ('privacy:view_requests_tenant', 'View tenant-wide DSAR requests',                   3)
 ON CONFLICT (code) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -162,10 +165,11 @@ SELECT 'FLEET_MANAGER', p FROM unnest(ARRAY[
     'notification:read','notification:manage',
     'training:read','training:manage','training:complete','training:review',
     'onboarding:read','onboarding:review',
-    'document:read','document:manage','geofence:read','geofence:manage',
-    'report:read','report:export','config:read'
-]) AS p
-ON CONFLICT DO NOTHING;
+     'document:read','document:manage','geofence:read','geofence:manage',
+     'report:read','report:export','config:read',
+     'privacy:view_requests_tenant'
+ ]) AS p
+ ON CONFLICT DO NOTHING;
 
 -- C6.1: Finance is read-only over data, with the single write action of
 -- clearing an already-verified receipt for payment.

@@ -1,0 +1,84 @@
+title = "Fleet Management — gitleaks configuration"
+
+[redact]
+redact-commit = true
+redact-logs = true
+
+[report]
+path = "gitleaks-report.json"
+format = "json"
+strip-path = true
+
+[allowlist]
+  description = "Allowlist for non-secret test / placeholder values"
+  regexes = [
+    '''(?i)(password|secret|token|api[-_]?key)\s*[:=]\s*(test|placeholder|example|dummy|xxx+|change[-_]?me|local)\b''',
+    '''postgres://[^:]+:pg_local_dev@''',
+    '''redis://localhost:6379''',
+  ]
+  paths = [
+    '''node_modules''',
+    '''dist''',
+    '''build''',
+    '''\.git/''',
+  ]
+
+[[rules]]
+id = "jwt-secret"
+description = "Generic JWT secret"
+regex = '''(?i)(jwt[_-]?secret|jwt[_-]?key)[^=]*[:=]\s*['"][A-Za-z0-9\-_\.]{20,}['"]'''
+tags = ["jwt", "key"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS access key ID"
+regex = '''AKIA[0-9A-Z]{16}'''
+tags = ["aws", "key"]
+
+[[rules]]
+id = "aws-secret-key"
+description = "AWS secret access key"
+regex = '''(?i)aws(.{0,20})?(secret[_-]?key|secretKey)[^=]*[:=]\s*['"][A-Za-z0-9/+=]{40}['"]'''
+tags = ["aws", "secret"]
+
+[[rules]]
+id = "google-api-key"
+description = "Google API key"
+regex = '''AIza[0-9A-Za-z\-_]{35}'''
+tags = ["google", "apikey"]
+
+[[rules]]
+id = "db-connection-url"
+description = "Database connection URL with credentials"
+regex = '''(postgres|postgresql|mysql|mongodb|redis|amqp)://[^:]+:[^@]+@'''
+tags = ["db", "url", "credential"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key assignment"
+regex = '''(?i)(api[_-]?key|auth[_-]?token|access[_-]?token)[^=]*[:=]\s*['"][A-Za-z0-9\-_\.]{20,}['"]'''
+tags = ["api", "key", "token"]
+
+[[rules]]
+id = "private-key"
+description = "PEM private key"
+regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----'''
+tags = ["key", "pem"]
+
+[[rules]]
+id = "generic-password"
+description = "Generic password assignment"
+regex = '''(?i)password[^=]*[:=]\s*['"][^'"]{8,}['"]'''
+tags = ["password"]
+
+[[rules]]
+id = "slack-webhook"
+description = "Slack webhook URL"
+regex = '''https://hooks\.slack\.com/services/[A-Za-z0-9\-/]+'''
+tags = ["slack", "webhook"]
+
+[[rules]]
+id = "firebase-api-key"
+description = "Firebase API key"
+regex = '''(?i)firebase.*api[_-]?key.*['"][A-Za-z0-9\-_]{34}['"]'''
+tags = ["firebase", "apikey"]

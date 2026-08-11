@@ -38,6 +38,18 @@ export interface IssuedRefreshToken {
 export class TokenService {
   constructor(private readonly env: Env) {}
 
+  /** Idle timeout (A1.6) — sessions inactive beyond this window are treated as expired. */
+  get idleTimeoutMs(): number {
+    return this.env.SESSION_IDLE_TIMEOUT_MINUTES * 60 * 1000;
+  }
+
+  /** True when the token's `iat` is older than the idle timeout (no recent activity). */
+  isIdle(claims: AccessTokenClaims): boolean {
+    const iat = claims.iat;
+    if (typeof iat !== "number") return false;
+    return Date.now() - iat * 1000 > this.idleTimeoutMs;
+  }
+
   issueAccessToken(input: {
     userId: string;
     email: string;

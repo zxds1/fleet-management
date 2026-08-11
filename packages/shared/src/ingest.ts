@@ -25,6 +25,9 @@ export type TraccarWebhookPayload = z.infer<typeof TraccarWebhookSchema>;
 /** Name of the durable Redis Stream the worker consumes (04 §2, N2.3). */
 export const TRACCAR_POSITIONS_STREAM = "traccar:positions";
 
+/** Default consumer group for the telemetry ingest stream (04 §2, N2.4). */
+export const TRACCAR_POSITIONS_GROUP = "fleet-ingest";
+
 /**
  * Maps the public payload onto the raw Traccar position shape `parseTraccarPosition` expects
  * (worker/src/ingest/traccar.ts): `latitude`/`longitude`/`speed`/`course`/`fixTime` plus an

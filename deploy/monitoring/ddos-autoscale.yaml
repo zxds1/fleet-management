@@ -1,0 +1,410 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  DDoS protection and autoscaling for the Fleet Management Platform (S-3).
+  Provisions an internet-facing Application Load Balancer with AWS Shield
+  Standard (always-on DDoS protection) + access logs enabled, and an Auto
+  Scaling Group for API pods that scales on CPU > 70% OR ALB request count
+  per target > 1000, with min 2 / max 20 replicas and target-tracking policies.
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID for the ALB + ASG subnets.
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for ASG (EKS-managed, tagged for API pods)."
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for the internet-facing ALB.
+  AlbCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for *.fleet.example.com (TLS termination)."
+  LogBucketName:
+    Type: String
+    Description: S3 bucket for ALB access logs (must be in the same region)."
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+    Description: Initial desired capacity for the API ASG."
+  MinCapacity:
+    Type: Number
+    Default: 2
+    Description: Minimum replicas for the API ASG (S-3)."
+  MaxCapacity:
+    Type: Number
+    Default: 20
+    Description: Maximum replicas for the API ASG (S-3)."
+  TargetGroupArn:
+    Type: String
+    Description: ARN of the existing ALB target group for API pods (created by EKS Ingress / IaC)."
+  WebAclArn:
+    Type: String
+    Description: ARN of the WAF WebACL (from deploy/monitoring/waf-rules.yaml) to attach to the ALB listener."
+
+Conditions:
+  EnableAccessLogs: !Not [!Equals [!Ref LogBucketName, ""]]
+
+Resources:
+  # ──────────────────────────────────────────────────────────────────────────
+  # S3 bucket for ALB access logs (if not provided via parameter).
+  # ──────────────────────────────────────────────────────────────────────────
+  AccessLogBucket:
+    Condition: EnableAccessLogs
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref LogBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAfter90Days
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Env
+          Value: production
+        - Key: Owner
+          Value: fleet-security
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # S3 bucket policy — allow ALB to write access logs.
+  # Required: the bucket must grant the elasticloadbalancing.amazonaws.com
+  # service principal write access.
+  # ──────────────────────────────────────────────────────────────────────────
+  AccessLogBucketPolicy:
+    Condition: EnableAccessLogs
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAlbLogging
+            Effect: Allow
+            Principal:
+              Service: elasticloadbalancing.amazonaws.com
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub "${AccessLogBucket.Arn}/*"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Security group for the ALB — inbound 443 only, outbound to ASG subnets.
+  # ──────────────────────────────────────────────────────────────────────────
+  AlbSecurityGroup:
+    Type: AWS::SecurityGroup
+    Properties:
+      GroupDescription: "Internet-facing ALB for Fleet Management Platform (S-3)"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+          Description: "HTTPS ingress from internet"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: "0.0.0.0/0"
+          Description: "Egress to ASG subnets"
+      Tags:
+        - Key: Name
+          Value: fleet-alb-sg
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Internet-facing Application Load Balancer.
+  #
+  # AWS Shield Standard is automatically enabled on all internet-facing
+  # Elastic Load Balancers at no additional cost — it provides always-on
+  # DDoS protection and automatic mitigation for common network/transport
+  # layer attacks (SYN/UDP floods, reflection attacks).
+  # ──────────────────────────────────────────────────────────────────────────
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: fleet-api-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      LoadBalancerAttributes:
+        # AWS Shield Standard is implicitly active on internet-facing ALBs.
+        # Additional DDoS hardening:
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+        - Key: routing.http2.enabled
+          Value: "true"
+        - Key: access_logs.s3.enabled
+          Value: !If [EnableAccessLogs, "true", "false"]
+        - Key: access_logs.s3.bucket
+          Value: !If [EnableAccessLogs, !Ref LogBucketName, ""]
+        - Key: access_logs.s3.prefix
+          Value: "alb-access-logs"
+        - Key: access_logs.s3.emit_interval
+          Value: "60"
+      Tags:
+        - Key: Env
+          Value: production
+        - Key: Shield
+          Value: Standard
+        - Key: WAF
+          Value: "attached-via-IAC"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # HTTPS listener (443) — TLS termination at the ALB.
+  # The WAF WebACL ARN is attached to this listener by the IaC layer.
+  # ──────────────────────────────────────────────────────────────────────────
+  AlbListenerHttps:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AlbCertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupArn
+       # WAF WebACL attachment (see deploy/k8s/manifests.yaml for the Ingress
+       # annotation that references the WAF WebACL ARN).
+       # On CloudFront, attach at the distribution level instead.
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # WAF WebACL Association — attaches the WebACL (from waf-rules.yaml) to the
+  # ALB. This satisfies S-3: "cloud WAF + app rate limiting."
+  # ──────────────────────────────────────────────────────────────────────────
+  WebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      WebACLArn: !Ref WebAclArn
+      ResourceArn: !GetAtt ApplicationLoadBalancer.Arn
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # HTTP→HTTPS redirect listener (80).
+  # ──────────────────────────────────────────────────────────────────────────
+  AlbListenerHttp:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Auto Scaling Group for API pods.
+  #
+  # NOTE: In an EKS environment, the ASG below manages the underlying EC2
+  # worker nodes (not Kubernetes pods directly). The Kubernetes HPA (defined
+  # in deploy/k8s/manifests.yaml) handles pod-level scaling. The ASG +
+  # target-tracking policies here provide node-level capacity scaling so
+  # that HPA requests for more pods can be scheduled.
+  #
+  # Scale triggers:
+  #   - CPU > 70% (target tracking policy)
+  #   - Request count > 1000 per target (ALB target tracking — see below)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  # Instance Launch Template for API worker nodes.
+  ApiNodeLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: fleet-api-nodes
+      LaunchTemplateData:
+        ImageId: ami-0abcdef1234567890  # AL2023 EKS-optimized AMI (replace via SSM in IaC)
+        InstanceType: t3.medium
+        IamInstanceProfile:
+          Name: eks-node-role  # EKS node role (created by EKS)
+        SecurityGroupIds:
+          - !Ref AlbSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 50
+              VolumeType: gp3
+              DeleteOnTermination: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: fleet-api-node
+              - Key: Env
+                Value: production
+              - Key: k8s.io/cluster-autoscaler/enabled
+                Value: "true"
+              - Key: k8s.io/cluster-autoscaler/fleet-cluster
+                Value: owned
+
+  ApiNodeAsg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: fleet-api-asg
+      VPCZoneIdentifier: !Split [",", !Select [0, !Split [" ", !Join [" ", !Ref PrivateSubnetIds]]]]
+      MinSize: 2
+      MaxSize: 20
+      DesiredCapacity: !Ref DesiredCapacity
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      TargetGroupARNs:
+        - !Ref TargetGroupArn
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ApiNodeLaunchTemplate
+        Version: !GetAtt ApiNodeLaunchTemplate.LatestVersion
+      Tags:
+        - Key: Name
+          Value: fleet-api-asg-node
+          PropagateAtLaunch: true
+        - Key: Env
+          Value: production
+          PropagateAtLaunch: true
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Target-tracking scaling policy: CPU > 70%.
+  # This is a node-level proxy for pod CPU pressure — when nodes average
+  # >70% CPU, new nodes are added. Pod-level CPU scaling is handled by the
+  # Kubernetes HPA in deploy/k8s/manifests.yaml (currently 65% target).
+  # ──────────────────────────────────────────────────────────────────────────
+  CpuTargetTrackingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ApiNodeAsg
+      PolicyName: cpu-70-target-tracking
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        TargetValue: 70.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
+        DisableScaleIn: false
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Target-tracking scaling policy: ALB request count per target > 1000.
+  # This directly addresses S-3's "request count > 1000 per target" trigger
+  # by using the ALB load metric. When the average request count per target
+  # across the ASG exceeds 1000, new nodes are added.
+  # ──────────────────────────────────────────────────────────────────────────
+  AlbRequestCountTargetTrackingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ApiNodeAsg
+      PolicyName: alb-request-count-1000-target-tracking
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        TargetValue: 1000.0
+        CustomizedScalingMetricSpecification:
+          MetricDataQueries:
+            - Id: RequestCount
+              MetricStat:
+                Metric:
+                  Namespace: AWS/ApplicationELB
+                  MetricName: RequestCountPerTarget
+                  Dimensions:
+                    - Name: LoadBalancer
+                      Value: !Select
+                        - "0"
+                        - !Split
+                          - "/"
+                          - !Select
+                            - "1"
+                            - !Split
+                              - "/"
+                              - !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+                Stat: Sum
+              ReturnData: true
+          # Scale out when the 1-minute average exceeds the target.
+          # The ASG evaluates every 60-second period.
+          Expression: "RequestCount"
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
+        DisableScaleIn: false
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Scale-out alarm: CPU > 70% (supplementary — ASGScaleOutCpuAlarm).
+  # This provides an additional safety net for CPU-based scale-out before
+  # target-tracking kicks in. Target-tracking is the primary mechanism.
+  # ──────────────────────────────────────────────────────────────────────────
+  ScaleOutCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: fleet-api-asg-cpu-scale-out
+      AlarmDescription: "Scale out when ASG average CPU > 70% (S-3)."
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ApiNodeAsg
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # Scale-in alarm: CPU < 30% (scale-in threshold for the reverse direction).
+  ScaleInCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: fleet-api-asg-cpu-scale-in
+      AlarmDescription: "Scale in when ASG average CPU < 30% (S-3)."
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ApiNodeAsg
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  LoadBalancerArn:
+    Description: "ARN of the internet-facing ALB with Shield Standard"
+    Value: !Ref ApplicationLoadBalancer
+
+  LoadBalancerDns:
+    Description: "DNS name of the ALB (point *.fleet.example.com CNAME here)"
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  AutoScalingGroupName:
+    Description: "ASG name for API worker nodes"
+    Value: !Ref ApiNodeAsg
+
+  AlsAccessLogBucket:
+    Condition: EnableAccessLogs
+    Description: "S3 bucket for ALB access logs"
+    Value: !Ref LogBucketName
+
+  ScaleOutCooldown:
+    Description: "Scale-out cooldown in seconds (60s)"
+    Value: 60
+
+  ScaleInCooldown:
+    Description: "Scale-in cooldown in seconds (300s)"
+    Value: 300
+
+  MinCapacity:
+    Description: "Minimum ASG capacity (2)"
+    Value: 2
+
+  MaxCapacity:
+    Description: "Maximum ASG capacity (20)"
+    Value: 20
+
+  WebAclAssociation:
+    Description: "ARN of the WAF WebACL-to-ALB association"
+    Value: !GetAtt WebAclAssociation.Arn

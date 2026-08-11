@@ -1,0 +1,310 @@
+# deploy/monitoring/alerts.yaml
+# CloudWatch metric alarms + SNS topic for Fleet Management Platform (af-south-1).
+# These correspond to the SLOs in docs/backend/slo.md and the Grafana dashboard
+# in deploy/monitoring/grafana-dashboards.json. Prometheus metrics are scraped via
+# the Prometheus Server / Grafana Cloud integration; CloudWatch alarms cover the
+# AWS-native signals (RDS, ElastiCache/Redis) and bridge-pushed app metrics.
+#
+# SLO mapping: docs/backend/slo.md §3 (availability), §4 (burn-rate alerts),
+# §5 (ingest freshness). Alert tiers: page (2 h / 5 min burn) vs. warning (ops channel).
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudWatch alarms for the Fleet Management Platform. Pages on-call on SLO breach;
+  warnings go to the ops Slack channel via a separate SNS subscription.
+
+Parameters:
+  AlertSnsTopic:
+    Type: String
+    Description: ARN of the PagerDuty SNS topic (error budget burn / 5xx / ingest lag).
+  WarningSnsTopic:
+    Type: String
+    Description: ARN of the ops-channel SNS topic (warnings, slow burn).
+  RedisReplicationGroupId:
+    Type: String
+    Description: ElastiCache replication group id (e.g. fleet-redis).
+  DbInstanceIdentifier:
+    Type: String
+    Description: RDS DB instance identifier for the fleet primary.
+  MetricsNamespace:
+    Type: String
+    Default: Fleet/Observability
+
+Resources:
+  # ──────────────────────────────────────────────────────────────────────────
+  # API error rate — SLO A-01: ≤ 0.1 % 5xx (99.9 % success)
+  # 36x burn-rate for 2 h → page; 6x for 2 h → warning.
+  # ──────────────────────────────────────────────────────────────────────────
+  ApiErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate"
+      AlarmDescription: "API 5xx error rate exceeded 0.1 % (SLO A-01)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: api_5xx_rate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 6
+      Threshold: 0.1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
+
+  ApiErrorRateWarning:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate-warning"
+      AlarmDescription: "API 5xx error rate elevated — SLO A-01 slow burn"
+      Namespace: !Ref MetricsNamespace
+      MetricName: api_5xx_rate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 6
+      Threshold: 0.05
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref WarningSnsTopic
+      OKActions:
+        - !Ref WarningSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # API P95 latency — SLO L-01 (reads ≤200 ms), L-02 (writes ≤600 ms)
+  # ──────────────────────────────────────────────────────────────────────────
+  ApiReadLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-api-p95-read-latency"
+      AlarmDescription: "API P95 read latency exceeded 200 ms (SLO L-01)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: api_p95_read_latency_ms
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 200
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  ApiWriteLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-api-p95-write-latency"
+      AlarmDescription: "API P95 write latency exceeded 600 ms (SLO L-02)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: api_p95_write_latency_ms
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 600
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Telemetry ingest latency & lag — SLOs T-01, T-02, T-03, T-04
+  # ──────────────────────────────────────────────────────────────────────────
+  TelemetryIngestLagAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-telemetry-ingest-lag"
+      AlarmDescription: "Telemetry ingest lag exceeded 30 s (SLO T-01/T-02)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: telemetry_ingest_lag_seconds
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  TelemetryStreamDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-telemetry-stream-depth"
+      AlarmDescription: "Traccar positions stream depth exceeded 50 000 (SLO T-03)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: redis_stream_depth_traccar_positions
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 50000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  TelemetryStreamDepthWarning:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-telemetry-stream-depth-warning"
+      AlarmDescription: "Traccar positions stream depth elevated > 10 000 (SLO T-03)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: redis_stream_depth_traccar_positions
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WarningSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Worker job error rate — SLO A-04: ≥ 99 % jobs succeed
+  # ──────────────────────────────────────────────────────────────────────────
+  WorkerJobErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-worker-job-error-rate"
+      AlarmDescription: "Worker job error rate exceeded 1 % (SLO A-04)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: worker_job_error_rate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 4
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Worker job P95 latency — SLO L-04
+  # ──────────────────────────────────────────────────────────────────────────
+  WorkerJobLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-worker-p95-job-latency"
+      AlarmDescription: "Worker P95 job latency exceeded 60 s (SLO L-04)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: worker_p95_job_duration_seconds
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 4
+      Threshold: 60
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # RDS / PostgreSQL — connections + replica lag (SLO A-05)
+  # ──────────────────────────────────────────────────────────────────────────
+  DbConnectionCountAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-rds-db-connections"
+      AlarmDescription: "RDS active connections approaching pool limit (SLO A-05)"
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstanceIdentifier
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WarningSnsTopic
+
+  DbReplicaLagAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-rds-replica-lag"
+      AlarmDescription: "RDS read-replica lag exceeded 30 s (SLO A-05)"
+      Namespace: AWS/RDS
+      MetricName: ReplicaLag
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstanceIdentifier
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # ElastiCache / Redis — CPU, memory, swap eviction (SLO A-06)
+  # ──────────────────────────────────────────────────────────────────────────
+  RedisCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-redis-cpu"
+      AlarmDescription: "Redis CPU utilization exceeded 85 %"
+      Namespace: AWS/ElastiCache
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroupId
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WarningSnsTopic
+
+  RedisMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-redis-memory"
+      AlarmDescription: "Redis memory utilization exceeded 85 % of maxmemory (eviction risk)"
+      Namespace: AWS/ElastiCache
+      MetricName: BytesUsedForCache
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroupId
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      # 85 % of the 256 MiB default: 0.85 * 268435456 = 228170437
+      Threshold: 228170437
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  RedisSwapEvictionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-redis-eviction"
+      AlarmDescription: "Redis swap/EvictedKeys > 0 — memory pressure causing data loss"
+      Namespace: AWS/ElastiCache
+      MetricName: EvictedKeys
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroupId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+Outputs:
+  AlertTopic:
+    Description: "SNS topic ARN for SLO page alerts"
+    Value: !Ref AlertSnsTopic
+  WarningTopic:
+    Description: "SNS topic ARN for SLO warning alerts"
+    Value: !Ref WarningSnsTopic

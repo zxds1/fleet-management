@@ -4,7 +4,7 @@
 // are request-scoped (see compose.ts) so each write shares one transaction.
 
 import { createPool, type Cache, type FleetPool, PgConfigClient, PgIdempotencyService } from "@fleet/db";
-import type { ConfigClient, IdempotencyService } from "@fleet/shared";
+import type { ConfigClient, IdempotencyService, DbClient } from "@fleet/shared";
 import { env as loadEnv, type Env } from "../config/env";
 import { createRedis, type RedisBundle } from "../config/redis";
 import { TokenService } from "../security/tokens";
@@ -39,7 +39,27 @@ export function buildContainer(environment: Env = loadEnv()): Container {
   const secretBox = new SecretBox(environment.MFA_ENCRYPTION_KEY);
   const presigner = new EnvMediaPresigner(environment);
 
-  const infra: Infra = { env: environment, tokens, secretBox, config, store: redis.sessions, presigner, email: new ConsoleEmailService() };
+  const infra: Infra = {
+    env: environment,
+    tokens,
+    secretBox,
+    config,
+    store: redis.sessions,
+    presigner,
+    email: new ConsoleEmailService(),
+    /** Idle-timeout touch (A1.6): bump last_seen_at on the session row (fire-and-forget from auth). */
+    touchSession: async (userId: string, sessionId: string): Promise<void> => {
+      const client: DbClient = await pool.connect();
+      try {
+        await client.query(
+          `UPDATE app.user_sessions SET last_seen_at = now() WHERE id = $1 AND revoked_at IS NULL`,
+          [sessionId],
+        );
+      } finally {
+        client.release?.();
+      }
+    },
+  };
 
   const releaseClaim = async (subject: string, key: string): Promise<void> => {
     const client = await pool.connect();

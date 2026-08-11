@@ -243,12 +243,29 @@ export type OwnershipType =
   | "LEASED"
   | "SUBCONTRACTOR";
 
+export type MediaQuarantineStatus =
+  | "quarantine"
+  | "clean"
+  | "quarantined_virus";
+
 export type QuarantineReason =
   | "ACCIDENT"
   | "FAILED_INSPECTION"
   | "MAINTENANCE_OVERDUE"
   | "DOCUMENT_EXPIRED"
   | "MANUAL";
+
+export type PrivacyRequestType =
+  | "EXPORT"
+  | "DELETION";
+
+export type PrivacyRequestStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "READY"
+  | "DOWNLOADED"
+  | "COMPLETED"
+  | "FAILED";
 
 export type ReconciliationMatchStatus =
   | "UNMATCHED"
@@ -429,10 +446,12 @@ export type PermissionCode =
   | "training:manage"
   | "training:complete"
   | "training:review"
-  | "onboarding:read"
-  | "onboarding:submit"
-  | "onboarding:review"
-  | "vehicle:report";
+   | "onboarding:read"
+   | "onboarding:submit"
+   | "onboarding:review"
+   | "vehicle:report"
+   | "privacy:request_own"
+   | "privacy:view_requests_tenant";
 
 export const PERMISSION_CODES: readonly PermissionCode[] = [
   "accident:acknowledge",
@@ -502,10 +521,12 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   "training:manage",
   "training:complete",
   "training:review",
-  "onboarding:read",
-  "onboarding:submit",
-  "onboarding:review",
-  "vehicle:report",
+   "onboarding:read",
+   "onboarding:submit",
+   "onboarding:review",
+   "vehicle:report",
+   "privacy:request_own",
+   "privacy:view_requests_tenant",
 ] as const;
 
 // ----------------------------------------------------------- row types
@@ -1320,6 +1341,21 @@ export interface PermissionRow {
   code: string;
   description: string;
   phase: number;
+}
+
+/** app.privacy_requests (15_privacy_requests.sql) */
+export interface PrivacyRequestRow {
+  tenant_id: string;
+  id: string;
+  user_id: string;
+  request_type: PrivacyRequestType;
+  status: PrivacyRequestStatus;
+  created_at: string;
+  completed_at: string | null;
+  download_token: string | null;
+  file_key: string | null;
+  file_size_bytes: string | null;
+  notes: string | null;
 }
 
 /** app.quarantine_events */

@@ -227,11 +227,22 @@ export class SessionRepository extends BaseRepository<UserSessionRow> {
   async rotate(sessionId: string, refreshTokenHash: string, expiresAt: Date): Promise<void> {
     await this.client.query(
       `UPDATE app.user_sessions
-          SET refresh_token_hash = $2, expires_at = $3, last_seen_at = now()
-        WHERE id = $1`,
+           SET refresh_token_hash = $2, expires_at = $3, last_seen_at = now()
+         WHERE id = $1`,
       [sessionId, refreshTokenHash, expiresAt],
     );
   }
+
+  /** Idle-timeout touch: bump last_seen_at for an active session (A1.6). */
+  async touch(sessionId: string): Promise<void> {
+    await this.client.query(
+      `UPDATE app.user_sessions
+           SET last_seen_at = now()
+         WHERE id = $1 AND revoked_at IS NULL`,
+      [sessionId],
+    );
+  }
+
 
   async revoke(sessionId: string, reason: string): Promise<void> {
     await this.client.query(

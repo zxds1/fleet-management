@@ -146,6 +146,14 @@ export class IdempotencyConflict extends AppError {
   }
 }
 
+export class QuarantinedMediaError extends AppError {
+  readonly httpStatus = 409;
+  readonly error_code = "MEDIA_QUARANTINED";
+  constructor(detail = "Media is quarantined and cannot be served") {
+    super({ title: "Media quarantined", detail });
+  }
+}
+
 export class IdempotencyInFlight extends AppError {
   readonly httpStatus = 409;
   readonly error_code = "IDEMPOTENCY_INFLIGHT";

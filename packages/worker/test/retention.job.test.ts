@@ -37,6 +37,7 @@ describe("RetentionJob media deletion", () => {
       deleteObject: async (bucket, key) => {
         deleted.push({ bucket, key });
       },
+      getObject: async () => null,
     };
     const media = [
       { id: "m1", bucket: "fleet-media", key: "accident/x" },
@@ -58,6 +59,7 @@ describe("RetentionJob media deletion", () => {
       deleteObject: async () => {
         throw new Error("must not be called in dry-run");
       },
+      getObject: async () => null,
     };
     const job = new RetentionJob(
       fakePool([{ id: "m1", bucket: "b", key: "k" }]),

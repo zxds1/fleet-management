@@ -1,0 +1,194 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Fleet Management — Observability",
+    "tags": ["fleet", "backend", "api", "worker", "redis", "postgres"],
+    "timezone": "Africa/Nairobi",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "templating": {
+      "list": [
+        {
+          "type": "query",
+          "name": "service",
+          "query": "label_values(fleet_http_requests_total, service)",
+          "label": "Service",
+          "includeAll": true,
+          "multi": true,
+          "allValue": ".*"
+        },
+        {
+          "type": "custom",
+          "name": "provider",
+          "query": { "CloudWatch": "cw", "Prometheus": "prom" },
+          "label": "Provider"
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API request rate & error rate",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum by (status) (rate(fleet_http_requests_total{status=~\"2..\"}[5m]))",
+            "legendFormat": "2xx / {{status}}",
+            "refId": "A"
+          },
+          {
+            "expr": "sum by (status) (rate(fleet_http_requests_total{status=~\"4..\"}[5m]))",
+            "legendFormat": "4xx / {{status}}",
+            "refId": "B"
+          },
+          {
+            "expr": "sum by (status) (rate(fleet_http_requests_total{status=~\"5..\"}[5m]))",
+            "legendFormat": "5xx / {{status}}",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [{ "format": "reqps", "label": "requests/s" }, { "format": "short" }],
+        "description": "API request rate by status class (excludes /healthz, /metrics)."
+      },
+      {
+        "id": 2,
+        "title": "API P95 latency by route (last 5 m)",
+        "type": "heatmap",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(fleet_http_request_duration_seconds_bucket[5m])) by (le, route))",
+            "legendFormat": "{{route}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [{ "format": "s", "label": "latency" }, { "format": "short" }],
+        "description": "P95 request latency in seconds by route. SLO L-01 (reads ≤200 ms), L-02 (writes ≤600 ms)."
+      },
+      {
+        "id": 3,
+        "title": "DB: query latency P95 & active connections",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(fleet_db_query_duration_seconds_bucket[5m])) by (le, operation))",
+            "legendFormat": "P95 {{operation}}",
+            "refId": "A"
+          },
+          {
+            "expr": "sum by (state) (fleet_db_connections)",
+            "legendFormat": "connections({{state}})",
+            "refId": "B",
+            "yaxis": 2
+          }
+        ],
+        "yaxes": [{ "format": "s" }, { "format": "short", "label": "connections" }],
+        "description": "Database query latency (SLO A-05) and pooled connection count."
+      },
+      {
+        "id": 4,
+        "title": "Redis: command latency P95, stream depth, memory",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(fleet_redis_latency_seconds_bucket[5m])) by (le, command))",
+            "legendFormat": "P95 {{command}}",
+            "refId": "A"
+          },
+          {
+            "expr": "fleet_redis_stream_depth{stream=\"traccar:positions\"}",
+            "legendFormat": "stream depth (traccar:positions)",
+            "refId": "B",
+            "yaxis": 2
+          }
+        ],
+        "yaxes": [{ "format": "s" }, { "format": "short", "label": "depth" }],
+        "description": "Redis command latency and ingest stream depth (SLO T-03)."
+      },
+      {
+        "id": 5,
+        "title": "Telemetry ingest: accept rate, lag, stream depth",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum by (result) (rate(fleet_telemetry_ingest_total[5m]))",
+            "legendFormat": "accept rate ({{result}})",
+            "refId": "A"
+          },
+          {
+            "expr": "fleet_telemetry_ingest_lag_seconds",
+            "legendFormat": "ingest lag (s)",
+            "refId": "B",
+            "yaxis": 2
+          }
+        ],
+        "yaxes": [{ "format": "reqps" }, { "format": "s", "label": "lag" }],
+        "description": "Telemetry ingest throughput, accept/lag. SLOs T-01, T-02, T-04."
+      },
+      {
+        "id": 6,
+        "title": "Worker: jobs processed & error rate",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum by (job) (rate(fleet_worker_jobs_total{result=\"success\"}[5m]))",
+            "legendFormat": "{{job}} success",
+            "refId": "A"
+          },
+          {
+            "expr": "sum by (job) (rate(fleet_worker_jobs_total{result=\"error\"}[5m]))",
+            "legendFormat": "{{job}} error",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [{ "format": "ops", "label": "jobs/s" }, { "format": "short" }],
+        "description": "Worker job throughput and error rate (SLO A-04)."
+      },
+      {
+        "id": 7,
+        "title": "Worker: job P95 duration by type",
+        "type": "heatmap",
+        "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(fleet_worker_job_duration_seconds_bucket[5m])) by (le, job))",
+            "legendFormat": "{{job}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [{ "format": "s", "label": "latency" }, { "format": "short" }],
+        "description": "P95 worker job duration by type. SLO L-04 (outbox ≤5 s, OCR ≤30 s, reconciliation ≤120 s)."
+      },
+      {
+        "id": 8,
+        "title": "Outbox backlog & Sentry event rate",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "fleet_outbox_backlog",
+            "legendFormat": "outbox({{status}})",
+            "refId": "A"
+          },
+          {
+            "expr": "sum by (category, level) (rate(fleet_sentry_events_total[5m]))",
+            "legendFormat": "sentry {{category}}/{{level}}",
+            "refId": "B",
+            "yaxis": 2
+          }
+        ],
+        "yaxes": [{ "format": "short", "label": "events" }, { "format": "events", "label": "sentry/s" }],
+        "description": "Outbox event backlog and Sentry error/transaction rate (SLO A-01)."
+      }
+    ],
+    "time": { "from": "now-6h", "to": "now" }
+  },
+  "folderId": 0,
+  "overwrite": true
+}

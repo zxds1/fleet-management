@@ -68,6 +68,7 @@ import {
   TrainingLessonRepository,
 } from "../repositories/training";
 import { NotificationRepository } from "../repositories/notifications";
+import { PrivacyRequestRepository } from "../repositories/privacy";
 import { SettingsRepository } from "../repositories/settings";
 import { AuthService } from "../services/auth";
 import { ConsentService } from "../services/consent";
@@ -92,6 +93,7 @@ import { ReportsService } from "../services/reports";
 import { SettingsService } from "../services/settings";
 import { NotificationService } from "../services/notifications";
 import { OnboardingService } from "../services/onboarding";
+import { PrivacyService } from "../services/privacy";
 import type { EmailService } from "../services/email";
 import type { MediaPresigner } from "../media/presigner";
 
@@ -104,6 +106,8 @@ export interface Infra {
   presigner: MediaPresigner;
   /** Invitation delivery (14_tenancy.sql). The accept token travels by email only. */
   email: EmailService;
+  /** Idle-timeout session touch (A1.6) — bumps last_seen_at on activity. */
+  touchSession: (userId: string, sessionId: string) => Promise<void>;
 }
 
 export interface Repositories {
@@ -150,10 +154,12 @@ export interface Repositories {
   settingsRepo: SettingsRepository;
   /** Read model for the admin driver roster (A3.7). */
   adminRepo: AdminRepository;
-  /** Driver onboarding + background-check records (13_onboarding.sql). */
-  onboardingRepo: OnboardingRepository;
-  /** Tenancy (14_tenancy.sql): companies, memberships, invitations, roles, manager scope. */
-  tenants: TenantRepository;
+   /** Driver onboarding + background-check records (13_onboarding.sql). */
+   onboardingRepo: OnboardingRepository;
+   /** DSAR request ledger (15_privacy_requests.sql). */
+   privacyRepo: PrivacyRequestRepository;
+   /** Tenancy (14_tenancy.sql): companies, memberships, invitations, roles, manager scope. */
+   tenants: TenantRepository;
   invitations: InvitationRepository;
   userTenants: UserTenantRepository;
   userRoles: UserRoleRepository;
@@ -202,8 +208,10 @@ export interface Services extends Repositories {
   settings: SettingsService;
   /** Recipient notification inbox (C6.4). */
   notification: NotificationService;
-  /** Driver onboarding + background check. */
-  onboarding: OnboardingService;
+   /** Driver onboarding + background check. */
+   onboarding: OnboardingService;
+   /** Data Subject Access Request (DSAR) service (15_privacy_requests.sql). */
+   privacy: PrivacyService;
 }
 
 export function makeRepositories(client: DbClient): Repositories {
@@ -245,8 +253,9 @@ export function makeRepositories(client: DbClient): Repositories {
     notifications: new NotificationRepository(client),
     settingsRepo: new SettingsRepository(client),
     adminRepo: new AdminRepository(client),
-    onboardingRepo: new OnboardingRepository(client),
-    tenants: new TenantRepository(client),
+     onboardingRepo: new OnboardingRepository(client),
+     privacyRepo: new PrivacyRequestRepository(client),
+     tenants: new TenantRepository(client),
     invitations: new InvitationRepository(client),
     userTenants: new UserTenantRepository(client),
     userRoles: new UserRoleRepository(client),
@@ -329,8 +338,9 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const settings = new SettingsService(repos.settingsRepo);
   const notification = new NotificationService(repos.notifications);
   const onboarding = new OnboardingService(repos.onboardingRepo, repos.drivers);
+  const privacy = new PrivacyService(repos.privacyRepo, infra.presigner, infra.env.S3_MEDIA_BUCKET);
 
-  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, tenancy, analytics, onboarding, vehicle, vehicleIssue, maintenance, training, report, settings, notification };
+  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, tenancy, analytics, onboarding, privacy, vehicle, vehicleIssue, maintenance, training, report, settings, notification };
 }
 
 export type { PoolLike };

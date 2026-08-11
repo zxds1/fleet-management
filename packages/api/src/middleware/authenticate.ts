@@ -13,6 +13,7 @@ import { principalFromClaims, type TokenService } from "../security/tokens";
 export interface AuthenticateDeps {
   tokens: TokenService;
   sessions: SessionStore;
+  touchSession?: (userId: string, sessionId: string) => Promise<void>;
 }
 
 export function authenticate(deps: AuthenticateDeps) {
@@ -30,6 +31,12 @@ export function authenticate(deps: AuthenticateDeps) {
       if (principal.sessionId && deps.sessions.available) {
         const live = await deps.sessions.has(principal.userId, principal.sessionId);
         if (!live) throw new Unauthenticated("Session revoked");
+      }
+
+      // Idle timeout (A1.6): refresh the session's last_seen_at on every successful auth.
+      // Fire-and-forget so auth latency is unaffected by a slow DB round-trip.
+      if (principal.sessionId && deps.touchSession) {
+        void deps.touchSession(principal.userId, principal.sessionId);
       }
 
       req.principal = principal;

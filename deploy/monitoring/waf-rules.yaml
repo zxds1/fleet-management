@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AWS WAF WebACL for the Fleet Management Platform edge (S-3). Defines managed
+  rule sets, per-IP rate-based blocking on auth + telemetry webhook endpoints,
+  optional Bot Control for credential-stuffing protection, and commented
+  geofencing for Kenya-only traffic. The WebACL ARN is attached to the
+  internet-facing ALB by the IaC layer (see deploy/k8s/manifests.yaml for the
+  attachment annotation).
+
+Parameters:
+  WafScope:
+    Type: String
+    Default: CLOUDFRONT
+    AllowedValues: [CLOUDFRONT, REGIONAL]
+    Description: "CLOUDFRONT for global edge (CloudFront + API GW); REGIONAL for ALB/ACM."
+  AllowedCountryCodes:
+    Type: String
+    Default: "KE"
+    Description: "Comma-separated ISO-3166 alpha-2 country codes to ALLOW (others blocked). Default: KE."
+  RateLimitAuth:
+    Type: Number
+    Default: 100
+    Description: "Max requests per 5-min period from a single IP on /api/v1/auth/* before blocking."
+  RateLimitWebhook:
+    Type: Number
+    Default: 100
+    Description: "Max requests per 5-min period from a single IP on /api/v1/telemetry/webhook."
+
+Conditions:
+  IsCloudFront: !Equals [!Ref WafScope, CLOUDFRONT]
+  IsRegional: !Equals [!Ref WafScope, REGIONAL]
+
+Resources:
+  # ──────────────────────────────────────────────────────────────────────────
+  # WAF IP set: IPs to always allow (admin/CI egress, health-check ranges).
+  # ──────────────────────────────────────────────────────────────────────────
+  TrustedIpSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub "${AWS::StackName}-trusted-ips"
+      Scope: !Ref WafScope
+      IPAddressVersion: IPV4
+      Addresses:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # WAF WebACL — default ALLOW, statements evaluated in priority order.
+  # ──────────────────────────────────────────────────────────────────────────
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${AWS::StackName}-waf"
+      Scope: !Ref WafScope
+      Description: "Fleet platform edge WAF (S-3): managed rules + rate-based blocking on auth/telemetry."
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${AWS::StackName}-waf"
+      # Lock priority 0-99 here. Statements below use distinct priorities.
+      Rules:
+        # ────────────────────────────────────────────────────────────────────
+        # 0. Trusted IPs — allow-list bypass for internal/admin traffic.
+        #    Priority 1, never rate-limited.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: TrustedIpsAllow
+          Priority: 1
+          Action:
+            Allow: {}
+          Statement:
+            IPSetReferenceStatement:
+              ARN: !GetAtt TrustedIpSet.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: TrustedIpsAllow
+
+        # ────────────────────────────────────────────────────────────────────
+        # 1. AWSManagedRulesCommonRuleSet (CRS) — XSS, SQLi, LFI, etc.
+        #    Priority 10.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 10
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesCommonRuleSet
+              VendorName: AWS
+              Version: "1.0"
+              # Exclude none by default; add excluded rules here if false positives appear.
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+
+        # ────────────────────────────────────────────────────────────────────
+        # 2. AWSManagedRulesKnownBadInputsRuleSet — bad bots, scanners, SQLi
+        #    in known-bad patterns. Priority 20.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 20
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+              VendorName: AWS
+              Version: "1.0"
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+
+        # ────────────────────────────────────────────────────────────────────
+        # 3. AWSManagedRulesAmazonIpReputationList — block known-malicious IPs.
+        #    Priority 30.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: AWSManagedRulesAmazonIpReputationList
+          Priority: 30
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesAmazonIpReputationList
+              VendorName: AWS
+              Version: "1.0"
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAmazonIpReputationList
+
+        # ────────────────────────────────────────────────────────────────────
+        # 4. AWSManagedRulesDOSCommonRuleSet — aggregate-pattern DDoS detection.
+        #    Priority 40.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: AWSManagedRulesDOSCommonRuleSet
+          Priority: 40
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesDOSCommonRuleSet
+              VendorName: AWS
+              Version: "1.0"
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesDOSCommonRuleSet
+
+        # ────────────────────────────────────────────────────────────────────
+        # 5. Rate-based rule: block IPs exceeding 100 req/5min on auth paths.
+        #    Targets POST /api/v1/auth/* (login, MFA, refresh).
+        #    Priority 50.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: RateLimitAuth
+          Priority: 50
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimitAuth
+              AggregateClientIpAddress: true
+              ScopeDownStatement:
+                AndStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          URIPath: {}
+                        PositionalConstraint: StartsWith
+                        SearchString: "/api/v1/auth"
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          URIPath: {}
+                        # Match any sub-path: auth/login, auth/mfa/*, auth/refresh, etc.
+                        PositionalConstraint: StartsWith
+                        SearchString: "/api/v1/auth/"
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+              # Only count POST (login attempts, MFA challenges).
+              # Note: RateBasedStatement does not natively support method — use a
+              # separate rule or rely on application-layer rate limiting (S-3) for
+              # method-specific throttling. The WAF rule covers all methods on auth
+              # as a defence-in-depth measure.
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitAuth
+
+        # ────────────────────────────────────────────────────────────────────
+        # 6. Rate-based rule: block IPs exceeding 100 req/5min on the telemetry
+        #    webhook. Targets POST /api/v1/telemetry/webhook.
+        #    Priority 60.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: RateLimitTelemetryWebhook
+          Priority: 60
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimitWebhook
+              AggregateClientIpAddress: true
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  FieldToMatch:
+                    URIPath: {}
+                  PositionalConstraint: Equals
+                  SearchString: "/api/v1/telemetry/webhook"
+                  TextTransformations:
+                    - Priority: 0
+                      Type: NONE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitTelemetryWebhook
+
+        # ────────────────────────────────────────────────────────────────────
+        # 7. Bot Control — credential stuffing protection for auth endpoints.
+        #    Requires AWSManagedRulesBotControlRuleSet (Bot Control is a paid
+        #    managed rule group). Blocks high-severity bots; challenges
+        #    medium-severity bots via CAPTCHA.
+        #    Priority 70.
+        #    NOTE: Enable only if subscribed to AWS WAF Bot Control.
+        # ────────────────────────────────────────────────────────────────────
+        - Name: BotControlAuth
+          Priority: 70
+          Action:
+            Block: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesBotControlRuleSet
+              VendorName: AWS
+              Version: "1.0"
+              # Bot Control signal categories:
+              #   - token=good (legitimate, allowlisted clients)
+              #   - token=managed (known good bots — search, etc.)
+              #   - token=bad (malicious bots — block)
+              #   - token=unclassified (unknown — challenge or allow)
+              # We scope to auth paths via ScopeDownStatement.
+              ScopeDownStatement:
+                OrStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          URIPath: {}
+                        PositionalConstraint: StartsWith
+                        SearchString: "/api/v1/auth"
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          URIPath: {}
+                        PositionalConstraint: Equals
+                        SearchString: "/api/v1/telemetry/webhook"
+                        TextTransformations:
+                          - Priority: 0
+                            Type: NONE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BotControlAuth
+
+        # ────────────────────────────────────────────────────────────────────
+        # 8. Geofencing — block traffic from non-allowed countries.
+        #    DEFAULT ALLOW is set on the WebACL; this rule provides a blocklist
+        #    for countries NOT in the allowed set.
+        #    Optional: uncomment to enforce Kenya-only (or allowed) traffic.
+        #    Priority 80.
+        # ────────────────────────────────────────────────────────────────────
+        # - Name: GeofenceAllowList
+        #   Priority: 80
+        #   Action:
+        #     Block: {}
+        #   Statement:
+        #     NotStatement:
+        #       Statement:
+        #         GeoMatchStatement:
+        #           CountryCodes: !Split [",", !Ref AllowedCountryCodes]
+        #           # ForwardedIPConfig for proxied traffic (CloudFront):
+        #           # ForwardedIPConfig:
+        #           #   HeaderName: X-Forwarded-For
+        #   VisibilityConfig:
+        #     SampledRequestsEnabled: true
+        #     CloudWatchMetricsEnabled: true
+        #     MetricName: GeofenceAllowList
+
+        # ────────────────────────────────────────────────────────────────────
+        # 9. AWSManagedRulesSQLRuleSet — additional SQLi-specific protection.
+        #    Priority 90. (CRS already covers much of this; this is extra depth.)
+        # ────────────────────────────────────────────────────────────────────
+        - Name: AWSManagedRulesSQLRuleSet
+          Priority: 90
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              Name: AWSManagedRulesSQLRuleSet
+              VendorName: AWS
+              Version: "1.0"
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesSQLRuleSet
+
+Outputs:
+  WebACLArn:
+    Description: "ARN of the WAF WebACL (attach to the ALB / CloudFront via IaC)"
+    Value: !GetAtt WebACL.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-webacl-arn"
+
+  WebACLId:
+    Description: "ID of the WAF WebACL"
+    Value: !Ref WebACL
+
+  TrustedIpSetArn:
+    Description: "ARN of the trusted IP set (for allow-list maintenance)"
+    Value: !GetAtt TrustedIpSet.Arn

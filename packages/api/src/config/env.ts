@@ -30,6 +30,10 @@ const EnvSchema = z.object({
   MFA_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300), // 5 min (02 §2)
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
+  // A1.6 — session idle timeout. A session inactive for this long is evicted; the access token
+  // is treated as idle when (now - iat) exceeds the window. Default 8 h.
+  SESSION_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(480),
+
   // AES-GCM data key for users.mfa_secret_encrypted (02 §3). 32 bytes, base64.
   MFA_ENCRYPTION_KEY: z.string().default(Buffer.alloc(32, 7).toString("base64")),
 

@@ -5,6 +5,7 @@
 // core `processPositions` is dependency-injected so it can be unit-tested with a fake repo.
 
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
+import { TRACCAR_POSITIONS_GROUP, TRACCAR_POSITIONS_STREAM } from "@fleet/shared";
 import { transaction } from "@fleet/db";
 import type { Redis } from "ioredis";
 import { logger } from "@fleet/shared";
@@ -28,6 +29,8 @@ export interface IngestConsumerDeps {
   redis: Redis | null;
   publisher?: EventPublisher;
   streamName?: string;
+  groupName?: string;
+  consumerName?: string;
   batchSize?: number;
   blockMs?: number;
   bufferMinutes?: number;
@@ -38,12 +41,16 @@ export class IngestConsumer {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastId = "$";
   private readonly stream: string;
+  private readonly groupName: string;
+  private readonly consumerName: string;
   private readonly batchSize: number;
   private readonly blockMs: number;
   private readonly bufferMinutes: number;
 
   constructor(private readonly deps: IngestConsumerDeps) {
-    this.stream = deps.streamName ?? "traccar:positions";
+    this.stream = deps.streamName ?? TRACCAR_POSITIONS_STREAM;
+    this.groupName = deps.groupName ?? TRACCAR_POSITIONS_GROUP;
+    this.consumerName = deps.consumerName ?? "fleet-worker";
     this.batchSize = deps.batchSize ?? 100;
     this.blockMs = deps.blockMs ?? 1000;
     this.bufferMinutes = deps.bufferMinutes ?? DEFAULT_RETENTION_BUFFER_MINUTES;
@@ -52,10 +59,17 @@ export class IngestConsumer {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    logger.info("ingest consumer started", { stream: this.stream });
+    logger.info("ingest consumer started", { stream: this.stream, group: this.groupName });
     if (!this.deps.redis) {
       logger.warn("ingest: Redis unavailable — stream disabled, back-fill poller remains the durability guarantee");
       return;
+    }
+    try {
+      await this.deps.redis.xgroup("CREATE", this.stream, this.groupName, "$", "MKSTREAM");
+    } catch (e: unknown) {
+      const msg = (e as Error).message;
+      // BUSYGROUP: group already exists on restart — expected, not fatal.
+      if (!msg.includes("BUSYGROUP")) throw e;
     }
     this.timer = setInterval(() => void this.poll(), this.blockMs);
     if (typeof (this.timer as { unref?: () => void }).unref === "function") {
@@ -74,16 +88,20 @@ export class IngestConsumer {
   private async poll(): Promise<void> {
     if (!this.running || !this.deps.redis) return;
     try {
-      const res = (await this.deps.redis.xread("COUNT", this.batchSize, "BLOCK", this.blockMs, "STREAMS", this.stream, this.lastId)) as any;
+      const res = (await this.deps.redis.xreadgroup("GROUP", this.groupName, this.consumerName, "COUNT", this.batchSize, "BLOCK", this.blockMs, "STREAMS", this.stream, this.lastId)) as any;
       if (!res) return;
-      for (const [, entries] of res) {
+      for (const [streamName, entries] of res) {
         const positions: TraccarPosition[] = [];
         for (const [id, fields] of entries) {
           this.lastId = id;
           const raw = this.decode(fields);
           if (raw) positions.push(parseTraccarPosition(raw));
         }
-        if (positions.length) await this.processPositions(positions);
+        if (positions.length) {
+          const result = await this.processPositions(positions);
+          await this.deps.redis!.xack(this.stream, this.groupName, ...entries.map((e: any) => e[0]));
+          void result;
+        }
       }
     } catch (e) {
       logger.error("ingest poll failed", { message: (e as Error).message });
