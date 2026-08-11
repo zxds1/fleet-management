@@ -476,13 +476,6 @@ function renderScreen(
         />
       );
     default:
-      return (
-        <NotFoundScreen
-          onAction={() => onNavigate("dashboard")}
-          testID="admin-not-found"
-        />
-      );
+      return <View />;
   }
 }
-
-

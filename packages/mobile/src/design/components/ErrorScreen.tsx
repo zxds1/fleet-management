@@ -1,15 +1,11 @@
-﻿// packages/mobile/src/design/components/ErrorScreen.tsx
+// packages/mobile/src/design/components/ErrorScreen.tsx
 //
 // Full-screen error surface (IMPLEMENTATION-PROMPT §5.9 "error/empty states").
 // Renders a user-friendly page for a caught `AppError` or an arbitrary thrown value,
 // mapping every code through the i18n catalogue so no internal error_code or stack
 // trace is ever shown to the user. The single correct action (retry / go online /
-// re-login / contact admin) is surfaced as the primary button; the raw error is
+// re-login / contact admin / …) is surfaced as the primary button; the raw error is
 // reported to Sentry in the background.
-//
-// Two entry points:
-//   1. `ErrorScreen` — full bleed, no chrome. Used by `ErrorBoundary` fallback.
-//   2. `ErrorScreenCard` — card-constrained variant for in-page error blocks.
 
 import React from "react"
 import { View, ScrollView, StyleSheet } from "react-native"
@@ -114,11 +110,6 @@ export function ErrorScreen({
   )
 }
 
-/**
- * Constrained card variant for in-page error blocks. Reuses the same i18n mapping
- * and Sentry reporting as `ErrorScreen` but renders inside a card rather than taking
- * over the full viewport.
- */
 export function ErrorScreenCard({
   error,
   region,
@@ -158,29 +149,29 @@ export function ErrorScreenCard({
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: theme.spacing.xl,
+    padding: theme.space.xl,
     justifyContent: "center",
     backgroundColor: theme.colors.background,
   },
   iconWrapper: {
     alignItems: "center",
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.space.lg,
   },
   title: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.space.md,
   },
   message: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.space.xl,
     maxWidth: 280,
     alignSelf: "center",
   },
   buttonRow: {
     flexDirection: "row",
-    gap: theme.spacing.sm,
+    gap: theme.space.sm,
     justifyContent: "center",
   },
   card: {
-    padding: theme.spacing.md,
+    padding: theme.space.md,
     backgroundColor: theme.colors.errorContainer,
     borderRadius: theme.radius.md,
     borderWidth: 1,
@@ -189,11 +180,11 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
+    gap: theme.space.sm,
+    marginBottom: theme.space.sm,
   },
   cardMessage: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.space.md,
   },
   cardButton: {
     alignSelf: "flex-start",
