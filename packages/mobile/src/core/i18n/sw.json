@@ -1226,6 +1226,10 @@
     "pinningFailedBody": "Cheti cha seva hakiwezi kuthibitishwa. Huenda uko kwenye mtandao usioaminika."
   },
   "errors": {
+    "genericTitle": "Kuna hitilafu",
+    "fatalTitle": "Inahitajika kuingia",
+    "notFoundTitle": "Haitaonekani",
+    "notFoundDescription": "Ukurasa au kipengele ulichonatakapo hakipo au kimeondolewa.",
     "VALIDATION_ERROR": "Baadhi ya maelezo hayako au hayafai. Angalia sehemu zilizoonyeshwa.",
     "UNAUTHENTICATED": "Kuingia kwako sasa hakifai tena. Tafadhali ingia tena.",
     "MFA_REQUIRED": "Weka nambari kutoka kwenye programu yako ya uthibitishaji.",
@@ -1295,3 +1299,4 @@
     "cancel": "Ghairi"
   }
 }
+

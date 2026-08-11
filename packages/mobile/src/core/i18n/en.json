@@ -1226,6 +1226,10 @@
     "pinningFailedBody": "The server certificate could not be verified. You may be on an untrusted network."
   },
   "errors": {
+    "genericTitle": "Something went wrong",
+    "fatalTitle": "Sign in required",
+    "notFoundTitle": "Not found",
+    "notFoundDescription": "The page or item you are looking for does not exist or has been removed.",
     "VALIDATION_ERROR": "Some details are missing or invalid. Check the highlighted fields.",
     "UNAUTHENTICATED": "Your sign-in is no longer valid. Please sign in again.",
     "MFA_REQUIRED": "Enter the code from your authenticator app.",
@@ -1295,3 +1299,5 @@
     "cancel": "Cancel"
   }
 }
+
+
