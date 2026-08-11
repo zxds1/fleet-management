@@ -70,6 +70,7 @@ import {
 import { NotificationRepository } from "../repositories/notifications";
 import { PrivacyRequestRepository } from "../repositories/privacy";
 import { SettingsRepository } from "../repositories/settings";
+import { ResetCodeRepository } from "../repositories/passwordReset";
 import { AuthService } from "../services/auth";
 import { ConsentService } from "../services/consent";
 import { DeviceService } from "../services/device";
@@ -94,6 +95,7 @@ import { SettingsService } from "../services/settings";
 import { NotificationService } from "../services/notifications";
 import { OnboardingService } from "../services/onboarding";
 import { PrivacyService } from "../services/privacy";
+import { PasswordResetService } from "../services/passwordReset";
 import type { EmailService } from "../services/email";
 import { ResendMfaDeliveryService } from "../services/mfaDelivery";
 import { RedisOtpStore } from "../security/otpStore";
@@ -162,6 +164,8 @@ export interface Repositories {
    onboardingRepo: OnboardingRepository;
    /** DSAR request ledger (15_privacy_requests.sql). */
    privacyRepo: PrivacyRequestRepository;
+   /** Delegated password-reset store (16_password_reset.sql). */
+   resets: ResetCodeRepository;
    /** Tenancy (14_tenancy.sql): companies, memberships, invitations, roles, manager scope. */
    tenants: TenantRepository;
   invitations: InvitationRepository;
@@ -216,6 +220,8 @@ export interface Services extends Repositories {
    onboarding: OnboardingService;
    /** Data Subject Access Request (DSAR) service (15_privacy_requests.sql). */
    privacy: PrivacyService;
+   /** Delegated password-reset service (immune-system follow-on). */
+   reset: PasswordResetService;
 }
 
 export function makeRepositories(client: DbClient): Repositories {
@@ -259,6 +265,7 @@ export function makeRepositories(client: DbClient): Repositories {
     adminRepo: new AdminRepository(client),
      onboardingRepo: new OnboardingRepository(client),
      privacyRepo: new PrivacyRequestRepository(client),
+     resets: new ResetCodeRepository(client),
      tenants: new TenantRepository(client),
     invitations: new InvitationRepository(client),
     userTenants: new UserTenantRepository(client),
@@ -346,7 +353,22 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   const onboarding = new OnboardingService(repos.onboardingRepo, repos.drivers);
   const privacy = new PrivacyService(repos.privacyRepo, infra.presigner, infra.env.S3_MEDIA_BUCKET);
 
-  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, tenancy, analytics, onboarding, privacy, vehicle, vehicleIssue, maintenance, training, report, settings, notification };
+  const resetMfaDelivery = new ResendMfaDeliveryService(infra.env);
+  const reset = new PasswordResetService({
+    users: repos.users,
+    userRoles: repos.userRoles,
+    userTenants: repos.userTenants,
+    resets: repos.resets,
+    email: infra.email,
+    sms: resetMfaDelivery,
+    env: infra.env,
+    applyNewPassword: async (userId, newPasswordHash) => {
+      await repos.users.updatePassword(userId, newPasswordHash);
+      await repos.sessions.revokeAllForUser(userId, "PASSWORD_RESET");
+    },
+  });
+
+  return { ...repos, auth, mfa, device, consent, session, shift, shiftQuery, fuel, fuelCard, reconciliation, fuelQuery, accident, accidentQuery, inspection, inspectionQuery, trailer, media, anomaly, document, dashboard, admin, tenancy, analytics, onboarding, privacy, vehicle, vehicleIssue, maintenance, training, report, settings, notification, reset };
 }
 
 export type { PoolLike };

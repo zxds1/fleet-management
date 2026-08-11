@@ -523,5 +523,108 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     ),
   );
 
+  // ── Delegated password reset (immune-system follow-on) ─────────────────────────────────
+  // Roles: company OWNER self-approves (code emailed immediately); INVITED ADMIN waits for the
+  // inviting admin; DRIVER waits for.. actually drivers wait for any tenant admin, then the code is
+  // sent to BOTH the driver's mobile (SMS) and email. See PasswordResetService for the full model.
+
+  const ResetRequestSchema = z.object({
+    email_or_phone: z.string().min(3).max(320),
+  });
+  router.post(
+    "/password-reset/request",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const input = parseBody(ResetRequestSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.reset.request(input.email_or_phone);
+        if (isErr(result)) return result.error as never;
+        tx.audit({
+          action: "PASSWORD_RESET_REQUESTED",
+          entity_table: "app.password_reset_codes",
+          actor_user_id: ctx.subject,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+        });
+        return ok({
+          status: 200,
+          body: {
+            reset_id: result.value.resetId,
+            status: result.value.status,
+            contact_hint: result.value.contactHint,
+            expires_at: result.value.expiresAt,
+            requires_approval: result.value.requiresApproval,
+          },
+        });
+      }),
+    ),
+  );
+
+  // Admin approves a pending reset. Authenticated; authorised inside the service (designated
+  // approver for invited admins, any tenant admin for drivers).
+  router.post(
+    "/password-reset/:resetId/approve",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.reset.approve(
+          req.params.resetId ?? "",
+          principal.userId,
+          principal.roles,
+          principal.tenantId,
+        );
+        if (isErr(result)) return result.error as never;
+        tx.audit({
+          action: "PASSWORD_RESET_APPROVED",
+          entity_table: "app.password_reset_codes",
+          entity_id: req.params.resetId ?? "",
+          actor_user_id: principal.userId,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+        });
+        return ok({ status: 200, body: { approved: true, delivered: result.value.delivered, channel: result.value.channel } });
+      }),
+    ),
+  );
+
+  const ResetCompleteSchema = z.object({
+    code: z.string().min(4).max(10),
+    new_password: z.string().min(8).max(200),
+  });
+  router.post(
+    "/password-reset/:resetId/complete",
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const input = parseBody(ResetCompleteSchema, req);
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.reset.complete(req.params.resetId ?? "", input.code, input.new_password);
+        if (isErr(result)) return result.error as never;
+        tx.audit({
+          action: "PASSWORD_RESET_COMPLETED",
+          entity_table: "app.password_reset_codes",
+          entity_id: req.params.resetId ?? "",
+          actor_user_id: ctx.subject,
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+        });
+        return ok({ status: 200, body: { reset: true } });
+      }),
+    ),
+  );
+
   return router;
 }

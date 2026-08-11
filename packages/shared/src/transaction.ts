@@ -45,7 +45,10 @@ export interface AuditInput {
     | "MEMBERSHIP_GRANT"
     | "MEMBERSHIP_REVOKE"
     | "INVITATION_CREATE"
-    | "SCOPE_ASSIGN";
+    | "SCOPE_ASSIGN"
+    | "PASSWORD_RESET_REQUESTED"
+    | "PASSWORD_RESET_APPROVED"
+    | "PASSWORD_RESET_COMPLETED";
   entity_table: string;
   entity_schema?: string;
   entity_id?: string;

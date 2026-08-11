@@ -396,4 +396,29 @@ export class UserRoleRepository {
     );
     return res.rowCount ?? 0;
   }
+
+  /** The actor who granted a user their role — the inviting admin for non-owner accounts. */
+  async findGrantedBy(userId: string, roleCode: RoleCode): Promise<string | null> {
+    const res = await this.client.query<{ granted_by: string | null }>(
+      `SELECT granted_by FROM app.user_roles WHERE user_id = $1 AND role_code = $2 LIMIT 1`,
+      [userId, roleCode],
+    );
+    return res.rows[0]?.granted_by ?? null;
+  }
+
+  /**
+   * Authorised approvers for a tenant's delegated resets: every active ADMIN / FLEET_MANAGER.
+   * Used to route driver reset approvals (drivers have no single inviting admin).
+   */
+  async listApprovers(tenantId: string): Promise<string[]> {
+    const res = await this.client.query<{ user_id: string }>(
+      `SELECT DISTINCT ur.user_id
+         FROM app.user_roles ur
+         JOIN app.user_tenants ut ON ut.user_id = ur.user_id AND ut.tenant_id = $1
+         JOIN app.users u ON u.id = ur.user_id AND u.deleted_at IS NULL AND u.is_active
+        WHERE ur.role_code IN ('ADMIN', 'FLEET_MANAGER')`,
+      [tenantId],
+    );
+    return res.rows.map((r) => r.user_id);
+  }
 }

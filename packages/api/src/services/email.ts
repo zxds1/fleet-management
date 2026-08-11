@@ -16,10 +16,21 @@ export interface InvitationEmailInput {
   expiresAt: Date;
 }
 
+export interface PasswordResetEmailInput {
+  to: string;
+  fullName: string;
+  /** Truncated redacted destination the code was (or will be) sent to. */
+  contactHint: string;
+  code: string;
+  expiresAt: Date;
+}
+
 export interface EmailService {
   /** Delivers the admin invitation email. Failures are logged, not thrown — a mail outage must
    * not roll back the (already-committed) invitation row. */
   sendInvitation(input: InvitationEmailInput): Promise<void>;
+  /** Delivers a password-reset code to the account owner's email. Failures are logged, never thrown. */
+  sendPasswordResetCode(input: PasswordResetEmailInput): Promise<void>;
 }
 
 /** Dev/test implementation: prints the invitation to stdout. Swap for a real transport in prod. */
@@ -27,11 +38,23 @@ export class ConsoleEmailService implements EmailService {
   async sendInvitation(input: InvitationEmailInput): Promise<void> {
     const expires = input.expiresAt.toISOString();
     // eslint-disable-next-line no-console
-    console.info(
+      console.info(
       `[email] invitation → ${input.to}\n` +
         `  company: ${input.tenantName}\n` +
         `  role:    ${input.roleCode}\n` +
         `  accept:  ${input.acceptUrl}\n` +
+        `  expires: ${expires}`,
+    );
+  }
+
+  async sendPasswordResetCode(input: PasswordResetEmailInput): Promise<void> {
+    const expires = input.expiresAt.toISOString();
+    // eslint-disable-next-line no-console
+    console.info(
+      `[email] password-reset → ${input.to}\n` +
+        `  name:   ${input.fullName}\n` +
+        `  code:   ${input.code}\n` +
+        `  to:     ${input.contactHint}\n` +
         `  expires: ${expires}`,
     );
   }
@@ -76,6 +99,44 @@ export class ResendEmailService implements EmailService {
     } catch (e) {
       // A mail outage must not roll back the invitation — log and move on.
       logger.error("resend: invitation email delivery error", { to: input.to, message: (e as Error).message });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async sendPasswordResetCode(input: PasswordResetEmailInput): Promise<void> {
+    if (!this.env.RESEND_API_KEY) {
+      logger.warn("resend: no RESEND_API_KEY configured, skipping password-reset email", { to: input.to });
+      return;
+    }
+    const expires = input.expiresAt.toISOString();
+    const text =
+      `Hi ${input.fullName},\n` +
+      `Your Fleet password-reset code is ${input.code}. It was sent to ${input.contactHint}.\n` +
+      `This code expires at ${expires}. If you did not request a reset, you can ignore this email.`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.env.RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: this.env.EMAIL_FROM,
+          to: input.to,
+          subject: "Your Fleet password-reset code",
+          text,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        logger.error("resend: password-reset email failed", { to: input.to, status: res.status });
+      }
+    } catch (e) {
+      logger.error("resend: password-reset email delivery error", { to: input.to, message: (e as Error).message });
     } finally {
       clearTimeout(timer);
     }

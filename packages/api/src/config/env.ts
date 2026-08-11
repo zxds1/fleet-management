@@ -96,6 +96,12 @@ const EnvSchema = z.object({
   // Dedicated scopes for high-value, abuse-prone endpoints (security Layer 4).
   // `password-reset` covers reset/initiation flows; `financial` covers reports/billing/export.
   RATE_LIMIT_PASSWORD_RESET_PER_MINUTE: z.coerce.number().int().positive().default(5),
+
+  // Delegated password-reset code lifetime (immune-system follow-on). The reset link/code expires
+  // after this many minutes; a PENDING_APPROVAL request must be approved before it lapses.
+  PASSWORD_RESET_CODE_TTL_MINUTES: z.coerce.number().int().positive().default(30),
+  // Length of the numeric reset code delivered out-of-band (6–8 digits).
+  PASSWORD_RESET_CODE_LENGTH: z.coerce.number().int().min(4).max(10).default(6),
   RATE_LIMIT_FINANCIAL_PER_MINUTE: z.coerce.number().int().positive().default(20),
   IP_BLOCK_THRESHOLD: z.coerce.number().int().positive().default(100), // abuse hits per window to auto-block
   IP_BLOCK_WINDOW_SECONDS: z.coerce.number().int().positive().default(600),

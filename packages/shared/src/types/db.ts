@@ -68,7 +68,10 @@ export type AuditAction =
   | "MEMBERSHIP_GRANT"
   | "MEMBERSHIP_REVOKE"
   | "INVITATION_CREATE"
-  | "SCOPE_ASSIGN";
+  | "SCOPE_ASSIGN"
+  | "PASSWORD_RESET_REQUESTED"
+  | "PASSWORD_RESET_APPROVED"
+  | "PASSWORD_RESET_COMPLETED";
 
 export type ConsentType =
   | "GPS_TRACKING_WORKING_HOURS"
@@ -1979,6 +1982,40 @@ export interface UserTenantRow {
   user_id: string;
   tenant_id: string;
   is_primary: boolean;
+  created_at: string;
+}
+
+/**
+ * app.password_reset_codes — delegated password-reset requests.
+ *
+ * A reset is *requested* by the account owner (via the reset link) and, unless the requester is the
+ * tenant's company owner (the self-signup super-admin), must be *approved* by an authorised admin
+ * before a reset code is delivered. Approvers are the inviting admin (invited admins) or any tenant
+ * ADMIN/FLEET_MANAGER (drivers). The code is single-use, hashed at rest, and expires after
+ * PASSWORD_RESET_CODE_TTL_MINUTES.
+ */
+export type PasswordResetStatus = "PENDING_APPROVAL" | "APPROVED" | "COMPLETED" | "EXPIRED" | "REVOKED";
+
+export interface PasswordResetCodeRow {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  /** Channel the delivered code travels over: email only, or email + sms for drivers. */
+  channel: "email" | "email_sms";
+  status: PasswordResetStatus;
+  /** SHA-256 of the numeric reset code — the raw code is never stored. */
+  code_hash: string;
+  /** Truncated redacted destination shown back to the requester/admin (e.g. a***@b.co / +254***33). */
+  contact_hint: string;
+  requested_at: string;
+  /** The admin who must approve (inviting admin for invited admins, a tenant admin for drivers). */
+  approver_user_id: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  /** When the raw code is delivered to the user (after approval). */
+  delivered_at: string | null;
+  expires_at: string;
+  completed_at: string | null;
   created_at: string;
 }
 
