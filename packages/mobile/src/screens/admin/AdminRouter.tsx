@@ -486,5 +486,3 @@ function renderScreen(
   }
 }
 
-
-

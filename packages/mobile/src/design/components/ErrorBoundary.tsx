@@ -1,4 +1,4 @@
-﻿// packages/mobile/src/design/components/ErrorBoundary.tsx
+// packages/mobile/src/design/components/ErrorBoundary.tsx
 //
 // Top-level React error boundary (IMPLEMENTATION-PROMPT §5.9 "error/empty states"). Catches render-time
 // crashes so a single bad screen does not blank the whole app. Shows the localized unknown-error copy
@@ -54,3 +54,4 @@ export class ErrorBoundary extends React.Component<Props, State> {
     );
   }
 }
+
