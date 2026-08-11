@@ -92,23 +92,22 @@ export function smsTransport(env: Env): NotificationTransport {
 export function emailTransport(env: Env): NotificationTransport {
   const fire = createBreaker(
     (row: NotificationRow) =>
-      fetchWithTimeout(env.EMAIL_API_URL ?? "", {
+      fetchWithTimeout("https://api.resend.com/emails", {
         method: "POST",
-        headers: { "Content-Type": "application/json", [env.EMAIL_AUTH_HEADER]: String(env.EMAIL_API_KEY ?? "") },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.RESEND_API_KEY}` },
         body: JSON.stringify({
           from: env.EMAIL_FROM,
           to: row.recipientAddress,
           subject: row.title,
           text: row.body,
-          locale: row.locale,
         }),
       }),
     "email",
   );
   return {
     async send(row: NotificationRow): Promise<SendResult> {
-      if (!env.EMAIL_API_URL) {
-        logger.debug("email: no provider configured, skipping", { id: row.id, to: row.recipientAddress });
+      if (!env.RESEND_API_KEY) {
+        logger.debug("email: no RESEND_API_KEY configured, skipping", { id: row.id, to: row.recipientAddress });
         return { status: "SENT", provider: "email-skip" };
       }
       try {

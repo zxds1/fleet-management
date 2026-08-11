@@ -15,6 +15,7 @@ import {
   type ResolvedPermissions,
 } from "../repositories/identity";
 import type { SessionService, IssuedSession } from "./session";
+import type { MfaService } from "./mfa";
 
 export type LoginResult =
   | { mfaRequired: false; session: IssuedSession }
@@ -36,6 +37,7 @@ export class AuthService {
     private readonly sessions: SessionService,
     private readonly tokens: TokenService,
     private readonly env: Env,
+    private readonly mfa: MfaService,
   ) {}
 
   async login(input: LoginInput): Promise<Result<LoginResult>> {
@@ -66,7 +68,9 @@ export class AuthService {
 
     const identity = await this.resolve(user.id);
     if (user.mfa_enabled) {
-      const challengeToken = this.tokens.issueMfaChallenge({ userId: user.id, email: user.email ?? "" });
+      const challengeToken = this.tokens.issueMfaChallenge({ userId: user.id });
+      const sent = await this.mfa.sendCode(user.id);
+      if (!sent.ok) return err(sent.error);
       return ok({ mfaRequired: true, challengeToken });
     }
 

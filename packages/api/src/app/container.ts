@@ -10,7 +10,7 @@ import { createRedis, type RedisBundle } from "../config/redis";
 import { TokenService } from "../security/tokens";
 import { SecretBox } from "../security/crypto";
 import { EnvMediaPresigner } from "../media/presigner";
-import { ConsoleEmailService } from "../services/email";
+import { ConsoleEmailService, ResendEmailService } from "../services/email";
 import type { Infra } from "./compose";
 
 export interface Container {
@@ -46,7 +46,8 @@ export function buildContainer(environment: Env = loadEnv()): Container {
     config,
     store: redis.sessions,
     presigner,
-    email: new ConsoleEmailService(),
+    email: environment.RESEND_API_KEY ? new ResendEmailService(environment) : new ConsoleEmailService(),
+    redis,
     /** Idle-timeout touch (A1.6): bump last_seen_at on the session row (fire-and-forget from auth). */
     touchSession: async (userId: string, sessionId: string): Promise<void> => {
       const client: DbClient = await pool.connect();

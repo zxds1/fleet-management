@@ -119,10 +119,11 @@ export class TokenService {
     );
   }
 
-  /** Short-lived challenge token issued after password verification when MFA is enforced. */
-  issueMfaChallenge(input: { userId: string; email: string }): string {
+  /** Short-lived challenge token issued after password verification when MFA is enforced. The
+   *  challenge only carries the userId — the OTP is delivered out-of-band, never embedded in it. */
+  issueMfaChallenge(input: { userId: string }): string {
     return jwt.sign(
-      { sub: input.userId, email: input.email, scope: "mfa" },
+      { sub: input.userId, scope: "mfa" },
       this.env.JWT_SECRET,
       {
         algorithm: "HS256",
@@ -133,14 +134,14 @@ export class TokenService {
     );
   }
 
-  verifyMfaChallenge(token: string): { userId: string; email: string } {
+  verifyMfaChallenge(token: string): { userId: string } {
     try {
       const decoded = jwt.verify(token, this.env.JWT_SECRET, {
         algorithms: ["HS256"],
         issuer: this.env.JWT_ISSUER,
-      }) as JwtPayload & { sub: string; email: string; scope?: string };
+      }) as JwtPayload & { sub: string; scope?: string };
       if (decoded.scope !== "mfa") throw new Unauthenticated("Invalid MFA challenge");
-      return { userId: decoded.sub, email: decoded.email };
+      return { userId: decoded.sub };
     } catch (e) {
       if (e instanceof Unauthenticated) throw e;
       throw new Unauthenticated("MFA challenge expired or invalid");

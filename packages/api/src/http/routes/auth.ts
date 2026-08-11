@@ -30,7 +30,6 @@ const MfaVerifySchema = z.object({
   code: z.string().min(4).max(16),
 });
 const RefreshSchema = z.object({ refresh_token: z.string().min(1) });
-const MfaConfirmSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 const DeviceRegisterSchema = z.object({
   device_id_hash: z.string().min(16),
   device_label: z.string().max(120).optional(),
@@ -239,26 +238,6 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         parseBody(MfaEnrollSchema, req);
         const svc = makeServices(tx.client, infra);
         const result = await svc.mfa.enroll(principal.userId);
-        if (isErr(result)) return result.error as never;
-        return ok({
-          status: 200,
-          body: { secret: result.value.secret, otpauth_uri: result.value.otpauthUri },
-        });
-      }),
-    ),
-  );
-
-  router.post(
-    "/mfa/confirm",
-    authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("MANAGE_OWN_MFA")),
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as Principal;
-        const input = parseBody(MfaConfirmSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.mfa.confirm(principal.userId, input.code);
         if (isErr(result)) return result.error as never;
         tx.audit({
           action: "CONFIG_CHANGE",

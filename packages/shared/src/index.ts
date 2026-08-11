@@ -15,6 +15,7 @@ export * from "./types/db";
 export * from "./types/principal";
 export * from "./tenancy";
 export * from "./schemas/auth";
+export * from "./schemas/mfa";
 export * from "./schemas/tenancy";
 export * from "./schemas/vehicles";
 export * from "./schemas/shifts";

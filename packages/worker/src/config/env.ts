@@ -59,11 +59,12 @@ const EnvSchema = z.object({
   SERVICE_NAME: z.string().default("fleet-worker"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
-  // Email transport (N9 / A1.8). A generic JSON-POST transactional provider (SES / SendGrid / Mailgun
-  // all accept a JSON body + auth header). When EMAIL_API_URL is absent the sender degrades to a
-  // logged no-op so dev/test never needs a mail provider.
+  // Email transport (N9 / A1.8). Now delivered via Resend (plain fetch + Bearer token). When
+  // RESEND_API_KEY is absent the sender degrades to a logged no-op so dev/test never needs a mail provider.
+  // EMAIL_API_URL / EMAIL_API_KEY / EMAIL_AUTH_HEADER are retained for any legacy callers but unused.
   EMAIL_API_URL: z.string().optional(),
   EMAIL_API_KEY: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("fleet@fleet.internal"),
   EMAIL_AUTH_HEADER: z.string().default("Authorization"),
 });

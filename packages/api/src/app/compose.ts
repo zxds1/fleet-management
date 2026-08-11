@@ -7,7 +7,7 @@
 import type { DbClient } from "@fleet/shared";
 import { Unauthenticated } from "@fleet/shared";
 import type { Env } from "../config/env";
-import type { SessionStore } from "../config/redis";
+import type { SessionStore, RedisBundle } from "../config/redis";
 import type { PoolLike } from "@fleet/shared";
 import type { ConfigClient } from "@fleet/shared";
 import type { TokenService } from "../security/tokens";
@@ -95,6 +95,8 @@ import { NotificationService } from "../services/notifications";
 import { OnboardingService } from "../services/onboarding";
 import { PrivacyService } from "../services/privacy";
 import type { EmailService } from "../services/email";
+import { ResendMfaDeliveryService } from "../services/mfaDelivery";
+import { RedisOtpStore } from "../security/otpStore";
 import type { MediaPresigner } from "../media/presigner";
 
 export interface Infra {
@@ -106,6 +108,8 @@ export interface Infra {
   presigner: MediaPresigner;
   /** Invitation delivery (14_tenancy.sql). The accept token travels by email only. */
   email: EmailService;
+  /** Redis bundle (used for OTP storage in the MFA service). */
+  redis: RedisBundle;
   /** Idle-timeout session touch (A1.6) — bumps last_seen_at on activity. */
   touchSession: (userId: string, sessionId: string) => Promise<void>;
 }
@@ -289,8 +293,10 @@ export function makeServices(client: DbClient, infra: Infra): Services {
   };
 
   const session = new SessionService(repos.sessions, infra.store, infra.tokens, infra.config, resolveIdentity);
-  const mfa = new MfaService(repos.users, repos.recovery, infra.secretBox, infra.tokens, session);
-  const auth = new AuthService(repos.users, repos.permissions, session, infra.tokens, infra.env);
+  const otpStore = new RedisOtpStore(infra.redis.client);
+  const mfaDelivery = new ResendMfaDeliveryService(infra.env);
+  const mfa = new MfaService(repos.users, repos.recovery, repos.permissions, infra.tokens, session, otpStore, mfaDelivery);
+  const auth = new AuthService(repos.users, repos.permissions, session, infra.tokens, infra.env, mfa);
   const device = new DeviceService(repos.devices, infra.tokens, infra.config);
   const consent = new ConsentService(repos.consents);
   const shift = new ShiftService(repos.shifts, repos.assignments, repos.vehicles, repos.fuelRecords, repos.workLogs, repos.hos, repos.consents);

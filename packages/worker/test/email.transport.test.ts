@@ -1,6 +1,6 @@
 // packages/worker/test/email.transport.test.ts
-// Email transport (N9 / A1.8): degrades to a logged no-op when no provider URL is configured, and
-// performs a real JSON POST with the configured auth header when one is set.
+// Email transport (N9 / A1.8): degrades to a logged no-op when no RESEND_API_KEY is configured, and
+// performs a real JSON POST to Resend (Bearer auth) when one is set.
 
 import { emailTransport } from "../src/jobs/transports";
 import type { Env } from "../src/config/env";
@@ -57,19 +57,20 @@ const baseEnv: Env = {
   LOG_LEVEL: "info",
   EMAIL_API_URL: undefined,
   EMAIL_API_KEY: undefined,
+  RESEND_API_KEY: undefined,
   EMAIL_FROM: "fleet@fleet.internal",
   EMAIL_AUTH_HEADER: "Authorization",
 };
 
 describe("emailTransport", () => {
-  it("skips (no-op) when no EMAIL_API_URL is configured", async () => {
+  it("skips (no-op) when no RESEND_API_KEY is configured", async () => {
     const t = emailTransport(baseEnv);
     const res = await t.send(row);
     expect(res.status).toBe("SENT");
     expect(res.provider).toBe("email-skip");
   });
 
-  it("POSTs to the configured provider and reports SENT on 2xx", async () => {
+  it("POSTs to Resend with Bearer auth and reports SENT on 2xx", async () => {
     const calls: RequestInit[] = [];
     const fetchMock = (async (_url: string, init: RequestInit) => {
       calls.push(init);
@@ -78,14 +79,16 @@ describe("emailTransport", () => {
     const prev = global.fetch;
     global.fetch = fetchMock;
     try {
-      const t = emailTransport({ ...baseEnv, EMAIL_API_URL: "https://mail.example/send", EMAIL_API_KEY: "key123" });
+      const t = emailTransport({ ...baseEnv, RESEND_API_KEY: "re_key123" });
       const res = await t.send(row);
       expect(res.status).toBe("SENT");
       expect(res.provider).toBe("EMAIL");
       const init = calls[0]!;
-      const body = JSON.parse(String(init.body));
-      expect(body.to).toBe("ops@fleet.co.ke");
-      expect(body.from).toBe("fleet@fleet.internal");
+      expect(JSON.parse(String(init.body)).to).toBe("ops@fleet.co.ke");
+      expect(init.headers).toMatchObject({
+        Authorization: "Bearer re_key123",
+        "Content-Type": "application/json",
+      });
       // fetchWithTimeout wires a per-call AbortController signal for the bounded timeout.
       expect(init.signal).toBeDefined();
     } finally {
@@ -93,12 +96,12 @@ describe("emailTransport", () => {
     }
   });
 
-  it("reports FAILED when the provider returns an error status", async () => {
+  it("reports FAILED when Resend returns an error status", async () => {
     const fetchMock = (async () => new Response(null, { status: 502 })) as unknown as typeof fetch;
     const prev = global.fetch;
     global.fetch = fetchMock;
     try {
-      const t = emailTransport({ ...baseEnv, EMAIL_API_URL: "https://mail.example/send" });
+      const t = emailTransport({ ...baseEnv, RESEND_API_KEY: "re_key123" });
       const res = await t.send(row);
       expect(res.status).toBe("FAILED");
     } finally {

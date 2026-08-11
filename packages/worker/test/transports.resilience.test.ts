@@ -43,8 +43,7 @@ const env: Env = {
   HEALTH_PORT: 8082,
   SERVICE_NAME: "fleet-worker",
   LOG_LEVEL: "info",
-  EMAIL_API_URL: "https://mail.example/send",
-  EMAIL_API_KEY: "key123",
+  RESEND_API_KEY: "key123",
   EMAIL_FROM: "fleet@fleet.internal",
   EMAIL_AUTH_HEADER: "Authorization",
 };

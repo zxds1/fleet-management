@@ -4,25 +4,41 @@
 // the consent ledger. All collaborators are faked; totp is mocked so verify() is deterministic.
 import { ok, err, Unauthenticated, ValidationError, DeviceRevoked, NotFound, ConsentRequired } from "@fleet/shared";
 import { MfaService } from "../src/services/mfa";
+import type { OtpStore } from "../src/security/otpStore";
 import { SessionService } from "../src/services/session";
 import { DeviceService } from "../src/services/device";
 import { ConsentService } from "../src/services/consent";
-jest.mock("../src/security/totp", () => ({
-  totp: { generateSecret: jest.fn(() => "SECRET"), provisioningUri: jest.fn(() => "uri"), verify: jest.fn(() => true) },
-  generateSecret: jest.fn(() => "SECRET"),
-  provisioningUri: jest.fn(() => "uri"),
-  verify: jest.fn(() => true),
-}));
-const totpMock = require("../src/security/totp").totp as { verify: jest.Mock };
-
-function fakeSecretBox(): any {
-  return { encrypt: (s: string) => `enc:${s}`, decrypt: (s: string) => s.replace(/^enc:/, "") };
-}
 
 describe("MfaService", () => {
+  function makeOtp(): OtpStore & { codes: Map<string, string>; attempts: Map<string, number> } {
+    const codes = new Map<string, string>();
+    const attempts = new Map<string, number>();
+    return {
+      codes,
+      attempts,
+      async get(u) {
+        return codes.get(u) ?? null;
+      },
+      async set(u, c) {
+        codes.set(u, c);
+      },
+      async delete(u) {
+        codes.delete(u);
+        attempts.delete(u);
+      },
+      async incrementAttempts(u) {
+        const n = (attempts.get(u) ?? 0) + 1;
+        attempts.set(u, n);
+        return n;
+      },
+      async resetAttempts(u) {
+        attempts.delete(u);
+      },
+    };
+  }
+
   const users: any = {
     getById: jest.fn(),
-    stageMfaSecret: jest.fn(async () => undefined),
     activateMfa: jest.fn(async () => undefined),
   };
   const recovery: any = { replaceAll: jest.fn(async () => undefined), consume: jest.fn(async () => false) };
@@ -30,68 +46,129 @@ describe("MfaService", () => {
   const sessions: any = {
     issue: jest.fn(async () => ok({ sessionId: "s1", userId: "u1", accessToken: "a", accessTokenExpiresAt: new Date(), refreshToken: "r", refreshTokenExpiresAt: new Date() })),
   };
-  const svc = new MfaService(users, recovery, fakeSecretBox(), tokens, sessions);
+  const delivery: any = {
+    sendEmail: jest.fn(async () => undefined),
+    sendSms: jest.fn(async () => undefined),
+  };
+
+  function build(roles: string[]) {
+    const permissions: any = {
+      resolve: jest.fn(async () => ({ roles: roles as any, permissions: [], requiresMfa: false })),
+    };
+    const otp = makeOtp();
+    const svc = new MfaService(users, recovery, permissions, tokens, sessions, otp, delivery);
+    return { svc, otp, permissions };
+  }
 
   beforeEach(() => jest.clearAllMocks());
 
-  it("enrols and stages an encrypted secret", async () => {
-    users.getById.mockResolvedValue({ email: "a@b.c", mfa_secret_encrypted: null });
+  it("enrols and activates MFA, returning 10 recovery codes", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c" });
+    const { svc } = build([]);
     const r = await svc.enroll("u1");
     expect(r.ok).toBe(true);
-    expect(users.stageMfaSecret).toHaveBeenCalled();
-    expect((r as any).value.otpauthUri).toBe("uri");
+    expect(recovery.replaceAll).toHaveBeenCalled();
+    expect(users.activateMfa).toHaveBeenCalledWith("u1");
+    expect((r as any).value.recoveryCodes).toHaveLength(10);
   });
 
   it("enrol fails for unknown user", async () => {
     users.getById.mockResolvedValue(null);
+    const { svc } = build([]);
     expect((await svc.enroll("x")).ok).toBe(false);
   });
 
-  it("confirms with a valid code and issues recovery codes", async () => {
-    users.getById.mockResolvedValue({ email: "a@b.c", mfa_secret_encrypted: "enc:SECRET" });
-    totpMock.verify.mockReturnValue(true);
-    const r = await svc.confirm("u1", "123456");
+  it("sendCode routes a driver with a phone number to SMS", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", phone: "+254700000000", mfa_enabled: true });
+    const { svc, otp } = build(["DRIVER"]);
+    const r = await svc.sendCode("u1");
     expect(r.ok).toBe(true);
-    expect(recovery.replaceAll).toHaveBeenCalled();
-    expect(users.activateMfa).toHaveBeenCalled();
-    expect((r as any).value.recoveryCodes).toHaveLength(10);
+    expect(delivery.sendSms).toHaveBeenCalledTimes(1);
+    expect(delivery.sendEmail).not.toHaveBeenCalled();
+    expect(otp.codes.get("u1")).toMatch(/^\d{6}$/);
   });
 
-  it("confirm rejects when enrolment not started", async () => {
-    users.getById.mockResolvedValue({ email: "a@b.c", mfa_secret_encrypted: null });
-    const r = await svc.confirm("u1", "123456");
+  it("sendCode routes an admin without a driver role to email", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "admin@b.c", phone: null, mfa_enabled: true });
+    const { svc } = build(["ADMIN"]);
+    const r = await svc.sendCode("u1");
+    expect(r.ok).toBe(true);
+    expect(delivery.sendEmail).toHaveBeenCalledTimes(1);
+    expect(delivery.sendSms).not.toHaveBeenCalled();
+  });
+
+  it("blocks login when no deliverable contact exists", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: null, phone: null, mfa_enabled: true });
+    const { svc } = build(["DRIVER"]);
+    const r = await svc.sendCode("u1");
     expect(r.ok).toBe(false);
     expect((r as any).error).toBeInstanceOf(ValidationError);
+    expect(delivery.sendSms).not.toHaveBeenCalled();
+    expect(delivery.sendEmail).not.toHaveBeenCalled();
   });
 
-  it("verify issues a session on a valid TOTP", async () => {
-    users.getById.mockResolvedValue({ mfa_enabled: true, mfa_secret_encrypted: "enc:SECRET" });
-    totpMock.verify.mockReturnValue(true);
+  it("reuses the same code on a repeat sendCode (no regeneration)", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", phone: "+254700000000", mfa_enabled: true });
+    const { svc, otp } = build(["DRIVER"]);
+    await svc.sendCode("u1");
+    const first = otp.codes.get("u1");
+    await svc.sendCode("u1");
+    expect(otp.codes.get("u1")).toBe(first);
+    expect(delivery.sendSms).toHaveBeenCalledTimes(2);
+  });
+
+  it("verify issues a session for the correct OTP and clears it", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: true });
+    const { svc, otp } = build([]);
+    otp.codes.set("u1", "123456");
     const r = await svc.verify("chal", "123456");
     expect(r.ok).toBe(true);
     expect(sessions.issue).toHaveBeenCalled();
+    expect(otp.codes.get("u1")).toBeUndefined();
   });
 
   it("verify rejects when MFA is not configured", async () => {
-    users.getById.mockResolvedValue({ mfa_enabled: false, mfa_secret_encrypted: null });
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: false });
+    const { svc } = build([]);
     const r = await svc.verify("chal", "123456");
     expect(r.ok).toBe(false);
     expect((r as any).error).toBeInstanceOf(Unauthenticated);
   });
 
   it("verify consumes a recovery code", async () => {
-    users.getById.mockResolvedValue({ mfa_enabled: true, mfa_secret_encrypted: "enc:SECRET" });
-    totpMock.verify.mockReturnValue(false);
-    recovery.consume.mockResolvedValue(true);
-    const r = await svc.verify("chal", "RECOVERY");
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: true });
+    const { svc } = build([]);
+    recovery.consume.mockResolvedValueOnce(true);
+    const r = await svc.verify("chal", "RECOVERY-CODE");
     expect(r.ok).toBe(true);
+    expect(recovery.consume).toHaveBeenCalledWith("u1", expect.any(String));
   });
 
-  it("verify rejects an invalid code", async () => {
-    users.getById.mockResolvedValue({ mfa_enabled: true, mfa_secret_encrypted: "enc:SECRET" });
-    totpMock.verify.mockReturnValue(false);
-    recovery.consume.mockResolvedValue(false);
-    const r = await svc.verify("chal", "bad");
+  it("verify rejects an invalid code and increments attempts", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: true });
+    const { svc, otp } = build([]);
+    otp.codes.set("u1", "123456");
+    const r = await svc.verify("chal", "000000");
+    expect(r.ok).toBe(false);
+    expect((r as any).error).toBeInstanceOf(ValidationError);
+    expect(otp.attempts.get("u1")).toBe(1);
+  });
+
+  it("verify invalidates the code after the attempt cap is exceeded", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: true });
+    const { svc, otp } = build([]);
+    otp.codes.set("u1", "123456");
+    for (let i = 0; i < 5; i++) await svc.verify("chal", "000000");
+    expect(otp.codes.get("u1")).toBeUndefined();
+    // A 6th attempt after invalidation is rejected with the "no active code" error.
+    const r = await svc.verify("chal", "123456");
+    expect(r.ok).toBe(false);
+  });
+
+  it("verify rejects when no active code exists", async () => {
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", mfa_enabled: true });
+    const { svc } = build([]);
+    const r = await svc.verify("chal", "123456");
     expect(r.ok).toBe(false);
     expect((r as any).error).toBeInstanceOf(ValidationError);
   });

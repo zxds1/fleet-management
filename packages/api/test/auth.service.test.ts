@@ -67,7 +67,12 @@ function buildAuth(overrides: {
   } as unknown as import("../src/services/session").SessionService;
 
   const tokens = new TokenService(env()) as unknown as TokenService;
-  const service = new AuthService(users, permissions, session, tokens, env());
+
+  const mfa = {
+    sendCode: jest.fn(async () => ok(undefined)),
+  } as unknown as import("../src/services/mfa").MfaService;
+
+  const service = new AuthService(users, permissions, session, tokens, env(), mfa);
   return { service, calls };
 }
 
