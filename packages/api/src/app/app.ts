@@ -27,6 +27,7 @@ import { createReportsRouter } from "../http/routes/reports";
 import { createSettingsRouter } from "../http/routes/settings";
 import { createNotificationRouter } from "../http/routes/notifications";
 import { createPrivacyRouter } from "../http/routes/privacy";
+import { createMeRouter } from "../http/routes/me";
 import { createTelemetryRouter } from "../http/routes/telemetry";
 import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
@@ -242,6 +243,13 @@ export function createApp(container: Container): Express {
     pool: container.pool,
     idempotency: container.idempotency,
     releaseClaim: container.releaseClaim,
+    infra: container.infra,
+  }));
+
+  // Self/consent status surface (GET /me/consent). Mounted at the API base so the path is
+  // literally `${base}/me/consent`; only `authenticate` guards it (any authenticated user).
+  app.use(`${base}/me`, createMeRouter({
+    pool: container.pool,
     infra: container.infra,
   }));
 

@@ -81,4 +81,20 @@ export class NotificationRepository extends BaseRepository<NotificationRow> {
     );
     return res.rows[0] ?? null;
   }
+
+  /**
+   * Marks every unread (non-DELIVERED) notification for the recipient as DELIVERED, scoped to the
+   * recipient so one user can never touch another's inbox. Returns the number of rows changed.
+   * Backs `POST /notifications/read-all` (204 No Content); the client refetches `GET /notifications`.
+   */
+  async markAllDelivered(userId: string): Promise<number> {
+    const res = await this.client.query(
+      `UPDATE app.notifications
+          SET status       = 'DELIVERED',
+              delivered_at = COALESCE(delivered_at, now())
+        WHERE recipient_user_id = $1::uuid AND status <> 'DELIVERED'`,
+      [userId],
+    );
+    return res.rowCount ?? 0;
+  }
 }

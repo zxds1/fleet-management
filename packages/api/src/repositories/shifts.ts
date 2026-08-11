@@ -103,9 +103,40 @@ export class ShiftRepository extends BaseRepository<ShiftRow> {
   }
 }
 
+/** Active assignment projection for `GET /drivers/me/assignment` (contract status endpoint). */
+export interface ActiveDriverAssignmentRow {
+  assignment_id: string;
+  vehicle_id: string | null;
+  status: string;
+  starts_at: string | null;
+  ends_at: string | null;
+}
+
 export class AssignmentRepository extends BaseRepository<AssignmentRow> {
   constructor(client: DbClient) {
     super(client, "app.assignments", { deletedAtColumn: null });
+  }
+
+  /**
+   * The driver's most recent non-cancelled assignment, projected onto the contract's
+   * `DriverAssignment` shape. `app.assignments` carries no start/end instants, so `starts_at` /
+   * `ends_at` are returned as null. Returns null (→ 404 NO_ASSIGNMENT) when the driver has no live
+   * assignment.
+   */
+  async getActiveForDriver(driverId: string): Promise<ActiveDriverAssignmentRow | null> {
+    const res = await this.client.query<ActiveDriverAssignmentRow>(
+      `SELECT a.id            AS assignment_id,
+              a.vehicle_id,
+              a.status::text   AS status,
+              NULL::timestamptz AS starts_at,
+              NULL::timestamptz AS ends_at
+         FROM app.assignments a
+        WHERE a.driver_id = $1::uuid AND a.status <> 'CANCELLED'
+        ORDER BY a.assigned_date DESC, a.created_at DESC
+        LIMIT 1`,
+      [driverId],
+    );
+    return res.rows[0] ?? null;
   }
 
   /**

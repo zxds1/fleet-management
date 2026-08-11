@@ -41,4 +41,22 @@ export class ConsentService {
   async has(userId: string, consentType: ConsentType): Promise<boolean> {
     return (await this.consents.findAccepted(userId, consentType)) !== null;
   }
+
+  /**
+   * Status projection for `GET /me/consent` (contract status endpoint). `consented` is whether the
+   * principal has any accepted record of the canonical data-processing notice; `current_version` is
+   * that record's policy version (or null); `required_version` is the configured version the client
+   * must meet. The canonical consent is `DATA_PROCESSING_NOTICE` — the baseline every user accepts.
+   */
+  async getStatus(
+    userId: string,
+    requiredVersion: string,
+  ): Promise<{ consented: boolean; current_version: string | null; required_version: string }> {
+    const accepted = await this.consents.findAccepted(userId, "DATA_PROCESSING_NOTICE" as ConsentType);
+    return {
+      consented: accepted !== null,
+      current_version: accepted?.policy_version ?? null,
+      required_version: requiredVersion,
+    };
+  }
 }

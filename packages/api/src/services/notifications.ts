@@ -56,4 +56,14 @@ export class NotificationService {
 
     return ok({ id: row.id, status: row.status, delivered_at: row.delivered_at });
   }
+
+  /**
+   * Marks every unread notification for the recipient as read (DELIVERED), backing
+   * `POST /notifications/read-all` (204 No Content). Scoped to the recipient id, which is passed in
+   * from the resolved principal, so one user can never mark another's notifications read.
+   */
+  async markAllRead(userId: string): Promise<Result<void>> {
+    await this.notifications.markAllDelivered(userId);
+    return ok(undefined);
+  }
 }

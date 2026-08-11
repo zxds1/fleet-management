@@ -11,11 +11,18 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { NotFound, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
+import {
+  Forbidden,
+  NotFound,
+  type IdempotencyService,
+  type PermissionCode,
+  type PoolLike,
+  type Principal,
+} from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, PROBLEM_CONTENT_TYPE } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
 import { withClient } from "../../db/withClient";
@@ -143,37 +150,83 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
     ),
   );
 
-  // ── Current dispatch assignment ───────────────────────────────────────────────────────
+  // ── Current dispatch assignment (contract status endpoint) ────────────────────────────
   router.get(
     "/assignment",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
-    requirePermission(asPerm("onboarding:read")),
+    requirePermission(asPerm("assignment:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const principal = (req as { principal?: Principal }).principal as Principal;
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.getByUserId(principal.userId);
         if (!driver) {
-          const problem = new NotFound("No driver profile for this user");
+          const problem = new Forbidden("No driver profile for this user");
           res
             .status(problem.httpStatus)
-            .type("application/problem+json")
+            .type(PROBLEM_CONTENT_TYPE)
             .json({ ...problem.toProblem(), instance: req.requestId });
           return;
         }
-        const result = await svc.onboarding.getAssignment(driver.id);
-        if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res
-            .status(status)
-            .type("application/problem+json")
-            .json({ ...result.error.toProblem(), instance: req.requestId });
+        const row = await svc.assignments.getActiveForDriver(driver.id);
+        if (!row) {
+          res.status(404).type(PROBLEM_CONTENT_TYPE).json({
+            type: "https://docs.fleet.internal/problems/no_assignment",
+            title: "No active assignment",
+            status: 404,
+            detail: "The driver has no active assignment.",
+            instance: req.requestId,
+            error_code: "NO_ASSIGNMENT",
+          });
           return;
         }
-        res.status(200).json(result.value);
+        res.status(200).json(toDriverAssignmentResponse(row));
+      }),
+    ),
+  );
+
+  // ── Training completion status (contract status endpoint) ─────────────────────────────
+  router.get(
+    "/training-status",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("training:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const principal = (req as { principal?: Principal }).principal as Principal;
+        const svc = makeServices(client, infra);
+        const driver = await svc.drivers.getByUserId(principal.userId);
+        if (!driver) {
+          const problem = new Forbidden("No driver profile for this user");
+          res
+            .status(problem.httpStatus)
+            .type(PROBLEM_CONTENT_TYPE)
+            .json({ ...problem.toProblem(), instance: req.requestId });
+          return;
+        }
+        const status = await svc.training.trainingStatus(driver.id);
+        res.status(200).json(status);
       }),
     ),
   );
 
   return router;
+}
+
+/**
+ * Projects an `app.assignments` row onto the contract's `DriverAssignment` shape for
+ * `GET /drivers/me/assignment`. Returns null when there is no active assignment, which the route
+ * turns into a 404 NO_ASSIGNMENT problem. Pure + exported so the mapping (and the null branch) is
+ * unit-testable without a database.
+ */
+export function toDriverAssignmentResponse(
+  row: import("../../repositories/shifts").ActiveDriverAssignmentRow | null,
+): import("../../repositories/shifts").ActiveDriverAssignmentRow | null {
+  if (!row) return null;
+  return {
+    assignment_id: row.assignment_id,
+    vehicle_id: row.vehicle_id,
+    status: row.status,
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+  };
 }

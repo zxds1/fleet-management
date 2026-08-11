@@ -63,7 +63,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
     ),
   );
 
-  // ── Acknowledge one notification ─────────────────────────────────────────────────────────
+  // ── Acknowledge one notification (contract: 204 No Content) ─────────────────────────────
   router.post(
     "/:id/read",
     authenticate({ tokens: infra.tokens, sessions: infra.store }),
@@ -88,7 +88,37 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
           endpoint: req.path,
           http_method: req.method,
         });
-        return { status: 200, body: result.value, resourceId: result.value.id } as never;
+        return { status: 204, body: undefined, resourceId: result.value.id } as never;
+      }),
+    ),
+  );
+
+  // ── Acknowledge all notifications (contract: 204 No Content) ────────────────────────────
+  router.post(
+    "/read-all",
+    authenticate({ tokens: infra.tokens, sessions: infra.store }),
+    requirePermission(asPerm("notification:manage")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const svc = makeServices(tx.client, infra);
+        const result = await svc.notification.markAllRead(principal.userId);
+        if (!result.ok) return result.error as never;
+        tx.audit({
+          action: "UPDATE",
+          entity_table: "app.notifications",
+          entity_id: principal.userId,
+          actor_user_id: principal.userId,
+          changed_fields: ["status", "delivered_at"],
+          new_value: { status: "DELIVERED" },
+          request_id: req.requestId,
+          ip_address: ip(req),
+          user_agent: ua(req),
+          endpoint: req.path,
+          http_method: req.method,
+        });
+        return { status: 204, body: undefined } as never;
       }),
     ),
   );

@@ -146,6 +146,27 @@ export class TrainingEnrollmentRepository extends BaseRepository<TrainingEnrollm
   }
 
   /**
+   * Derives the driver's training status for `GET /drivers/me/training-status` (contract status
+   * endpoint): the set of completed lesson ids plus the total number of (non-deleted) lessons.
+   * `all_complete` is computed in the service layer from these two counts.
+   */
+  async getStatus(driverId: string): Promise<{ completedLessonIds: string[]; totalLessons: number }> {
+    const completed = await this.client.query<{ lesson_id: string }>(
+      `SELECT e.lesson_id::text AS lesson_id
+         FROM app.training_enrollments e
+        WHERE e.driver_id = $1::uuid AND e.status = 'COMPLETED' AND e.deleted_at IS NULL`,
+      [driverId],
+    );
+    const total = await this.client.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM app.training_lessons WHERE deleted_at IS NULL`,
+    );
+    return {
+      completedLessonIds: completed.rows.map((r) => r.lesson_id),
+      totalLessons: total.rows[0]?.count ?? 0,
+    };
+  }
+
+  /**
    * Manager roster: every enrolment with the driver's name and the lesson/course titles. Keyset
    * paginated on (created_at, id) DESC. Fetches limit + 1 for `has_more`.
    */

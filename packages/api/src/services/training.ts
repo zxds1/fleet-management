@@ -90,4 +90,22 @@ export class TrainingService {
     });
     return ok(buildPage(rows, limit, (row) => ({ sort: String(row.created_at ?? ""), id: row.id })));
   }
+
+  /**
+   * Driver training status for `GET /drivers/me/training-status` (contract status endpoint).
+   * `completed_lessons` are the lesson ids the driver has completed; `total_lessons` is the count of
+   * (non-deleted) lessons; `all_complete` follows the contract exactly: completed >= total.
+   */
+  async trainingStatus(driverId: string): Promise<{
+    completed_lessons: string[];
+    total_lessons: number;
+    all_complete: boolean;
+  }> {
+    const { completedLessonIds, totalLessons } = await this.enrollments.getStatus(driverId);
+    return {
+      completed_lessons: completedLessonIds,
+      total_lessons: totalLessons,
+      all_complete: completedLessonIds.length >= totalLessons,
+    };
+  }
 }

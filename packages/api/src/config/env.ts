@@ -74,6 +74,10 @@ const EnvSchema = z.object({
   // Base URL of the web/admin console, used to build the invitation accept link sent by email.
   FRONTEND_URL: z.string().default("http://localhost:3000"),
 
+  // Required privacy/data-processing consent version surfaced by GET /me/consent (C5.5). A user
+  // who has accepted any version lower than this must re-consent before sensitive work.
+  CONSENT_REQUIRED_VERSION: z.string().default("2026.1"),
+
   // Resend (transactional email): admin MFA OTPs + admin invitations + notifications. Optional so
   // dev/test degrade to the ConsoleEmailService no-op. No SDK — called via native fetch.
   RESEND_API_KEY: z.string().optional(),

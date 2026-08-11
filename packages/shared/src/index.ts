@@ -26,6 +26,7 @@ export * from "./schemas/trailer";
 export * from "./schemas/media";
 export * from "./schemas/privacy";
 export * from "./schemas/vehicleIssue";
+export * from "./schemas/status";
 export * from "./realtime";
 export * from "./telemetry";
 export * from "./ingest";

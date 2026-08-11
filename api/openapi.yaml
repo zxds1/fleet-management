@@ -35,6 +35,9 @@ tags:
   - name: Media
   - name: Hardware
   - name: Vehicles
+  - name: Drivers
+  - name: Consent
+  - name: Notifications
 
 security:
   - bearerAuth: []
@@ -145,6 +148,36 @@ components:
         upload_url: { type: string, format: uri }
         expires_in_seconds: { type: integer, example: 60 }
         method: { type: string, example: PUT }
+
+    # ── Driver / consent / training / notification status (mobile contract endpoints) ───────────
+    DriverAssignment:
+      type: object
+      description: The driver's current (non-cancelled) dispatch assignment (GET /drivers/me/assignment).
+      required: [assignment_id, status]
+      properties:
+        assignment_id: { type: string, format: uuid }
+        vehicle_id: { type: string, format: uuid, nullable: true }
+        status: { type: string }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+
+    ConsentStatus:
+      type: object
+      description: The caller's consent standing against the configured required version (GET /me/consent).
+      required: [consented, required_version]
+      properties:
+        consented: { type: boolean }
+        current_version: { type: string, nullable: true }
+        required_version: { type: string }
+
+    TrainingStatus:
+      type: object
+      description: The driver's training completion status (GET /drivers/me/training-status).
+      required: [completed_lessons, total_lessons, all_complete]
+      properties:
+        completed_lessons: { type: array, items: { type: string } }
+        total_lessons: { type: integer }
+        all_complete: { type: boolean }
 
     DriverSummary:
       type: object
@@ -743,6 +776,74 @@ paths:
                   vehicle_id: { type: string, format: uuid }
                   trailer_id: { type: string, format: uuid, nullable: true }
                   clock_in_at: { type: string, format: date-time }
+
+  # ── Driver / consent / training / notification status (mobile contract endpoints) ──────────────
+  /drivers/me/assignment:
+    get:
+      tags: [Drivers]
+      summary: The driver's current (non-cancelled) dispatch assignment.
+      responses:
+        '200':
+          description: Active assignment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverAssignment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The driver has no active assignment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /drivers/me/training-status:
+    get:
+      tags: [Drivers]
+      summary: The driver's training completion status.
+      responses:
+        '200':
+          description: Training status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrainingStatus' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /me/consent:
+    get:
+      tags: [Consent]
+      summary: The caller's consent standing against the required version.
+      responses:
+        '200':
+          description: Consent status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/{id}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark a single owned notification read (204 No Content).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Notification marked read.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Notification not found or not owned by the caller.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all of the caller's notifications read (204 No Content).
+      responses:
+        '204':
+          description: All notifications marked read.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /shifts/verification-inbox:
     get:
