@@ -82,9 +82,12 @@ describe("emailTransport", () => {
       const res = await t.send(row);
       expect(res.status).toBe("SENT");
       expect(res.provider).toBe("EMAIL");
-      const body = JSON.parse(String(calls[0]!.body));
+      const init = calls[0]!;
+      const body = JSON.parse(String(init.body));
       expect(body.to).toBe("ops@fleet.co.ke");
       expect(body.from).toBe("fleet@fleet.internal");
+      // fetchWithTimeout wires a per-call AbortController signal for the bounded timeout.
+      expect(init.signal).toBeDefined();
     } finally {
       global.fetch = prev;
     }

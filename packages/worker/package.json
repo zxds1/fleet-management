@@ -4,7 +4,9 @@
   "description": "Scheduled + queue jobs, outbox relay and the Traccar ingest consumer (05-workers.md, 04-telemetry-ingest.md).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "build": "tsc -b",
@@ -13,20 +15,22 @@
     "lint": "tsc -b --noEmit",
     "test": "jest --passWithNoTests",
     "contract": "tsc -b --noEmit",
-      "dev:worker": "npm run build && node dist/index.js --role worker",
-      "dev:ingest": "npm run build && node dist/index.js --role ingest",
-      "start": "node dist/index.js --role worker",
-      "start:ingest": "node dist/index.js --role ingest"
+    "dev:worker": "npm run build && node dist/index.js --role worker",
+    "dev:ingest": "npm run build && node dist/index.js --role ingest",
+    "start": "node dist/index.js --role worker",
+    "start:ingest": "node dist/index.js --role ingest"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@fleet/db": "*",
     "@fleet/shared": "*",
-    "ioredis": "^5.4.1"
+    "ioredis": "^5.4.1",
+    "opossum": "^10.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
+    "@types/opossum": "^8.1.9",
     "jest": "^29.0.0",
     "ts-jest": "^29.1.0",
     "typescript": "^5.4.0"
