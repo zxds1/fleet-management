@@ -6,17 +6,9 @@
 // decreased / consent violations surface as domain `ApiError`s (C3.3, C4.2, C5.5).
 
 import { z } from "zod"
-import {
-  ClockInSchema,
-  ClockOutSchema,
-  WorkPlanSchema,
-  type ClockInInput,
-  type ClockOutInput,
-  type WorkPlan,
-} from "@fleet/shared/mobile"
+import { ClockInSchema, ClockOutSchema, type ClockInInput, type ClockOutInput } from "@fleet/shared/mobile"
 import { DriverService, type DriverServiceDeps } from "./base"
 import { EvidencePhoto, NetworkOfflineError, type SubmitResult } from "./types"
-import { uploadSequence } from "../media"
 
 export const ActiveShiftSchema = z.object({
   shift_id: z.string().uuid(),
@@ -32,8 +24,6 @@ export interface ClockInParams {
   start_fuel_gauge: ClockInInput["start_fuel_gauge"]
   consent_version: string
   phone_gps_fallback_enabled?: boolean
-  planned_notes?: string
-  work_plan_photos?: EvidencePhoto[]
 }
 
 export interface ClockOutParams {
@@ -105,7 +95,7 @@ export class ShiftsService extends DriverService {
   }
 
   async clockIn(params: ClockInParams, photo: EvidencePhoto): Promise<SubmitResult> {
-    const startMediaId = await this.media.upload(photo, {
+    const mediaId = await this.media.upload(photo, {
       owner_kind: "WORK_LOG",
       retention_class: "WORK_PLAN",
       content_type: "image/jpeg",
@@ -113,22 +103,13 @@ export class ShiftsService extends DriverService {
       height_px: photo.height,
       client_captured_at: photo.createdAt,
     })
-    const workPlanMediaIds = params.work_plan_photos
-      ? await uploadSequence(this.media, params.work_plan_photos, (i) => ({
-          owner_kind: "WORK_LOG",
-          retention_class: "WORK_PLAN",
-          content_type: "image/jpeg",
-        }))
-      : []
     const body = ClockInSchema.parse({
       assignment_id: params.assignment_id,
       start_odometer_km: params.start_odometer_km,
       start_fuel_gauge: params.start_fuel_gauge,
-      start_media_object_id: startMediaId,
+      start_media_object_id: mediaId,
       consent_version: params.consent_version,
       phone_gps_fallback_enabled: params.phone_gps_fallback_enabled ?? false,
-      planned_notes: params.planned_notes,
-      work_plan_media_object_ids: workPlanMediaIds.length > 0 ? workPlanMediaIds : undefined,
     })
     const r = await this.commit("POST", "/shifts/clock-in", body, "Clock-in")
     return this.toResult((r.done as { shift_id: string } | undefined)?.shift_id ?? "", r)
@@ -152,12 +133,6 @@ export class ShiftsService extends DriverService {
     })
     const r = await this.commit("POST", "/shifts/clock-out", body, "Clock-out")
     return this.toResult((r.done as { shift_id: string } | undefined)?.shift_id ?? "", r)
-  }
-
-  async getWorkPlan(shiftId: string): Promise<WorkPlan | null> {
-    const res = await this.api.request<unknown>(`/shifts/${shiftId}/work-plan`, { method: "GET" })
-    if (res == null) return null
-    return WorkPlanSchema.parse(res)
   }
 }
 

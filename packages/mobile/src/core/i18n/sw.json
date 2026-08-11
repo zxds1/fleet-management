@@ -208,10 +208,6 @@
       "startGauge": "Kiwango cha mafuta",
       "startPhoto": "Picha ya odometer",
       "photoRequired": "Picha ya odometer inahitajika.",
-      "workPlan": "Mpango wa kazi",
-      "plannedNotes": "Mikakati au vituo vya leo (si lazima)",
-      "addWorkPlanPhotos": "Ongeza picha za mpango wa kazi (si lazima)",
-      "noWorkPlanPhoto": "Ongeza angalau moja kumbukumbu au picha ya mpango.",
       "hosBlocked": "Kipindi cha kupumzika hakijakwisha. Unaweza kuingia kazi kuanzia {{time}}.",
       "submit": "Ingia Kazi",
       "queued": "Ingia kazi imehifadhiwa. Itapakia unaporudi mtandaoni."

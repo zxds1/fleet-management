@@ -37,7 +37,7 @@ function net(): FakeNetwork {
 }
 
 describe("ShiftsService", () => {
-   it("clock-in uploads the start photo then POSTs with the media id + idempotency key", async () => {
+  it("clock-in uploads the start photo then POSTs with the media id + idempotency key", async () => {
     const n = net()
     const api = makeApi(n)
     const svc = new ShiftsService({ api, media: makeMedia(api, n) })
@@ -48,31 +48,6 @@ describe("ShiftsService", () => {
     expect(assertDone(r)).toBe(S)
     const post = n.calls?.find((c) => c.url.endsWith("/shifts/clock-in"))
     expect(post?.body).toMatchObject({ start_media_object_id: M, start_odometer_km: 1000, start_fuel_gauge: "HALF" })
-  })
-
-  it("clock-in with work plan uploads plan photos and includes them in the request", async () => {
-    const n = net()
-    const api = makeApi(n)
-    const svc = new ShiftsService({ api, media: makeMedia(api, n) })
-    const r = await svc.clockIn(
-      {
-        assignment_id: uid(10),
-        start_odometer_km: 1000,
-        start_fuel_gauge: "HALF",
-        consent_version: "2026.1",
-        planned_notes: "Deliver 5 pallets to dock 3",
-        work_plan_photos: [photo("plan1"), photo("plan2")],
-      },
-      photo("start"),
-    )
-    expect(assertDone(r)).toBe(S)
-    const post = n.calls?.find((c) => c.url.endsWith("/shifts/clock-in"))
-    expect(post?.body).toMatchObject({
-      start_media_object_id: M,
-      planned_notes: "Deliver 5 pallets to dock 3",
-      work_plan_media_object_ids: [M, M],
-    })
-    expect(n.calls?.filter((c) => c.url.endsWith("/media/upload-url")).length).toBe(3)
   })
 
   it("getActive parses the active shift (nullable)", async () => {
