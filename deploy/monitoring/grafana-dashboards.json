@@ -187,7 +187,24 @@
         "description": "Outbox event backlog and Sentry error/transaction rate (SLO A-01)."
       }
     ],
-    "time": { "from": "now-6h", "to": "now" }
+    "time": { "from": "now-6h", "to": "now" },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "type": "tags",
+          "datasource": "Prometheus",
+          "enable": true,
+          "iconColor": "rgb(255, 96, 96)",
+          "tags": ["deploy"],
+          "tagKeys": "release,build_sha,service",
+          "titleFormat": "Deploy {{release}} ({{service}})",
+          "textFormat": "build {{build_sha}}",
+          "target": { "expr": "fleet_deploy_info" },
+          "showLine": true
+        }
+      ]
+    }
   },
   "folderId": 0,
   "overwrite": true

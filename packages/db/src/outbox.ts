@@ -75,6 +75,7 @@ export class PgOutboxRelay implements OutboxRelay {
           await client.query(MARK_FAILED, [attempts, (e as Error).message, dead, ev.id]);
           logger.error("outbox handler failed", { service_name: "db", event_type: ev.event_type, attempts, dead, error: (e as Error).message });
           metrics.increment("outbox_handler_failed", 1);
+          if (dead) metrics.increment("worker.job_dead_lettered", 1);
         }
       }
     } finally {

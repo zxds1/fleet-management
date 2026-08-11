@@ -203,6 +203,66 @@ export class ServiceUnavailable extends TransientError {
   }
 }
 
+/**
+ * Maps every known stable `error_code` (08-error-state-model.md §1) to its
+ * remediation bucket. Concrete-class codes are taken from the classes above;
+ * dynamic ConflictError/SemanticViolation codes are mapped from the catalogue
+ * where the bucket is unambiguous.
+ */
+export const ERROR_CODE_BUCKET: Record<string, ErrorBucket> = Object.freeze({
+  // client (4xx, caller fault)
+  VALIDATION_ERROR: "client",
+  UNAUTHENTICATED: "client",
+  MFA_REQUIRED: "client",
+  FORBIDDEN: "client",
+  ACCOUNT_SUSPENDED: "client",
+  DEVICE_REVOKED: "client",
+  CONSENT_REQUIRED: "client",
+  NOT_FOUND: "client",
+  CLOCKOUT_PENDING: "client",
+  SHIFT_ALREADY_OPEN: "client",
+  UNLOCK_REQUIRED: "client",
+  NO_ASSIGNMENT: "client",
+  DUPLICATE: "client",
+  SESSION_LIMIT: "client",
+  IDEMPOTENCY_CONFLICT: "client",
+  IDEMPOTENCY_INFLIGHT: "transient",
+  OFFLINE_PIN_LOCKED: "client",
+  RATE_LIMITED: "transient",
+  // business (422 domain violations)
+  ODOMETER_DECREASED: "business",
+  ODOMETER_DIVERGENCE: "business",
+  HOS_REST_BLOCKED: "business",
+  MISSING_GAUGE_PAIR: "business",
+  DVIR_FAIL_NEEDS_PHOTO: "business",
+  DEFECTS_NOT_REVIEWED: "business",
+  WORK_PLAN_REQUIRED: "business",
+  ONBOARDING_PROFILE_EMPTY: "business",
+  ONBOARDING_CONSENT_REQUIRED: "business",
+  BACKGROUND_CHECK_ALREADY_CLEARED: "business",
+  MEDIA_QUARANTINED: "business",
+  // transient (infra, safe to retry)
+  SERVICE_UNAVAILABLE: "transient",
+});
+
+/** Codes that are transient / safe to retry by nature (consulted by isRetryableError). */
+export const RETRYABLE_ERROR_CODES: ReadonlySet<string> = Object.freeze(
+  new Set<string>([
+    "SERVICE_UNAVAILABLE",
+    "RATE_LIMITED",
+    "IDEMPOTENCY_INFLIGHT",
+  ]),
+);
+
+/**
+ * Returns the bucket for a known `error_code` string, or undefined when unknown.
+ * Use this to classify a raw code (e.g. from a log line or wire payload) without
+ * constructing the AppError.
+ */
+export function bucketForErrorCode(code: string): ErrorBucket | undefined {
+  return ERROR_CODE_BUCKET[code];
+}
+
 // Convenience helpers used by services (mirrors db/seed + openapi Error Codes section).
 export const conflict = (code: string, title: string, detail?: string) =>
   new ConflictError(code, title, detail);
@@ -218,8 +278,12 @@ export const violation = (
  * `isRetryable` or classified into the `transient` bucket.
  */
 export function isRetryableError(e: unknown): boolean {
-  return (
-    e instanceof AppError &&
-    (e.isRetryable === true || e.bucket === "transient")
-  );
+  if (e instanceof AppError) {
+    return e.isRetryable === true || e.bucket === "transient";
+  }
+  // Plain string code path: consult the retryable-code set.
+  if (typeof e === "string") {
+    return RETRYABLE_ERROR_CODES.has(e);
+  }
+  return false;
 }

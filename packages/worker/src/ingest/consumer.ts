@@ -6,7 +6,7 @@
 
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
 import { TRACCAR_POSITIONS_GROUP, TRACCAR_POSITIONS_STREAM, logger, metrics } from "@fleet/shared";
-import { transaction } from "@fleet/db";
+import { DeadLetterRepository, transaction } from "@fleet/db";
 import type { Redis } from "ioredis";
 import { parseTraccarPosition, type TraccarPosition } from "./traccar";
 import { decideRetention, type RetentionContext, type RetentionDecision } from "./retention";
@@ -90,27 +90,9 @@ export class IngestConsumer {
       const res = (await this.deps.redis.xreadgroup("GROUP", this.groupName, this.consumerName, "COUNT", this.batchSize, "BLOCK", this.blockMs, "STREAMS", this.stream, this.lastId)) as any;
       if (!res) return;
       for (const [streamName, entries] of res) {
-        const positions: TraccarPosition[] = [];
-        for (const [id, fields] of entries) {
+        for (const [id, fields] of entries as [string, string[]][]) {
           this.lastId = id;
-          const raw = this.decode(fields, id);
-          if (raw) positions.push(parseTraccarPosition(raw));
-          else metrics.increment("worker.ingest_discarded_position", 1);
-        }
-        if (positions.length) {
-          const result = await this.processPositions(positions);
-          await this.deps.redis!.xack(this.stream, this.groupName, ...entries.map((e: any) => e[0]));
-          logger.info("ingest batch processed", {
-            service_name: "worker",
-            stream: this.stream,
-            processed: result.processed,
-            retained: result.retained,
-            discarded: result.discarded,
-            movements: result.movements,
-          });
-          metrics.increment("worker.ingest_processed", result.processed);
-          metrics.increment("worker.ingest_retained", result.retained);
-          metrics.increment("worker.ingest_discarded", result.discarded);
+          await this.processEntry(id, fields);
         }
       }
     } catch (e) {
@@ -118,22 +100,159 @@ export class IngestConsumer {
     }
   }
 
-  private decode(fields: string[], id?: string): Record<string, unknown> | null {
+  /**
+   * Process a single stream entry in isolation. On a malformed/parse failure (poison payload)
+   * the entry is dead-lettered and ACKed so it leaves the live stream. On a transient DB
+   * failure the entry is left UNACKed (XNACK-like redelivery) to preserve at-least-once
+   * semantics; only after exhausting retries is it dead-lettered. Successful entries are ACKed.
+   */
+  private async processEntry(id: string, fields: string[]): Promise<void> {
+    const redis = this.deps.redis!;
+    const decoded = this.decode(fields, id);
+    if (!decoded.ok) {
+      // Malformed payload with no recoverable data — dead-letter (poison isolation) + ack.
+      await this.deadLetter(id, decoded.rawJson, decoded.reason, "INGEST_MALFORMED_PAYLOAD");
+      metrics.increment("worker.ingest_dead_lettered", 1);
+      await redis.xack(this.stream, this.groupName, id);
+      return;
+    }
+
+    const raw = decoded.raw;
+    let position: TraccarPosition;
+    try {
+      position = parseTraccarPosition(raw);
+    } catch (e) {
+      // Poison parse failure — cannot be retried, dead-letter + ack to isolate.
+      await this.deadLetter(id, raw, (e as Error).message, "INGEST_PARSE_FAILURE");
+      metrics.increment("worker.ingest_dead_lettered", 1);
+      await redis.xack(this.stream, this.groupName, id);
+      return;
+    }
+
+    const retryKey = `traccar:positions:retries:${id}`;
+    const maxRetries = 5;
+    try {
+      const result = await this.processPositions([position]);
+      await redis.xack(this.stream, this.groupName, id);
+      logger.info("ingest entry processed", {
+        service_name: "worker",
+        flow_step: "ingest",
+        stream: this.stream,
+        id,
+        processed: result.processed,
+        retained: result.retained,
+        discarded: result.discarded,
+        movements: result.movements,
+      });
+          metrics.increment("worker.ingest_processed", result.processed);
+          metrics.increment("worker.ingest_retained", result.retained);
+          metrics.increment("worker.ingest_discarded", result.discarded);
+          metrics.increment("ingest.processed", result.processed);
+          if (result.retained > 0) metrics.increment("flow.completed", 1);
+          // A batch that was read but produced no retained positions and no errors is a
+          // silent dead-letter signal (everything discarded/malformed) worth watching.
+          if (result.processed > 0 && result.retained === 0) {
+            metrics.increment("ingest.dead_lettered", result.discarded);
+          }
+      if (this.deps.redis) await this.clearRetries(retryKey).catch(() => undefined);
+    } catch (e) {
+      const transient = this.isTransient(e);
+      const attempts = await this.bumpRetries(retryKey);
+      if (transient && attempts <= maxRetries) {
+        // Leave UNACKed so Redis redelivers (at-least-once for genuinely transient failures).
+        logger.error("ingest entry transient failure — will retry via redelivery", {
+          service_name: "worker",
+          flow_step: "ingest",
+          error_code: "INGEST_TRANSIENT_FAILURE",
+          stream: this.stream,
+          id,
+          attempts,
+          message: (e as Error).message,
+        });
+        return;
+      }
+      // Permanent / exhausted retries — dead-letter + ack so the poison entry leaves the stream.
+      await this.deadLetter(id, raw, (e as Error).message, transient ? "INGEST_RETRY_EXHAUSTED" : "INGEST_PROCESSING_FAILURE");
+      metrics.increment("worker.ingest_dead_lettered", 1);
+      await redis.xack(this.stream, this.groupName, id);
+    }
+  }
+
+  private isTransient(e: unknown): boolean {
+    const msg = (e as Error).message ?? "";
+    // Connection/lock/serialization failures are transient and worth redelivering for.
+    return /connection|timeout|deadlock|serializ|terminating|ETIMEDOUT|ECONNRESET/i.test(msg);
+  }
+
+  private async bumpRetries(key: string): Promise<number> {
+    const redis = this.deps.redis;
+    if (!redis) return 1;
+    try {
+      const n = await redis.incr(key);
+      await redis.pexpire(key, 1000 * 60 * 60).catch(() => undefined);
+      return n;
+    } catch {
+      return 1;
+    }
+  }
+
+  private async clearRetries(key: string): Promise<void> {
+    const redis = this.deps.redis;
+    if (redis) await redis.del(key);
+  }
+
+  private async deadLetter(streamId: string, payload: unknown, errorMessage: string, errorCode: string): Promise<void> {
+    const tenantId = this.tenantIdFor(payload);
+    logger.error("ingest dead-lettered", {
+      service_name: "worker",
+      flow_step: "ingest",
+      error_code: errorCode,
+      stream: this.stream,
+      stream_id: streamId,
+      tenant_id: tenantId,
+      message: errorMessage,
+    });
+    try {
+      const client = await this.client();
+      try {
+        const repo = new DeadLetterRepository(client);
+        await repo.insertIngest({ stream: this.stream, streamId, payloadJson: payload, errorMessage, errorCode, tenantId });
+      } finally {
+        (client as { release?: () => void }).release?.();
+      }
+    } catch (dlErr) {
+      // Never let a DLQ write failure wedge the consumer loop.
+      logger.error("ingest dead-letter write failed", { service_name: "worker", flow_step: "ingest", message: (dlErr as Error).message });
+    }
+  }
+
+  private tenantIdFor(payload: unknown): string | null {
+    const p = payload as Record<string, unknown> | null;
+    const t = p?.tenantId;
+    return typeof t === "string" ? t : null;
+  }
+
+  private decode(
+    fields: string[],
+    id?: string,
+  ): { ok: true; raw: Record<string, unknown> } | { ok: false; reason: string; rawJson: string } {
     // Traccar forwards the position as a JSON string under the `data` field.
     for (let i = 0; i + 1 < fields.length; i += 2) {
       if (fields[i] === "data") {
+        const rawJson = String(fields[i + 1]);
         try {
-          return JSON.parse(fields[i + 1] as string) as Record<string, unknown>;
+          return { ok: true, raw: JSON.parse(rawJson) as Record<string, unknown> };
         } catch (e) {
-          logger.warn("ingest: discarded malformed position payload", { service_name: "worker", stream: this.stream, id, message: (e as Error).message });
+          logger.warn("ingest: malformed position payload", { service_name: "worker", stream: this.stream, id, message: (e as Error).message });
           metrics.increment("worker.ingest_malformed_payload", 1);
-          return null;
+          return { ok: false, reason: `malformed JSON: ${(e as Error).message}`, rawJson };
         }
       }
     }
-    logger.warn("ingest: discarded position with no data field", { service_name: "worker", stream: this.stream, id });
+    const reason = "position has no data field";
+    logger.warn("ingest: discarded position", { service_name: "worker", stream: this.stream, id, message: reason });
     metrics.increment("worker.ingest_missing_data_field", 1);
-    return null;
+    return { ok: false, reason, rawJson: "" };
   }
 
 

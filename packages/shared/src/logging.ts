@@ -3,6 +3,18 @@
 
 const SENSITIVE_RE = /(pin|password|secret|token|apikey|api_key|key|authorization|cookie|set-cookie|email|phone|ssn|passwordhash)([\s_-]*(value|hash|token))?$/i;
 
+/**
+ * Deploy-anchoring (audit #8): read once at module load so every emitted log carries the
+ * release/build that produced it. Any of GIT_SHA / RELEASE / BUILD_SHA is accepted; GIT_SHA wins.
+ */
+const BUILD_SHA = process.env.GIT_SHA ?? process.env.BUILD_SHA ?? undefined;
+const RELEASE = process.env.RELEASE ?? BUILD_SHA ?? undefined;
+
+export const deployContext: { release?: string; build_sha?: string } = {
+  ...(RELEASE ? { release: RELEASE } : {}),
+  ...(BUILD_SHA ? { build_sha: BUILD_SHA } : {}),
+};
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
@@ -58,6 +70,7 @@ export class ConsoleLogger implements Logger {
         msg,
         time: new Date().toISOString(),
         service_name: this.serviceName,
+        ...deployContext,
         ...this.defaultMeta,
         ...(meta ?? {}),
         ...(err ? { error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : err } : {}),

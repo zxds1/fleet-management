@@ -3,28 +3,76 @@
 // client-branchable member; the catalogue is frozen in 08-error-state-model.md §1.
 
 import type { NextFunction, Request, Response } from "express";
-import { AppError, ServiceUnavailable, TransactionError, logger, reportError } from "@fleet/shared";
+import { AppError, ServiceUnavailable, TransactionError, logger, reportError, computeFingerprint } from "@fleet/shared";
 
 export const PROBLEM_CONTENT_TYPE = "application/problem+json";
 
+/** A persisted error-event row (audit #6). Mirrors the @fleet/db ErrorEventInput subset we need. */
+export interface ErrorEventPersistInput {
+  request_id?: string | null;
+  error_code: string;
+  flow_step?: string | null;
+  route?: string | null;
+  tenant_id?: string | null;
+  geography?: string | null;
+  severity: string;
+  message?: string | null;
+  fingerprint: string;
+}
+
+/**
+ * Optional fire-and-forget sink that mirrors a >=400 error into app.error_events. Injected from
+ * createApp so the problem handler stays decoupled from the db pool (audit #6). When omitted, the
+ * error is still reported to Sentry + logs; persistence is purely additive.
+ */
+export type PersistErrorEvent = (input: ErrorEventPersistInput) => void;
+
 /** Express error handler. Every error leaves the API as a problem+json document. */
-export function problemHandler() {
+export function problemHandler(persistErrorEvent?: PersistErrorEvent) {
   return (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
     const requestId = (req as { requestId?: string }).requestId;
     const appError = toAppError(err);
     const problem = { ...appError.toProblem(), instance: appError.requestId ?? requestId };
 
+    const route = `${req.method} ${req.path}`;
+    const severity = problem.status >= 500 ? "error" : "warn";
+    const fingerprint = computeFingerprint(problem.error_code, route, severity);
+
+    // Audit #6 + #7: persist a correlated, fingerprinted error event for every >=400 with an
+    // error_code. Non-blocking: fire-and-forget with try/catch + log on failure.
+    if (problem.status >= 400 && problem.error_code && persistErrorEvent) {
+      void (async () => {
+        try {
+          persistErrorEvent({
+            request_id: requestId,
+            error_code: problem.error_code,
+            flow_step: (req as { flowStep?: string }).flowStep ?? null,
+            route,
+            tenant_id: req.principal?.tenantId ?? null,
+            geography: null,
+            severity,
+            message: problem.detail ?? appError.message ?? null,
+            fingerprint,
+          });
+        } catch (e) {
+          logger.error("persist error_event failed", { service_name: "api", requestId, error_code: problem.error_code, message: (e as Error).message });
+        }
+      })();
+    }
+
     if (problem.status >= 500) {
       logger.error(
         "request failed",
-        { requestId, method: req.method, path: req.path, error_code: problem.error_code },
+        { requestId, method: req.method, path: req.path, error_code: problem.error_code, fingerprint },
         err,
       );
       reportError(err, {
         error_code: problem.error_code,
         requestId,
         principalId: req.principal?.userId,
-        route: `${req.method} ${req.path}`,
+        route,
+        severity,
+        fingerprint,
       });
     } else {
       logger.warn("request rejected", {
@@ -33,6 +81,7 @@ export function problemHandler() {
         path: req.path,
         status: problem.status,
         error_code: problem.error_code,
+        fingerprint,
       });
     }
 

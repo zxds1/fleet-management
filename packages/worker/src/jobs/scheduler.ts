@@ -3,6 +3,7 @@
 // on intervals. The outbox relay (outbox/relay.ts) drains event-driven work separately.
 
 import { logger, metrics, reportError } from "@fleet/shared";
+import { DeadLetterRepository } from "@fleet/db";
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
 import type { Env } from "../config/env";
 import type { VisionAdapter } from "./ocr";
@@ -143,27 +144,50 @@ export function buildSchedule(
 
 export class JobScheduler {
   private timers: ReturnType<typeof setInterval>[] = [];
-  constructor(private readonly jobs: ScheduledJob[]) {}
+  constructor(private readonly jobs: ScheduledJob[], private readonly pool: PoolLike) {}
 
   start(): void {
     for (const job of this.jobs) {
       logger.info("scheduling job", { name: job.name, intervalMs: job.intervalMs });
+      const handle = (e: unknown) => this.onJobFailure(job, e);
       const t = setInterval(() => {
-        job.run().catch((e) => {
-          logger.error("job failed", { service_name: "worker", name: job.name, message: (e as Error).message });
-          metrics.increment("worker.job_failed", 1);
-          reportError(e, { route: job.name, serviceName: "worker" });
-        });
+        job.run().catch(handle);
       }, job.intervalMs);
       if (typeof (t as { unref?: () => void }).unref === "function") (t as { unref: () => void }).unref();
       this.timers.push(t);
       // Kick the first run shortly after boot.
-      setTimeout(() => job.run().catch((e) => {
-        logger.error("job failed", { service_name: "worker", name: job.name, message: (e as Error).message });
-        metrics.increment("worker.job_failed", 1);
-        reportError(e, { route: job.name, serviceName: "worker" });
-      }), 1000);
+      setTimeout(() => job.run().catch(handle), 1000);
     }
+  }
+
+  /**
+   * On recurring-job failure: keep the existing log + reportError, but also record a dead-letter
+   * row so ops can see which scheduled jobs are wedged without scraping logs (audit item #4).
+   */
+  private async onJobFailure(job: ScheduledJob, e: unknown): Promise<void> {
+    const message = (e as Error).message;
+    logger.error("job failed", { service_name: "worker", name: job.name, message });
+    metrics.increment("worker.job_failed", 1);
+    reportError(e, { route: job.name, serviceName: "worker" });
+    try {
+      const client = await this.poolConnect();
+      try {
+        const repo = new DeadLetterRepository(client);
+        await repo.insertJob({ jobName: job.name, errorMessage: message, errorCode: "JOB_FAILURE" });
+      } finally {
+        (client as { release?: () => void }).release?.();
+      }
+    } catch (dlErr) {
+      // Never let a DLQ write failure break the scheduler loop.
+      logger.error("job dead-letter write failed", { service_name: "worker", name: job.name, message: (dlErr as Error).message });
+    }
+    metrics.increment("worker.job_dead_lettered", 1);
+  }
+
+  private async poolConnect() {
+    const anyPool = this.pool as unknown as { connect?: () => Promise<import("@fleet/shared").DbClient> };
+    if (typeof anyPool.connect !== "function") throw new Error("pool has no connect()");
+    return anyPool.connect();
   }
 
   stop(): void {

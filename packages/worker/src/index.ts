@@ -4,7 +4,7 @@
 // and the scheduled job registry (05). Graceful shutdown on SIGINT/SIGTERM. Sentry is initialised
 // at boot and uncaught errors are reported before exit (C5.7).
 
-import { logger, initErrorReporter, reportError, flushTelemetry } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
 import { bootInfra, type WorkerInfra } from "./infra";
 import { env } from "./config/env";
 import { startHealthServer } from "./health";
@@ -53,7 +53,15 @@ async function main(): Promise<void> {
     SERVICE_NAME: e.SERVICE_NAME,
     NODE_ENV: e.NODE_ENV,
   });
-  logger.info("worker booting", { role, nodeEnv: e.NODE_ENV });
+  logger.info("worker booting", { role, nodeEnv: e.NODE_ENV, ...deployContext });
+
+  // Emit in-process metrics to the structured log sink (CloudWatch Logs) and flush on an interval
+  // so counters (ingest throughput, job failures, dead-letters) are actually observed.
+  metrics.setSink(consoleMetricSink);
+  const metricFlush = setInterval(() => metrics.flush(), 15_000);
+  if (typeof (metricFlush as { unref?: () => void }).unref === "function") {
+    (metricFlush as { unref: () => void }).unref();
+  }
 
   const infra = await bootInfra({ ...e, ROLE: role });
   const health = startHealthServer(e.HEALTH_PORT, infra.pool, infra.redis);
@@ -107,7 +115,7 @@ async function main(): Promise<void> {
   relay.start();
 
   const presigner = new EnvMediaPresigner(e);
-  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, NoopVision, infra.publisher, presigner));
+  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, NoopVision, infra.publisher, presigner), infra.pool);
   scheduler.start();
 
   await new Promise<void>(() => {});

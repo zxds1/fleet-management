@@ -32,6 +32,9 @@ import { createTelemetryRouter } from "../http/routes/telemetry";
 import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
 import type { Container } from "./container";
+import { logger } from "@fleet/shared";
+import { ErrorEventsRepository, type ErrorEventInput } from "@fleet/db";
+import type { ErrorEventPersistInput } from "../http/problem";
 import { safeJson } from "../security/bodyParser";
 import { securityHeaders } from "../security/headers";
 import { corsMiddleware } from "../security/cors";
@@ -294,6 +297,31 @@ export function createApp(container: Container): Express {
     });
   });
 
-  app.use(problemHandler());
+  // Audit #6: mirror every >=400 RFC7807 error into app.error_events (fire-and-forget, own
+  // connection). Persistence failures must never break the response, so they are swallowed here.
+  const persistErrorEvent: (input: ErrorEventPersistInput) => void = (input) => {
+    void (async () => {
+      const client = await container.pool.connect();
+      try {
+        await new ErrorEventsRepository(client).insert({
+          request_id: input.request_id,
+          error_code: input.error_code,
+          flow_step: input.flow_step,
+          route: input.route,
+          tenant_id: input.tenant_id,
+          geography: input.geography,
+          severity: input.severity as ErrorEventInput["severity"],
+          message: input.message,
+          fingerprint: input.fingerprint,
+        });
+      } catch (e) {
+        logger.error("persist error_event failed", { service_name: "api", error_code: input.error_code, message: (e as Error).message });
+      } finally {
+        client.release?.();
+      }
+    })();
+  };
+
+  app.use(problemHandler(persistErrorEvent));
   return app;
 }

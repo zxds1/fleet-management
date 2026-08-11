@@ -48,6 +48,10 @@ subclass or a `ConflictError`/`SemanticViolation` with that exact `error_code` (
 `error_code` is **frozen** — adding one is a contract change requiring a versioned `openapi.yaml`
 bump.
 
+> The `error_code` → bucket mapping (and the retryable-code set) is now defined in code at
+> `packages/shared/src/errors.ts` (`ERROR_CODE_BUCKET`, `RETRYABLE_ERROR_CODES`,
+> `bucketForErrorCode`), not only in this document.
+
 ---
 
 ## 2. Shift state machine

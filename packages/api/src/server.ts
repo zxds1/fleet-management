@@ -3,7 +3,7 @@
 // listening. SIGTERM/SIGINT drain the pool cleanly so in-flight transactions can finish. Sentry is
 // initialised at boot and uncaught errors are reported + flushed before exit (C5.7).
 
-import { logger, initErrorReporter, reportError, flushTelemetry } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
 import { buildContainer } from "./app/container";
 import { createApp } from "./app/app";
 
@@ -17,11 +17,19 @@ export function start(): void {
     NODE_ENV: container.env.NODE_ENV,
   });
 
+  // Emit in-process metrics to the structured log sink (CloudWatch Logs) and flush on an interval.
+  metrics.setSink(consoleMetricSink);
+  const metricFlush = setInterval(() => metrics.flush(), 15_000);
+  if (typeof (metricFlush as { unref?: () => void }).unref === "function") {
+    (metricFlush as { unref: () => void }).unref();
+  }
+
   const app = createApp(container);
 
   const server = app.listen(container.env.PORT, () => {
     logger.info("fleet-api listening", { port: container.env.PORT, base: container.env.API_BASE_PATH });
   });
+  logger.info("service started", { ...deployContext, service: "api" });
 
   const shutdown = async (signal: string) => {
     logger.info("shutdown signal", { signal });

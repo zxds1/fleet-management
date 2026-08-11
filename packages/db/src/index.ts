@@ -11,4 +11,6 @@ export * from "./repository";
 export * from "./migrations";
 export * from "./idempotency";
 export * from "./outbox";
+export * from "./dead-letter";
 export * from "./config";
+export * from "./errorEvents";

@@ -6,7 +6,7 @@
 
 import { createServer, type Server as HttpServer } from "http";
 import { Server } from "socket.io";
-import { logger, initErrorReporter, reportError, flushTelemetry } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
 import { createPool, PgConfigClient, type FleetPool } from "@fleet/db";
 import { loadEnv, type Env } from "./config/env";
 import { createRedis, type RedisBundle } from "./config/redis";
@@ -113,10 +113,19 @@ async function main(): Promise<void> {
     SERVICE_NAME: env.SERVICE_NAME,
     NODE_ENV: env.NODE_ENV,
   });
+
+  // Emit in-process metrics to the structured log sink (CloudWatch Logs) and flush on an interval.
+  metrics.setSink(consoleMetricSink);
+  const metricFlush = setInterval(() => metrics.flush(), 15_000);
+  if (typeof (metricFlush as { unref?: () => void }).unref === "function") {
+    (metricFlush as { unref: () => void }).unref();
+  }
+
   const proc = await bootstrap(env);
   proc.httpServer.listen(env.WS_PORT, () => {
     logger.info("fleet-ws listening", { port: env.WS_PORT });
   });
+  logger.info("service started", { ...deployContext, service: "ws" });
 
   const shutdown = (signal: string) => {
     logger.info("fleet-ws shutting down", { signal });

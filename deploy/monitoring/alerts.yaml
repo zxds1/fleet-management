@@ -123,7 +123,7 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 30
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
+      TreatMissingData: breaching
       AlarmActions:
         - !Ref AlertSnsTopic
 
@@ -139,7 +139,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 50000
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
+      TreatMissingData: breaching
       AlarmActions:
         - !Ref AlertSnsTopic
 
@@ -155,7 +155,7 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 10000
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
+      TreatMissingData: breaching
       AlarmActions:
         - !Ref WarningSnsTopic
 
@@ -174,10 +174,128 @@ Resources:
       EvaluationPeriods: 4
       Threshold: 1
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
+      TreatMissingData: breaching
       AlarmActions:
         - !Ref AlertSnsTopic
       OKActions:
+        - !Ref AlertSnsTopic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Metric-velocity / silent-failure detection (#5 audit item).
+  #
+  # A HALTED ingest pipeline is invisible to error-rate alarms (errors stay flat while
+  # throughput drops to zero). These alarms make a stalled/quiet pipeline page.
+  #
+  # (a) ingest.processed throughput rate — fires when processed positions/min drop below floor.
+  # (b) ingest.processed / errors ratio — fires when throughput collapses while errors are flat.
+  #     Implemented with CloudWatch MetricMath: ratio = processed / max(errors,1). When processed
+  #     collapses but errors stay >0 this ratio craters; when both are zero (full stall) the rate
+  #     alarm (a) catches it via TreatMissingData: breaching.
+  # ──────────────────────────────────────────────────────────────────────────
+  IngestProcessedRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-ingest-processed-rate"
+      AlarmDescription: "Ingest throughput (ingest.processed) dropped below 1/min — possible stalled pipeline (silent failure)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: ingest_processed
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
+
+  IngestThroughputErrorRatioAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-ingest-velocity-ratio"
+      AlarmDescription: "Ingest velocity collapse vs flat errors (silent failure): processed/errors ratio dropped"
+      Namespace: !Ref MetricsNamespace
+      MetricName: ingest_velocity_ratio
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0.5
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
+
+  IngestVelocityMath:
+    Type: AWS::CloudWatch::MetricMathAlarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-ingest-velocity-math"
+      AlarmDescription: "Metric-velocity composite: ingest.processed collapses while errors stay flat (silent failure)"
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
+      EvaluationPeriods: 2
+      Threshold: 0.5
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      Metrics:
+        - Id: processed
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: ingest_processed
+            Period: 300
+            Stat: Sum
+        - Id: errs
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: errors_total
+            Period: 300
+            Stat: Sum
+        - Id: ratio
+          Expression: "processed / GREATEST(errs, 1)"
+          Label: "ingest processed per error (floor 1)"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Dead-letter / poison-message alarms (referenced by packages/db/src/outbox.ts
+  # `worker.job_dead_lettered` and packages/worker/src/ingest/consumer.ts
+  # `ingest.dead_lettered`). Any dead-letter means a job/position exhausted retries.
+  # ──────────────────────────────────────────────────────────────────────────
+  WorkerJobDeadLetteredAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-worker-job-dead-lettered"
+      AlarmDescription: "Worker outbox handler dead-lettered (exhausted retries)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: worker_job_dead_lettered
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  IngestDeadLetteredAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${MetricsNamespace}-ingest-dead-lettered"
+      AlarmDescription: "Ingest batch consumed but produced zero retained positions (discarded/malformed)"
+      Namespace: !Ref MetricsNamespace
+      MetricName: ingest_dead_lettered
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
         - !Ref AlertSnsTopic
 
   # ──────────────────────────────────────────────────────────────────────────

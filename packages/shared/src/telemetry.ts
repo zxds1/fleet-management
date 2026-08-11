@@ -21,9 +21,22 @@ export interface ErrorContext {
   principalId?: string;
   route?: string;
   serviceName?: string;
+  /** Severity used for the aggregation fingerprint (audit #7). Defaults to "error". */
+  severity?: string;
+  /** Optional precomputed fingerprint (e.g. from a persisted error event). */
+  fingerprint?: string;
+}
+
+/**
+ * Aggregation fingerprint (audit #7): identical (error_code|route|severity) errors collapse to one
+ * "issue" so reporting can show "1 issue + count N". Severity defaults to "error".
+ */
+export function computeFingerprint(error_code: string | undefined, route: string | undefined, severity: string | undefined): string {
+  return `${error_code ?? "UNKNOWN"}|${route ?? "unknown"}|${severity ?? "error"}`;
 }
 
 let initialised = false;
+let release: string | undefined;
 
 /** Initialises the Sentry client. Safe to call when no DSN is configured — it becomes a no-op. */
 export function initErrorReporter(cfg: TelemetryConfig): boolean {
@@ -36,6 +49,7 @@ export function initErrorReporter(cfg: TelemetryConfig): boolean {
     tracesSampleRate: 0,
   });
   initialised = true;
+  release = cfg.RELEASE;
   return true;
 }
 
@@ -52,15 +66,18 @@ export function reportError(err: unknown, ctx: ErrorContext = {}): void {
   // even in dev/test processes where the Sentry DSN is absent. This wires the otherwise-orphaned
   // `Metrics` producer (09 §1).
   recordErrorMetric(ctx.error_code);
+  const fingerprint = ctx.fingerprint ?? computeFingerprint(ctx.error_code, ctx.route, ctx.severity);
   if (!initialised) return;
   const tags: Record<string, string> = {};
   if (ctx.error_code) tags.error_code = ctx.error_code;
   if (ctx.route) tags.route = ctx.route;
   if (ctx.serviceName) tags.serviceName = ctx.serviceName;
+  tags.fingerprint = fingerprint;
+  if (release) tags.release = release;
   Sentry.captureException(toError(err), {
     tags,
     user: ctx.principalId ? { id: ctx.principalId } : undefined,
-    extra: { requestId: ctx.requestId },
+    extra: { requestId: ctx.requestId, fingerprint },
   });
 }
 

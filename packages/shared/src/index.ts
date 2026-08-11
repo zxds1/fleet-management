@@ -4,6 +4,7 @@
 
 export * from "./result";
 export * from "./errors";
+export * from "./slo";
 export * from "./config";
 export * from "./transaction";
 export * from "./idempotency";
