@@ -1,4 +1,4 @@
-﻿// packages/mobile/src/design/components/ErrorScreen.tsx
+// packages/mobile/src/design/components/ErrorScreen.tsx
 //
 // Full-screen error surface (IMPLEMENTATION-PROMPT §5.9 "error/empty states").
 // Renders a user-friendly page for a caught `AppError` or an arbitrary thrown value,
@@ -40,10 +40,10 @@ function resolveAppError(error: AppError | unknown): AppError {
   return fromUnknown(error)
 }
 
-function iconForCode(code: string): "error" | "cloud_off" | "block" | "help" {
+function iconForCode(code: string): "error" | "cloud_off" | "lock" | "help" {
   if (code === "NETWORK_UNAVAILABLE") return "cloud_off"
   if (code === "NOT_FOUND") return "error"
-  if (isFatal(code)) return "block"
+  if (isFatal(code)) return "lock"
   return "error"
 }
 
@@ -158,29 +158,29 @@ export function ErrorScreenCard({
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: theme.spacing.xl,
+    padding: theme.space.xl,
     justifyContent: "center",
     backgroundColor: theme.colors.background,
   },
   iconWrapper: {
     alignItems: "center",
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.space.lg,
   },
   title: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.space.md,
   },
   message: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.space.xl,
     maxWidth: 280,
     alignSelf: "center",
   },
   buttonRow: {
     flexDirection: "row",
-    gap: theme.spacing.sm,
+    gap: theme.space.sm,
     justifyContent: "center",
   },
   card: {
-    padding: theme.spacing.md,
+    padding: theme.space.md,
     backgroundColor: theme.colors.errorContainer,
     borderRadius: theme.radius.md,
     borderWidth: 1,
@@ -189,13 +189,14 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
+    gap: theme.space.sm,
+    marginBottom: theme.space.sm,
   },
   cardMessage: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.space.md,
   },
   cardButton: {
     alignSelf: "flex-start",
   },
 })
+

@@ -37,7 +37,7 @@ describe("ErrorScreen mapping", () => {
     function iconForCode(code: string): string {
       if (code === "NETWORK_UNAVAILABLE") return "cloud_off"
       if (code === "NOT_FOUND") return "error"
-      if (isFatal(code)) return "block"
+      if (isFatal(code)) return "lock"
       return "error"
     }
 
@@ -50,9 +50,9 @@ describe("ErrorScreen mapping", () => {
     })
 
     it("maps fatal codes (UNAUTHENTICATED) to block", () => {
-      expect(iconForCode("UNAUTHENTICATED")).toBe("block")
-      expect(iconForCode("ACCOUNT_SUSPENDED")).toBe("block")
-      expect(iconForCode("DEVICE_REVOKED")).toBe("block")
+      expect(iconForCode("UNAUTHENTICATED")).toBe("lock")
+      expect(iconForCode("ACCOUNT_SUSPENDED")).toBe("lock")
+      expect(iconForCode("DEVICE_REVOKED")).toBe("lock")
     })
 
     it("maps non-fatal codes to error", () => {
@@ -112,3 +112,4 @@ describe("ErrorScreen mapping", () => {
     })
   })
 })
+

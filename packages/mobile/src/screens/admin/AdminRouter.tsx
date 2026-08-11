@@ -47,6 +47,7 @@ import { FuelEfficiencyScreen } from "./FuelEfficiencyScreen";
 import { SettingsTriggersScreen } from "./SettingsTriggersScreen";
 import { RoleSwitchScreen, type AppRole } from "../driver/RoleSwitchScreen";
 import { OutboxScreen } from "../driver/OutboxScreen";
+import { NotFoundScreen } from "../NotFoundScreen";
 import { t, getLocale, setLocale } from "@/core/i18n";
 import type { Services } from "@/services";
 import type { AppError } from "@/core/error";
@@ -484,5 +485,6 @@ function renderScreen(
       );
   }
 }
+
 
 
