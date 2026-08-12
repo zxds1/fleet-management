@@ -261,6 +261,9 @@ export class PasswordResetService {
     }
     const expected = this.hashCode(code);
     const got = Buffer.from(expected);
+    if (row.code_hash == null) {
+      return err(new Unauthenticated("Invalid reset code"));
+    }
     const have = Buffer.from(row.code_hash);
     if (got.length !== have.length || !timingSafeEqual(got, have)) {
       return err(new Unauthenticated("Invalid reset code"));

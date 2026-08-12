@@ -6,6 +6,7 @@
 
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
 import { TRACCAR_POSITIONS_GROUP, TRACCAR_POSITIONS_STREAM, logger, metrics } from "@fleet/shared";
+import { telemetryIngestTotalM, ingestDeadLetteredTotalM } from "@fleet/shared";
 import { DeadLetterRepository, transaction } from "@fleet/db";
 import type { Redis } from "ioredis";
 import { parseTraccarPosition, type TraccarPosition } from "./traccar";
@@ -112,7 +113,7 @@ export class IngestConsumer {
     if (!decoded.ok) {
       // Malformed payload with no recoverable data — dead-letter (poison isolation) + ack.
       await this.deadLetter(id, decoded.rawJson, decoded.reason, "INGEST_MALFORMED_PAYLOAD");
-      metrics.increment("worker.ingest_dead_lettered", 1);
+      ingestDeadLetteredTotalM().inc({ stream: this.stream });
       await redis.xack(this.stream, this.groupName, id);
       return;
     }
@@ -124,7 +125,7 @@ export class IngestConsumer {
     } catch (e) {
       // Poison parse failure — cannot be retried, dead-letter + ack to isolate.
       await this.deadLetter(id, raw, (e as Error).message, "INGEST_PARSE_FAILURE");
-      metrics.increment("worker.ingest_dead_lettered", 1);
+      ingestDeadLetteredTotalM().inc({ stream: this.stream });
       await redis.xack(this.stream, this.groupName, id);
       return;
     }
@@ -147,14 +148,14 @@ export class IngestConsumer {
           metrics.increment("worker.ingest_processed", result.processed);
           metrics.increment("worker.ingest_retained", result.retained);
           metrics.increment("worker.ingest_discarded", result.discarded);
-          metrics.increment("ingest.processed", result.processed);
+          telemetryIngestTotalM().inc({ result: "processed" }, result.processed);
           if (result.retained > 0) metrics.increment("flow.completed", 1);
           // A batch that was read but produced no retained positions and no errors is a
           // silent dead-letter signal (everything discarded/malformed) worth watching.
           if (result.processed > 0 && result.retained === 0) {
-            metrics.increment("ingest.dead_lettered", result.discarded);
+            ingestDeadLetteredTotalM().inc({ stream: TRACCAR_POSITIONS_STREAM }, result.discarded);
           }
-      if (this.deps.redis) await this.clearRetries(retryKey).catch(() => undefined);
+      if (this.deps.redis) await this.clearRetries(retryKey).catch((e: unknown) => logger.warn("ingest retry-key clear failed", { stream: this.stream, id, message: (e as Error).message }));
     } catch (e) {
       const transient = this.isTransient(e);
       const attempts = await this.bumpRetries(retryKey);
@@ -173,7 +174,7 @@ export class IngestConsumer {
       }
       // Permanent / exhausted retries — dead-letter + ack so the poison entry leaves the stream.
       await this.deadLetter(id, raw, (e as Error).message, transient ? "INGEST_RETRY_EXHAUSTED" : "INGEST_PROCESSING_FAILURE");
-      metrics.increment("worker.ingest_dead_lettered", 1);
+      ingestDeadLetteredTotalM().inc({ stream: this.stream });
       await redis.xack(this.stream, this.groupName, id);
     }
   }
@@ -189,9 +190,10 @@ export class IngestConsumer {
     if (!redis) return 1;
     try {
       const n = await redis.incr(key);
-      await redis.pexpire(key, 1000 * 60 * 60).catch(() => undefined);
+      await redis.pexpire(key, 1000 * 60 * 60).catch((e: unknown) => logger.warn("ingest retry-key expiry set failed", { message: (e as Error).message }));
       return n;
-    } catch {
+    } catch (e) {
+      logger.warn("ingest retry-key increment failed", { message: (e as Error).message });
       return 1;
     }
   }

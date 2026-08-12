@@ -63,7 +63,8 @@ export function createRedis(env: Env): RedisBundle {
     async get(key) {
       try {
         return await client.get(key);
-      } catch {
+      } catch (e) {
+        logger.warn("redis cache get failed", { op: "cache.get", message: (e as Error).message });
         return null;
       }
     },
@@ -71,15 +72,15 @@ export function createRedis(env: Env): RedisBundle {
       try {
         if (ttlSeconds) await client.set(key, value, "EX", ttlSeconds);
         else await client.set(key, value);
-      } catch {
-        /* cache write is best effort */
+      } catch (e) {
+        logger.warn("redis cache set failed", { op: "cache.set", key, message: (e as Error).message });
       }
     },
     async del(key) {
       try {
         await client.del(key);
-      } catch {
-        /* best effort */
+      } catch (e) {
+        logger.warn("redis cache del failed", { op: "cache.del", key, message: (e as Error).message });
       }
     },
   };
@@ -106,8 +107,8 @@ export function createRedis(env: Env): RedisBundle {
     async remove(userId, sessionId) {
       try {
         await client.zrem(sessionKey(userId), sessionId);
-      } catch {
-        /* best effort */
+      } catch (e) {
+        logger.warn("session store remove failed", { userId, sessionId, message: (e as Error).message });
       }
     },
     async removeAll(userId) {
@@ -116,21 +117,24 @@ export function createRedis(env: Env): RedisBundle {
         const members = await client.zrange(key, 0, -1);
         await client.del(key);
         return members;
-      } catch {
+      } catch (e) {
+        logger.warn("session store removeAll failed", { userId, message: (e as Error).message });
         return [];
       }
     },
     async has(userId, sessionId) {
       try {
         return (await client.zscore(sessionKey(userId), sessionId)) !== null;
-      } catch {
+      } catch (e) {
+        logger.warn("session store has failed", { userId, sessionId, message: (e as Error).message });
         return true; // degrade open; app.user_sessions remains the audit source (02 §6)
       }
     },
     async count(userId) {
       try {
         return await client.zcard(sessionKey(userId));
-      } catch {
+      } catch (e) {
+        logger.warn("session store count failed", { userId, message: (e as Error).message });
         return 0;
       }
     },
@@ -143,7 +147,8 @@ export function createRedis(env: Env): RedisBundle {
     async close() {
       try {
         await client.quit();
-      } catch {
+      } catch (e) {
+        logger.warn("redis shutdown failed", { op: "client.quit", message: (e as Error).message });
         client.disconnect();
       }
     },

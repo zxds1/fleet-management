@@ -2,7 +2,7 @@
 // Scheduled job registry (05 §2). Builds the 13 jobs at their documented cadences and runs them
 // on intervals. The outbox relay (outbox/relay.ts) drains event-driven work separately.
 
-import { logger, metrics, reportError } from "@fleet/shared";
+import { logger, metrics, reportError, workerDeadLetteredTotalM } from "@fleet/shared";
 import { DeadLetterRepository } from "@fleet/db";
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
 import type { Env } from "../config/env";
@@ -181,7 +181,7 @@ export class JobScheduler {
       // Never let a DLQ write failure break the scheduler loop.
       logger.error("job dead-letter write failed", { service_name: "worker", name: job.name, message: (dlErr as Error).message });
     }
-    metrics.increment("worker.job_dead_lettered", 1);
+    workerDeadLetteredTotalM().inc({ job: job.name, stream: "scheduler" });
   }
 
   private async poolConnect() {

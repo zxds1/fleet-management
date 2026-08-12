@@ -14,3 +14,4 @@ export * from "./outbox";
 export * from "./dead-letter";
 export * from "./config";
 export * from "./errorEvents";
+export * from "./crypto";

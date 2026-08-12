@@ -92,7 +92,7 @@ export class MetricsCollector implements MetricsCollectorLike {
     const c = new Counter({
       name: spec.name,
       help: spec.help,
-      labelNames: spec.labelNames,
+      labelNames: spec.labelNames ?? [],
       registers: [this.registry],
     });
     this.counters.set(spec.name, c);
@@ -106,7 +106,7 @@ export class MetricsCollector implements MetricsCollectorLike {
     const g = new Gauge({
       name: spec.name,
       help: spec.help,
-      labelNames: spec.labelNames,
+      labelNames: spec.labelNames ?? [],
       registers: [this.registry],
     });
     this.gauges.set(spec.name, g);
@@ -120,7 +120,7 @@ export class MetricsCollector implements MetricsCollectorLike {
     const h = new Histogram({
       name: spec.name,
       help: spec.help,
-      labelNames: spec.labelNames,
+      labelNames: spec.labelNames ?? [],
       buckets: spec.buckets,
       registers: [this.registry],
     });
@@ -284,6 +284,20 @@ export const errorsTotal = (m: MetricsCollector): CounterHandle =>
     labelNames: ["error_code", "route"],
   });
 
+export const workerDeadLetteredTotal = (m: MetricsCollector): CounterHandle =>
+  m.counter({
+    name: "fleet_worker_dead_lettered_total",
+    help: "Total worker jobs that exhausted retries (dead-lettered)",
+    labelNames: ["job", "stream"],
+  });
+
+export const ingestDeadLetteredTotal = (m: MetricsCollector): CounterHandle =>
+  m.counter({
+    name: "fleet_ingest_dead_lettered_total",
+    help: "Total telemetry positions that were dead-lettered (discarded/malformed)",
+    labelNames: ["stream"],
+  });
+
 // ── Lazy handles that resolve against the shared singleton ────────────────────
 
 let _httpRequestDuration: HistogramHandle | null = null;
@@ -299,6 +313,8 @@ let _workerJobsTotal: CounterHandle | null = null;
 let _workerJobDuration: HistogramHandle | null = null;
 let _sentryEventsTotal: CounterHandle | null = null;
 let _errorsTotal: CounterHandle | null = null;
+let _workerDeadLetteredTotal: CounterHandle | null = null;
+let _ingestDeadLetteredTotal: CounterHandle | null = null;
 
 export function httpRequestDurationM(): HistogramHandle {
   return _httpRequestDuration ??= httpRequestDuration(appMetrics);
@@ -338,6 +354,12 @@ export function sentryEventsTotalM(): CounterHandle {
 }
 export function errorsTotalM(): CounterHandle {
   return _errorsTotal ??= errorsTotal(appMetrics);
+}
+export function workerDeadLetteredTotalM(): CounterHandle {
+  return _workerDeadLetteredTotal ??= workerDeadLetteredTotal(appMetrics);
+}
+export function ingestDeadLetteredTotalM(): CounterHandle {
+  return _ingestDeadLetteredTotal ??= ingestDeadLetteredTotal(appMetrics);
 }
 
 export { PROMETHEUS_CONTENT_TYPE_VALUE };

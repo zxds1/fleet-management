@@ -6,7 +6,7 @@
 
 import { createServer, type Server as HttpServer } from "http";
 import { Server } from "socket.io";
-import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext, initMetrics, startMetrics, initTracing, shutdownTracing, appMetrics } from "@fleet/shared";
 import { createPool, PgConfigClient, type FleetPool } from "@fleet/db";
 import { loadEnv, type Env } from "./config/env";
 import { createRedis, type RedisBundle } from "./config/redis";
@@ -58,13 +58,18 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
     bus,
   };
 
-  const httpServer = createServer(async (_req, res) => {
-    if (_req.url === "/healthz") {
+  const httpServer = createServer(async (req, res) => {
+    if (req.url === "/metrics") {
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8" });
+      res.end(await appMetrics.render());
+      return;
+    }
+    if (req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
-    if (_req.url === "/readyz") {
+    if (req.url === "/readyz") {
       const checks: Record<string, boolean> = {};
       try {
         const client = await pool.connect();
@@ -114,6 +119,11 @@ async function main(): Promise<void> {
     NODE_ENV: env.NODE_ENV,
   });
 
+  initTracing(env.SERVICE_NAME);
+  startMetrics();
+  initMetrics();
+  logger.info("fleet-ws booting", {});
+
   // Emit in-process metrics to the structured log sink (CloudWatch Logs) and flush on an interval.
   metrics.setSink(consoleMetricSink);
   const metricFlush = setInterval(() => metrics.flush(), 15_000);
@@ -129,7 +139,7 @@ async function main(): Promise<void> {
 
   const shutdown = (signal: string) => {
     logger.info("fleet-ws shutting down", { signal });
-    void proc.close().finally(() => process.exit(0));
+    void Promise.all([shutdownTracing(), proc.close()]).finally(() => process.exit(0));
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));

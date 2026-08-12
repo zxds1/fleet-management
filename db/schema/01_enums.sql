@@ -24,7 +24,6 @@ CREATE TYPE app.role_code AS ENUM (
 );
 
 CREATE TYPE app.driver_status AS ENUM (
-    'PENDING',         -- created by an admin, awaiting approval before the driver can sign in
     'ACTIVE',
     'SUSPENDED',       -- B13: device refresh tokens are revoked on entry
     'ON_LEAVE',
@@ -35,13 +34,6 @@ CREATE TYPE app.consent_type AS ENUM (
     'GPS_TRACKING_WORKING_HOURS',   -- C5.5, mandatory before first shift
     'PHONE_GPS_FALLBACK',           -- C1.9, opt-in, revocable
     'DATA_PROCESSING_NOTICE'
-);
-
-CREATE TYPE app.training_status AS ENUM (
-    'NOT_STARTED',
-    'IN_PROGRESS',
-    'COMPLETED',
-    'EXPIRED'
 );
 
 -- -----------------------------------------------------------------------------

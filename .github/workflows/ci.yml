@@ -70,6 +70,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
       REDIS_URL: redis://localhost:6379
+      PG_INTEGRATION: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +96,56 @@ jobs:
 
       - name: Integration tests (throwaway PG)
         run: npm run test
+
+  chaos:
+    name: chaos / fault-injection
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pg_local_dev
+          POSTGRES_DB: fleet
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run chaos / fault-injection tests (network-throttle + DB-latency + Redis-failure + external-5xx + 50-tracker load)
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern chaos
+
+      - name: Run resilience regression tests
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern "resilience"
 
   signoff-gates:
     name: sign-off gates (release blockers)

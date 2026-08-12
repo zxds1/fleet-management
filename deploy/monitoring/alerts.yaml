@@ -41,7 +41,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate"
       AlarmDescription: "API 5xx error rate exceeded 0.1 % (SLO A-01)"
       Namespace: !Ref MetricsNamespace
-      MetricName: api_5xx_rate
+      MetricName: fleet_http_requests_total
       Statistic: Average
       Period: 300
       EvaluationPeriods: 6
@@ -60,7 +60,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate-warning"
       AlarmDescription: "API 5xx error rate elevated — SLO A-01 slow burn"
       Namespace: !Ref MetricsNamespace
-      MetricName: api_5xx_rate
+      MetricName: fleet_http_requests_total
       Statistic: Average
       Period: 300
       EvaluationPeriods: 6
@@ -82,7 +82,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-api-p95-read-latency"
       AlarmDescription: "API P95 read latency exceeded 200 ms (SLO L-01)"
       Namespace: !Ref MetricsNamespace
-      MetricName: api_p95_read_latency_ms
+      MetricName: fleet_http_request_duration_seconds
       Statistic: Average
       Period: 60
       EvaluationPeriods: 2
@@ -98,7 +98,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-api-p95-write-latency"
       AlarmDescription: "API P95 write latency exceeded 600 ms (SLO L-02)"
       Namespace: !Ref MetricsNamespace
-      MetricName: api_p95_write_latency_ms
+      MetricName: fleet_http_request_duration_seconds
       Statistic: Average
       Period: 60
       EvaluationPeriods: 2
@@ -117,7 +117,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-telemetry-ingest-lag"
       AlarmDescription: "Telemetry ingest lag exceeded 30 s (SLO T-01/T-02)"
       Namespace: !Ref MetricsNamespace
-      MetricName: telemetry_ingest_lag_seconds
+      MetricName: fleet_telemetry_ingest_lag_seconds
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
@@ -133,7 +133,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-telemetry-stream-depth"
       AlarmDescription: "Traccar positions stream depth exceeded 50 000 (SLO T-03)"
       Namespace: !Ref MetricsNamespace
-      MetricName: redis_stream_depth_traccar_positions
+      MetricName: fleet_redis_stream_depth
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 1
@@ -149,7 +149,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-telemetry-stream-depth-warning"
       AlarmDescription: "Traccar positions stream depth elevated > 10 000 (SLO T-03)"
       Namespace: !Ref MetricsNamespace
-      MetricName: redis_stream_depth_traccar_positions
+      MetricName: fleet_redis_stream_depth
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 2
@@ -168,7 +168,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-worker-job-error-rate"
       AlarmDescription: "Worker job error rate exceeded 1 % (SLO A-04)"
       Namespace: !Ref MetricsNamespace
-      MetricName: worker_job_error_rate
+      MetricName: fleet_worker_jobs_total
       Statistic: Average
       Period: 300
       EvaluationPeriods: 4
@@ -186,19 +186,19 @@ Resources:
   # A HALTED ingest pipeline is invisible to error-rate alarms (errors stay flat while
   # throughput drops to zero). These alarms make a stalled/quiet pipeline page.
   #
-  # (a) ingest.processed throughput rate — fires when processed positions/min drop below floor.
-  # (b) ingest.processed / errors ratio — fires when throughput collapses while errors are flat.
+   # (a) fleet_telemetry_ingest_total throughput rate — fires when processed positions/min drop below floor.
+   # (b) fleet_telemetry_ingest_total / fleet_errors_total ratio — fires when throughput collapses while errors are flat.
   #     Implemented with CloudWatch MetricMath: ratio = processed / max(errors,1). When processed
   #     collapses but errors stay >0 this ratio craters; when both are zero (full stall) the rate
-  #     alarm (a) catches it via TreatMissingData: breaching.
+   #     alarm (a) catches it via TreatMissingData: breaching.
   # ──────────────────────────────────────────────────────────────────────────
   IngestProcessedRateAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "${MetricsNamespace}-ingest-processed-rate"
-      AlarmDescription: "Ingest throughput (ingest.processed) dropped below 1/min — possible stalled pipeline (silent failure)"
+      AlarmDescription: "Ingest throughput (fleet_telemetry_ingest_total) dropped below 1/min — possible stalled pipeline (silent failure)"
       Namespace: !Ref MetricsNamespace
-      MetricName: ingest_processed
+      MetricName: fleet_telemetry_ingest_total
       Statistic: Sum
       Period: 60
       EvaluationPeriods: 3
@@ -232,7 +232,7 @@ Resources:
     Type: AWS::CloudWatch::MetricMathAlarm
     Properties:
       AlarmName: !Sub "${MetricsNamespace}-ingest-velocity-math"
-      AlarmDescription: "Metric-velocity composite: ingest.processed collapses while errors stay flat (silent failure)"
+      AlarmDescription: "Metric-velocity composite: fleet_telemetry_ingest_total collapses while errors stay flat (silent failure)"
       ActionsEnabled: true
       AlarmActions:
         - !Ref AlertSnsTopic
@@ -247,14 +247,14 @@ Resources:
           MetricStat:
             Metric:
               Namespace: !Ref MetricsNamespace
-              MetricName: ingest_processed
+              MetricName: fleet_telemetry_ingest_total
             Period: 300
             Stat: Sum
         - Id: errs
           MetricStat:
             Metric:
               Namespace: !Ref MetricsNamespace
-              MetricName: errors_total
+              MetricName: fleet_errors_total
             Period: 300
             Stat: Sum
         - Id: ratio
@@ -263,8 +263,8 @@ Resources:
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dead-letter / poison-message alarms (referenced by packages/db/src/outbox.ts
-  # `worker.job_dead_lettered` and packages/worker/src/ingest/consumer.ts
-  # `ingest.dead_lettered`). Any dead-letter means a job/position exhausted retries.
+  # `fleet_worker_dead_lettered_total` and packages/worker/src/ingest/consumer.ts
+  # `fleet_ingest_dead_lettered_total`). Any dead-letter means a job/position exhausted retries.
   # ──────────────────────────────────────────────────────────────────────────
   WorkerJobDeadLetteredAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -272,7 +272,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-worker-job-dead-lettered"
       AlarmDescription: "Worker outbox handler dead-lettered (exhausted retries)"
       Namespace: !Ref MetricsNamespace
-      MetricName: worker_job_dead_lettered
+      MetricName: fleet_worker_dead_lettered_total
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -288,7 +288,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-ingest-dead-lettered"
       AlarmDescription: "Ingest batch consumed but produced zero retained positions (discarded/malformed)"
       Namespace: !Ref MetricsNamespace
-      MetricName: ingest_dead_lettered
+      MetricName: fleet_ingest_dead_lettered_total
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -307,7 +307,7 @@ Resources:
       AlarmName: !Sub "${MetricsNamespace}-worker-p95-job-latency"
       AlarmDescription: "Worker P95 job latency exceeded 60 s (SLO L-04)"
       Namespace: !Ref MetricsNamespace
-      MetricName: worker_p95_job_duration_seconds
+      MetricName: fleet_worker_job_duration_seconds
       Statistic: Average
       Period: 300
       EvaluationPeriods: 4

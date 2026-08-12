@@ -66,6 +66,10 @@ export interface ConfigClient {
 }
 
 // Default values mirror db/seed/01_seed.sql so a fresh DB is always usable.
+
+/** Minimum receipt-OCR confidence (0–1) below which the review UI raises a low-confidence banner (A1.4). */
+export const OCR_CONFIDENCE_THRESHOLD = 0.7;
+
 export const CONFIG_DEFAULTS: Record<string, number | string | boolean> = {
   "tracker.offline_threshold_minutes": 15,
   "telemetry.moving_speed_kph": 3,

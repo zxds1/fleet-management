@@ -32,6 +32,14 @@ const EnvSchema = z.object({
   AFRICAS_TALKING_API_KEY: z.string().optional(),
   NOTIFICATION_FROM: z.string().default("Fleet"),
 
+  // Feature toggles (audit L10 — env-gated wiring so noop adapters are not always used).
+  // `VISION_ENABLED=1` injects the real Google Vision adapter; `RECONCILIATION_ENABLED=1`
+  // injects the real CSV statement parser. Defaults to "0" (noop) so local dev never hits
+  // paid external APIs.
+  VISION_ENABLED: z.string().default("0").transform((v) => v === "1"),
+  RECONCILIATION_ENABLED: z.string().default("0").transform((v) => v === "1"),
+  GOOGLE_VISION_API_KEY: z.string().optional(),
+
   // Media object store (D5, C5.3). Used by the retention job to hard-delete expired objects.
   // When credentials are absent the retention job runs as a dry-run log (deletes are skipped).
   AWS_REGION: z.string().default("af-south-1"),

@@ -35,19 +35,6 @@ export const VerifyShiftSchema = z.object({
 });
 export type VerifyShiftInput = z.infer<typeof VerifyShiftSchema>
 
-export const WorkPlanMediaItemSchema = z.object({
-  media_object_id: z.string().uuid(),
-  sequence: z.number().int().min(1).max(5),
-})
-
-export const WorkPlanSchema = z.object({
-  shift_id: z.string().uuid(),
-  planned_notes: z.string().nullable(),
-  photos: z.array(WorkPlanMediaItemSchema),
-  debrief_notes: z.string().nullable().optional(),
-})
-export type WorkPlan = z.infer<typeof WorkPlanSchema>;
-
 // Cursor pagination envelope shared by every list endpoint (D7).
 export const CursorPageSchema = <T extends z.ZodTypeAny>(item: T) =>
   z.object({

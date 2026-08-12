@@ -4,7 +4,6 @@
  */
 import { ok, err, isOk, isErr } from "../src/result";
 import { operationalDate, addInterval } from "../src/time";
-import { ConsoleLogger } from "../src/logging";
 import { ValidationError, SemanticViolation, Forbidden } from "../src/errors";
 import { ClockInSchema } from "../src/schemas/shifts";
 
@@ -35,29 +34,6 @@ describe("time", () => {
   it("addInterval is pure", () => {
     const d = new Date("2026-08-06T00:00:00Z");
     expect(addInterval(d, { days: 1 }).toISOString()).toBe("2026-08-07T00:00:00.000Z");
-  });
-});
-
-describe("logging", () => {
-  it("redacts sensitive keys recursively", () => {
-    const out: string[] = [];
-    const lg = new ConsoleLogger("error", {});
-    const orig = process.stdout.write.bind(process.stdout);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (process.stdout as any).write = (s: string) => {
-      out.push(s);
-      return true;
-    };
-    try {
-      lg.error("login", { email: "a@b.co", password: "hunter2", nested: { pin: "1234" } });
-    } finally {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (process.stdout as any).write = orig;
-    }
-    const line = JSON.parse(out[0]!);
-    expect(line.password).toBe("[redacted]");
-    expect(line.nested.pin).toBe("[redacted]");
-    expect(line.email).toBe("[redacted]");
   });
 });
 

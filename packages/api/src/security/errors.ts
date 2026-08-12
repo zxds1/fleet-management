@@ -16,6 +16,6 @@ export class IpBlocked extends AppError {
   readonly httpStatus = 403;
   readonly error_code = "IP_BLOCKED";
   constructor(detail = "Access temporarily blocked from this address") {
-    super({ title: "Forbidden", detail });
+    super({ title: "Forbidden", detail, bucket: "client" });
   }
 }

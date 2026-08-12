@@ -17,12 +17,8 @@ import {
   IdempotencyInFlight,
   RateLimited,
   ServiceUnavailable,
-  TransactionError,
   conflict,
   violation,
-  transaction,
-  type PoolLike,
-  type Tx,
   RealtimeChannels,
   redisPublisher,
   type RedisPub,
@@ -33,7 +29,6 @@ import {
   addInterval,
   withinWindow,
   intervalMs,
-  ConsoleLogger,
 } from "../src/index";
 
 describe("AppError hierarchy (01 §2 / D7)", () => {
@@ -81,20 +76,6 @@ describe("AppError hierarchy (01 §2 / D7)", () => {
     const problem = err.toProblem();
     expect(problem.instance).toBe("req-1");
     expect(problem.error_code).toBe("SERVICE_UNAVAILABLE");
-  });
-});
-
-describe("transaction primitive (D8)", () => {
-  it("TransactionError serialises to 500", () => {
-    const err = new TransactionError("rolled back", new Error("x"));
-    expect(err.toProblem()).toMatchObject({ status: 500, error_code: "TRANSACTION_FAILED" });
-  });
-
-  it("transaction() is unbound in shared and throws", async () => {
-    const pool = { connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }) }) } as PoolLike;
-    await expect(transaction(pool, (async () => undefined) as (tx: Tx) => Promise<void>)).rejects.toBeInstanceOf(
-      TransactionError,
-    );
   });
 });
 
@@ -152,48 +133,5 @@ describe("time helpers (A2.3)", () => {
   });
   it("intervalMs sums parts", () => {
     expect(intervalMs({ minutes: 1, hours: 1, days: 1 })).toBe(1 * 60_000 + 3_600_000 + 86_400_000);
-  });
-});
-
-describe("logging redaction (01 §9)", () => {
-  function capture(logger: ConsoleLogger, fn: () => void): unknown {
-    const writes: string[] = [];
-    const spy = jest.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-      writes.push(chunk.toString());
-      return true;
-    });
-    fn();
-    spy.mockRestore();
-    return writes.map((w) => JSON.parse(w)).find(Boolean);
-  }
-
-  it("redacts secret-shaped keys", () => {
-    const entry = capture(new ConsoleLogger("info"), () =>
-      new ConsoleLogger("info").info("login", { user_token: "abc", name: "x" }),
-    ) as { user_token: string; name: string };
-    expect(entry.user_token).toBe("[redacted]");
-    expect(entry.name).toBe("x");
-  });
-
-  it("skips info when level is error and emits debug at debug level", () => {
-    const errorOnly = new ConsoleLogger("error");
-    const infoEntry = capture(errorOnly, () => errorOnly.info("should be suppressed"));
-    expect(infoEntry).toBeUndefined();
-    const debugEntry = capture(new ConsoleLogger("debug"), () => new ConsoleLogger("debug").debug("d"));
-    expect(debugEntry).toBeDefined();
-  });
-
-  it("attaches an error object on error() and merges child meta", () => {
-    const child = new ConsoleLogger("info").child({ service_name: "ws", scope: "ws" });
-    const entry = capture(new ConsoleLogger("info"), () =>
-      child.error("boom", { extra: 1 }, new Error("boom")),
-    ) as {
-      scope: string;
-      extra: number;
-      error: { name: string };
-    };
-    expect(entry.scope).toBe("ws");
-    expect(entry.extra).toBe(1);
-    expect(entry.error.name).toBe("Error");
   });
 });

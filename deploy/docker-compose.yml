@@ -53,6 +53,8 @@ services:
       DATABASE_USER: fleet
       DATABASE_PASSWORD: fleet_local_dev
       # N2.3: durable forward to a Redis Stream, not fire-and-forget HTTP.
+      # The exact forwarding transport is verified at integration time against the
+      # pinned Traccar version; if unavailable we use HTTP + the back-fill poller.
       FORWARD_REDIS_ENABLED: "true"
       FORWARD_REDIS_URI: redis://redis:6379/0
       FORWARD_REDIS_CHANNEL: traccar:positions
@@ -81,8 +83,6 @@ services:
       traccar:
         condition: service_healthy
     environment:
-      PORT: "4000"
-      API_BASE_PATH: /api/v1
       DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
@@ -117,48 +117,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
       NODE_ENV: development
-    volumes:
-      - ../..:/app
-
-  ingest:
-    build:
-      context: ../..
-      dockerfile: deploy/Dockerfile
-      target: dev
-    command: ["npm", "run", "dev:ingest"]
-    depends_on:
-      - postgres
-      - redis
-      - api
-    environment:
-      DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
-      REDIS_URL: redis://redis:6379/0
-      TRACCAR_BASE_URL: http://traccar:8082
-      NODE_ENV: development
-    volumes:
-      - ../..:/app
-
-  ws:
-    build:
-      context: ../..
-      dockerfile: deploy/Dockerfile
-      target: dev
-    command: ["npm", "run", "dev:ws"]
-    depends_on:
-      - postgres
-      - redis
-      - api
-    environment:
-      WS_PORT: "4001"
-      DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: dev-only-not-secret
-      JWT_SECRET_PREVIOUS: dev-only-not-secret
-      JWT_KID: k1
-      JWT_KID_PREVIOUS: k0
-      NODE_ENV: development
-    ports:
-      - "4001:4001"
     volumes:
       - ../..:/app
 

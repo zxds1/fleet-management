@@ -33,6 +33,7 @@ import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
 import type { Container } from "./container";
 import { logger } from "@fleet/shared";
+import { startMetrics, metricsMiddleware } from "@fleet/shared";
 import { ErrorEventsRepository, type ErrorEventInput } from "@fleet/db";
 import type { ErrorEventPersistInput } from "../http/problem";
 import { safeJson } from "../security/bodyParser";
@@ -57,6 +58,7 @@ export function createApp(container: Container): Express {
   app.use(safeJson());
   app.use(securityHeaders());
   app.use(corsMiddleware(container.env.ALLOWED_ORIGINS));
+  app.use(metricsMiddleware);
 
   const rateLimiter = createRateLimiter(container.redis.client, secure);
   const ipBlocker = createIpBlocker(container.redis.client, secure, {
@@ -67,7 +69,7 @@ export function createApp(container: Container): Express {
   app.use(rateLimiter.middleware({ scope: "global", max: container.env.RATE_LIMIT_GLOBAL_PER_MINUTE }));
   app.use(ipBlocker.middleware());
 
-  // Liveness / readiness / deep probes (09 §1/§2). Deep checks inspect replication lag, outbox
+   // Liveness / readiness / deep probes (09 §1/§2). Deep checks inspect replication lag, outbox
   // backlog and last ingest position age; each degrades independently.
   app.get("/healthz", (_req, res) => res.status(200).json({ status: "ok" }));
   app.get(
@@ -84,6 +86,10 @@ export function createApp(container: Container): Express {
       res.status(result.status === "ok" ? 200 : 503).json(result);
     }),
   );
+
+  // Prometheus metrics endpoint (09 §1). Mounted outside auth/rate-limit so
+  // Prometheus/Grafana Cloud scrapes succeed. Excluded from SLOs (slo.md §2).
+  app.get("/metrics", startMetrics());
 
   app.use(`${base}/auth`, rateLimiter.middleware({ scope: "auth", max: container.env.RATE_LIMIT_AUTH_PER_MINUTE }));
   app.use(`${base}/auth`, createAuthRouter({

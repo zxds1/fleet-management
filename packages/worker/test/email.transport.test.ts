@@ -3,6 +3,7 @@
 // performs a real JSON POST to Resend (Bearer auth) when one is set.
 
 import { emailTransport } from "../src/jobs/transports";
+import { setSleepFn, resetSleepFn } from "../src/infra/http";
 import type { Env } from "../src/config/env";
 
 const row = {
@@ -45,6 +46,9 @@ const baseEnv: Env = {
   S3_ENDPOINT: undefined,
   S3_FORCE_PATH_STYLE: false,
   S3_MEDIA_BUCKET: "fleet-media",
+  VISION_ENABLED: false,
+  RECONCILIATION_ENABLED: false,
+  GOOGLE_VISION_API_KEY: undefined,
   OUTBOX_INTERVAL_MS: 1000,
   OUTBOX_BATCH_SIZE: 50,
   OUTBOX_MAX_ATTEMPTS: 5,
@@ -63,6 +67,8 @@ const baseEnv: Env = {
 };
 
 describe("emailTransport", () => {
+  beforeEach(() => setSleepFn(async () => undefined));
+  afterEach(() => resetSleepFn());
   it("skips (no-op) when no RESEND_API_KEY is configured", async () => {
     const t = emailTransport(baseEnv);
     const res = await t.send(row);

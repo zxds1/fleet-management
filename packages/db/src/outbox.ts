@@ -5,7 +5,7 @@
 // handlers MUST be idempotent (01 §6).
 
 import type { OutboxEvent, OutboxHandler, OutboxRelay, PoolLike } from "@fleet/shared";
-import { logger, metrics } from "@fleet/shared";
+import { logger, errorsTotalM, workerDeadLetteredTotalM } from "@fleet/shared";
 
 const SELECT_DUE = `
   SELECT *
@@ -74,8 +74,8 @@ export class PgOutboxRelay implements OutboxRelay {
           const dead = attempts >= (this.opts.maxAttempts ?? 5);
           await client.query(MARK_FAILED, [attempts, (e as Error).message, dead, ev.id]);
           logger.error("outbox handler failed", { service_name: "db", event_type: ev.event_type, attempts, dead, error: (e as Error).message });
-          metrics.increment("outbox_handler_failed", 1);
-          if (dead) metrics.increment("worker.job_dead_lettered", 1);
+          errorsTotalM().inc({ error_code: "OUTBOX_HANDLER_FAILED" });
+          if (dead) workerDeadLetteredTotalM().inc({ job: ev.event_type, stream: "outbox" });
         }
       }
     } finally {

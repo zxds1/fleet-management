@@ -4,6 +4,8 @@
 // are JSON-serialisable. Keeping this in @fleet/shared (no new runtime deps) lets both sides import
 // identical constants instead of duplicating string literals.
 
+import { logger } from "./logging";
+
 export const RealtimeChannels = {
   /** Recompute + diff the vehicle display-state view (triggered by tracker_health / shift / HOS change). */
   vehicleStates: "ws:map:vehicle-states",
@@ -21,12 +23,8 @@ export const RealtimeChannels = {
 
 export type RealtimeChannel = (typeof RealtimeChannels)[keyof typeof RealtimeChannels];
 
-/**
- * Wire event names the gateway actually emits over the socket. These are the *unprefixed*
- * counterparts of `RealtimeChannels` (no `ws:` topic prefix) — the client subscribes to and
- * listens on these, while callers address handlers by the `RealtimeChannel` constant. `EVENT_FOR_CHANNEL`
- * bridges the two so a channel rename touches exactly one place.
- */
+/** Wire event names the @fleet/ws gateway actually emits (unprefixed, 07 §3). Keys mirror
+ * `RealtimeChannels` so callers can bridge the `ws:`-prefixed channel to the emitted event. */
 export const RealtimeEvents = {
   vehicleStates: "map:vehicle-states",
   notifications: "notifications",
@@ -36,7 +34,9 @@ export const RealtimeEvents = {
   driverAccident: "driver:accident",
 } as const;
 
-/** `RealtimeChannel` → wire event name. Keys mirror `RealtimeChannels` 1:1. */
+export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents];
+
+/** Maps a `ws:`-prefixed `RealtimeChannel` to the unprefixed event name the gateway emits. */
 export const EVENT_FOR_CHANNEL = {
   [RealtimeChannels.vehicleStates]: RealtimeEvents.vehicleStates,
   [RealtimeChannels.notifications]: RealtimeEvents.notifications,
@@ -44,7 +44,7 @@ export const EVENT_FOR_CHANNEL = {
   [RealtimeChannels.driverShift]: RealtimeEvents.driverShift,
   [RealtimeChannels.driverVehicle]: RealtimeEvents.driverVehicle,
   [RealtimeChannels.driverAccident]: RealtimeEvents.driverAccident,
-} as const satisfies Record<RealtimeChannel, string>;
+} as const;
 
 export interface EventPublisher {
   publish(channel: string, payload: unknown): Promise<void>;
@@ -64,8 +64,8 @@ export function redisPublisher(client: RedisPub | null): EventPublisher {
       const body = typeof payload === "string" ? payload : JSON.stringify(payload);
       try {
         await client.publish(channel, body);
-      } catch {
-        /* best effort — real-time push is not a durable side effect */
+      } catch (e) {
+        logger.error("realtime_publish_failed", { channel, error: e instanceof Error ? { name: e.name, message: e.message } : String(e) });
       }
     },
   };

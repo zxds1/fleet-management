@@ -8,7 +8,7 @@ export interface FieldError {
   message: string;
 }
 
-/** Classifies an error by the kind of remediation it needs. */
+/** Classifies an error by the kind of remediation it needs (Layer 1 taxonomy, 08 §1). */
 export type ErrorBucket =
   | "transient"
   | "client"
@@ -120,6 +120,22 @@ export class DeviceRevoked extends AppError {
   }
 }
 
+export class IpBlocked extends AppError {
+  readonly httpStatus = 403;
+  readonly error_code = "IP_BLOCKED";
+  constructor(detail = "Access temporarily blocked from this address") {
+    super({ title: "Forbidden", detail, bucket: "client" });
+  }
+}
+
+export class SessionRevoked extends AppError {
+  readonly httpStatus = 401;
+  readonly error_code = "SESSION_REVOKED";
+  constructor(detail = "Session revoked. Please sign in again.") {
+    super({ title: "Session revoked", detail, bucket: "client" });
+  }
+}
+
 export class ConsentRequired extends AppError {
   readonly httpStatus = 403;
   readonly error_code = "CONSENT_REQUIRED";
@@ -217,6 +233,8 @@ export const ERROR_CODE_BUCKET: Record<string, ErrorBucket> = Object.freeze({
   FORBIDDEN: "client",
   ACCOUNT_SUSPENDED: "client",
   DEVICE_REVOKED: "client",
+  IP_BLOCKED: "client",
+  SESSION_REVOKED: "client",
   CONSENT_REQUIRED: "client",
   NOT_FOUND: "client",
   CLOCKOUT_PENDING: "client",

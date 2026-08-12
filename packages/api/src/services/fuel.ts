@@ -304,8 +304,8 @@ export class FuelService {
         input.adjusted_odometer != null ||
         input.admin_notes != null
       ) {
-        const amount = input.adjusted_amount ?? numeric((purchase as { amount_spent?: string | null }).amount_spent);
-        const litres = input.adjusted_litres ?? numeric((purchase as { liters_pumped?: string | null }).liters_pumped);
+        const amount = numeric(input.adjusted_amount) ?? numeric((purchase as { amount_spent?: string | null }).amount_spent);
+        const litres = numeric(input.adjusted_litres) ?? numeric((purchase as { liters_pumped?: string | null }).liters_pumped);
         const pricePerLiter = amount != null && litres != null && litres > 0
           ? Math.round((amount / litres) * 100) / 100
           : null;

@@ -83,3 +83,93 @@ export class ReconciliationJob {
 function statementMediaMediaId(id: string): string {
   return id;
 }
+
+/**
+ * Simple CSV tokenizer that handles RFC-4180 quoting (fields wrapped in double quotes,
+ * embedded quotes escaped as ""). Sufficient for fuel-card statement imports.
+ */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      cur += ch;
+      i++;
+    } else if (ch === '"') {
+      inQuotes = true;
+      i++;
+    } else if (ch === ",") {
+      fields.push(cur);
+      cur = "";
+      i++;
+    } else {
+      cur += ch;
+      i++;
+    }
+  }
+  fields.push(cur);
+  return fields;
+}
+
+/**
+ * Real CSV parser driven by a per-statement column-mapping (A1.9). The mapping maps source
+ * CSV header → canonical field name so the same parser works across bank formats. Injected
+ * only when `RECONCILIATION_ENABLED=1` (audit L10); otherwise NoopParser returns [].
+ */
+export class ColumnMappingCsvParser implements CsvParser {
+  parse(buffer: Buffer, columnMapping: Record<string, string>): StatementLine[] {
+    const text = buffer.toString("utf-8");
+    const rawLines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (rawLines.length < 2) return [];
+
+    const headers = parseCsvLine(rawLines[0] ?? "").map((h) => h.trim());
+    const lines: StatementLine[] = [];
+
+    for (let i = 1; i < rawLines.length; i++) {
+      const vals = parseCsvLine(rawLines[i] ?? "");
+      const row: Record<string, string> = {};
+      for (let j = 0; j < headers.length; j++) {
+        row[headers[j] ?? ""] = vals[j] ?? "";
+      }
+
+      const mapped: Record<string, string> = {};
+      for (const [source, target] of Object.entries(columnMapping)) {
+        mapped[target] = row[source] ?? "";
+      }
+
+      const rawTransactionAt = mapped["transactionAt"] ?? mapped["transaction_at"];
+      const transactionAt = rawTransactionAt ? new Date(rawTransactionAt) : new Date(NaN);
+      if (Number.isNaN(transactionAt.getTime())) continue;
+
+      const cardLastFour = mapped["cardLastFour"] ?? mapped["card_last_four"] ?? "";
+      const amountStr = mapped["amount"] ?? "0";
+      const amount = parseFloat(amountStr);
+      if (Number.isNaN(amount)) continue;
+
+      const line: StatementLine = {
+        transactionAt,
+        cardLastFour,
+        amount,
+        raw: row,
+      };
+      const station = mapped["stationName"] ?? mapped["station_name"];
+      if (station) line.stationName = station;
+      lines.push(line);
+    }
+
+    return lines;
+  }
+}

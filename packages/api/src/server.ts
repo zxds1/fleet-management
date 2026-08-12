@@ -3,7 +3,7 @@
 // listening. SIGTERM/SIGINT drain the pool cleanly so in-flight transactions can finish. Sentry is
 // initialised at boot and uncaught errors are reported + flushed before exit (C5.7).
 
-import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext, startMetrics, initTracing, shutdownTracing } from "@fleet/shared";
 import { buildContainer } from "./app/container";
 import { createApp } from "./app/app";
 
@@ -22,6 +22,8 @@ export function start(): void {
         "Set real secrets via the platform secret store before running in production.",
     );
   }
+
+  initTracing(container.env.SERVICE_NAME);
 
   initErrorReporter({
     SENTRY_DSN: container.env.SENTRY_DSN,
@@ -43,11 +45,13 @@ export function start(): void {
   const server = app.listen(container.env.PORT, () => {
     logger.info("fleet-api listening", { port: container.env.PORT, base: container.env.API_BASE_PATH });
   });
+  startMetrics(server);
   logger.info("service started", { ...deployContext, service: "api" });
 
   const shutdown = async (signal: string) => {
     logger.info("shutdown signal", { signal });
     server.close();
+    await shutdownTracing();
     await flushTelemetry();
     await container.close();
     process.exit(0);

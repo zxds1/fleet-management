@@ -13,7 +13,8 @@ import {
   type Tx,
   violation,
 } from "@fleet/shared";
-import type { ClockInInput, ClockOutInput, ConsentType, VerifyShiftInput, WorkPlan } from "@fleet/shared";
+import type { ClockInInput, ClockOutInput, ConsentType, VerifyShiftInput } from "@fleet/shared";
+import type { WorkLogWithPhotos } from "../repositories/shifts";
 import { ConsentRequired } from "@fleet/shared";
 import type {
   AssignmentRow,
@@ -281,7 +282,7 @@ export class ShiftService {
     return this.shifts.findOpenByDriver(driverId);
   }
 
-  async getWorkPlan(shiftId: string): Promise<WorkPlan | null> {
+  async getWorkPlan(shiftId: string): Promise<WorkLogWithPhotos | null> {
     return this.workLogs.getForShift(shiftId);
   }
 }

@@ -4,7 +4,7 @@
 // and the scheduled job registry (05). Graceful shutdown on SIGINT/SIGTERM. Sentry is initialised
 // at boot and uncaught errors are reported before exit (C5.7).
 
-import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext } from "@fleet/shared";
+import { logger, initErrorReporter, reportError, flushTelemetry, metrics, consoleMetricSink, deployContext, initMetrics, initTracing, shutdownTracing } from "@fleet/shared";
 import { bootInfra, type WorkerInfra } from "./infra";
 import { env } from "./config/env";
 import { startHealthServer } from "./health";
@@ -14,7 +14,9 @@ import { createOutboxRelay, registerHandlers, type RelayInfra } from "./outbox/r
 import { buildSchedule, JobScheduler } from "./jobs/scheduler";
 import { EnvMediaPresigner } from "./media/presigner";
 import type { VisionAdapter } from "./jobs/ocr";
+import { GoogleVisionAdapter } from "./jobs/vision";
 import type { CsvParser, StatementLine } from "./jobs/reconciliation";
+import { ColumnMappingCsvParser } from "./jobs/reconciliation";
 
 const NoopVision: VisionAdapter = {
   async analyse() {
@@ -53,6 +55,8 @@ async function main(): Promise<void> {
     SERVICE_NAME: e.SERVICE_NAME,
     NODE_ENV: e.NODE_ENV,
   });
+  initTracing(e.SERVICE_NAME);
+  initMetrics();
   logger.info("worker booting", { role, nodeEnv: e.NODE_ENV, ...deployContext });
 
   // Emit in-process metrics to the structured log sink (CloudWatch Logs) and flush on an interval
@@ -69,6 +73,7 @@ async function main(): Promise<void> {
     logger.info("worker shutting down");
     await health.close();
     await infra.shutdown();
+    await shutdownTracing();
     await flushTelemetry();
     process.exit(0);
   };
@@ -102,20 +107,39 @@ async function main(): Promise<void> {
     return;
   }
 
+  const presigner = new EnvMediaPresigner(e);
+
+  let vision: VisionAdapter = NoopVision;
+  if (e.VISION_ENABLED) {
+    if (e.GOOGLE_VISION_API_KEY) {
+      vision = new GoogleVisionAdapter(e.GOOGLE_VISION_API_KEY, e, infra.pool, presigner);
+    } else {
+      logger.warn("VISION_ENABLED=1 but GOOGLE_VISION_API_KEY is not set; falling back to NoopVision");
+    }
+  } else if (e.NODE_ENV === "production") {
+    logger.warn("VISION_ENABLED is not set; falling back to NoopVision (OCR is non-functional in production)");
+  }
+
+  let parser: CsvParser = NoopParser;
+  if (e.RECONCILIATION_ENABLED) {
+    parser = new ColumnMappingCsvParser();
+  } else if (e.NODE_ENV === "production") {
+    logger.warn("RECONCILIATION_ENABLED is not set; falling back to NoopParser (reconciliation is non-functional in production)");
+  }
+
   const relayInfra: RelayInfra = {
     pool: infra.pool,
     config: infra.config,
     env: e,
-    vision: NoopVision,
-    parser: NoopParser,
+    vision,
+    parser,
     publisher: infra.publisher,
   };
   const relay = createOutboxRelay(infra.pool, e);
   registerHandlers(relay, relayInfra);
   relay.start();
 
-  const presigner = new EnvMediaPresigner(e);
-  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, NoopVision, infra.publisher, presigner), infra.pool);
+  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, vision, infra.publisher, presigner), infra.pool);
   scheduler.start();
 
   await new Promise<void>(() => {});

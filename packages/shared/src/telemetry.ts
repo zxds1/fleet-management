@@ -5,7 +5,28 @@
 // structured log lines (shipped to CloudWatch Logs in AWS); a deep health probe can read the snapshot.
 
 import * as Sentry from "@sentry/node";
+import { collectDefaultMetrics } from "prom-client";
+import type { NextFunction, Request, Response } from "express";
 import { logger } from "./logging";
+import {
+  initMetrics,
+  appMetrics,
+  httpRequestDurationM,
+  httpRequestsTotalM,
+  dbQueryDurationM,
+  dbConnectionsM,
+  redisLatencyM,
+  redisStreamDepthM,
+  outboxBacklogM,
+  telemetryIngestTotalM,
+  telemetryIngestLagSecondsM,
+  workerJobsTotalM,
+  workerJobDurationM,
+  sentryEventsTotalM,
+  errorsTotalM,
+  workerDeadLetteredTotalM,
+  ingestDeadLetteredTotalM,
+} from "./metrics";
 
 export interface TelemetryConfig {
   SENTRY_DSN?: string;
@@ -160,3 +181,78 @@ export class Metrics {
 }
 
 export const metrics = new Metrics();
+
+// --- Prometheus metrics ------------------------------------------------------
+
+/**
+ * Starts the Prometheus metrics subsystem: initialises the prom-client Registry,
+ * registers the fleet_* metric definitions from slo.md, and collects Node.js
+ * runtime default metrics. Returns an Express handler for the `/metrics` endpoint.
+ *
+ * Idempotent — safe to call from every entrypoint. The `httpServer` parameter
+ * is accepted for forward-compatibility (server-level instrumentation); the
+ * returned handler is mounted on the Express app independently.
+ */
+export function startMetrics(httpServer?: unknown): (req: Request, res: Response) => Promise<void> {
+  if (!appMetrics.isInitialised()) {
+    initMetrics();
+    const registry = appMetrics.getRegistry();
+    if (registry) {
+      collectDefaultMetrics({ register: registry });
+    }
+  }
+
+  // Touch every domain metric handle so it is registered in the Registry
+  // before Prometheus scrapes /metrics.
+  httpRequestDurationM();
+  httpRequestsTotalM();
+  dbQueryDurationM();
+  dbConnectionsM();
+  redisLatencyM();
+  redisStreamDepthM();
+  outboxBacklogM();
+  telemetryIngestTotalM();
+  telemetryIngestLagSecondsM();
+  workerJobsTotalM();
+  workerJobDurationM();
+  sentryEventsTotalM();
+  errorsTotalM();
+  workerDeadLetteredTotalM();
+  ingestDeadLetteredTotalM();
+
+  return async (_req: Request, res: Response) => {
+    res.set("Content-Type", appMetrics.contentType());
+    res.end(await appMetrics.render());
+  };
+}
+
+/**
+ * Express middleware that records request count and latency per route
+ * to the `fleet_http_requests_total` counter and
+ * `fleet_http_request_duration_seconds` histogram.
+ *
+ * Health probes (`/healthz`, `/readyz`, `/health/deep`) and `/metrics`
+ * are excluded from recording (slo.md §2 exclusion policy).
+ */
+export function metricsMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const excluded = ["/healthz", "/readyz", "/health/deep", "/metrics"];
+  const path = req.originalUrl.split("?")[0] ?? req.originalUrl;
+
+  if (excluded.includes(path)) {
+    next();
+    return;
+  }
+
+  const start = process.hrtime();
+  res.on("finish", () => {
+    const [seconds, nanoseconds] = process.hrtime(start);
+    const durationSeconds = seconds + nanoseconds / 1e9;
+    const status = String(res.statusCode);
+    // Express sets req.route at runtime when a route matches; @types/express v4
+    // types it as `any`, so we access it cautiously.
+    const route: string = req.route ? String(req.route.path) : path;
+    httpRequestsTotalM().inc({ method: req.method, route, status });
+    httpRequestDurationM().observe({ method: req.method, route, status }, durationSeconds);
+  });
+  next();
+}

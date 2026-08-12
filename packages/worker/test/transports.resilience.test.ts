@@ -4,7 +4,7 @@
 // instead of hammering it. Both surface as a retryable FAILED result handled by the outbox path.
 
 import { emailTransport, fcmTransport } from "../src/jobs/transports";
-import { fetchWithTimeout, TransportTimeoutError, TransportHttpError } from "../src/infra/http";
+import { fetchWithTimeout, TransportTimeoutError, TransportHttpError, setSleepFn, resetSleepFn } from "../src/infra/http";
 import type { Env } from "../src/config/env";
 import type { NotificationRow } from "../src/jobs/notifications";
 import { createServer } from "http";
@@ -33,6 +33,9 @@ const env: Env = {
   S3_ENDPOINT: undefined,
   S3_FORCE_PATH_STYLE: false,
   S3_MEDIA_BUCKET: "fleet-media",
+  VISION_ENABLED: false,
+  RECONCILIATION_ENABLED: false,
+  GOOGLE_VISION_API_KEY: undefined,
   OUTBOX_INTERVAL_MS: 1000,
   OUTBOX_BATCH_SIZE: 50,
   OUTBOX_MAX_ATTEMPTS: 5,
@@ -65,6 +68,9 @@ const row: NotificationRow = {
 };
 
 describe("fetchWithTimeout", () => {
+  beforeEach(() => setSleepFn(async () => undefined));
+  afterEach(() => resetSleepFn());
+
   it("aborts a hung downstream at the timeout", async () => {
     // Accept the connection but never send a response — the fetch must time out, not hang.
     const server = createServer((_req, res) => res.socket?.on("data", () => {}));
@@ -86,7 +92,7 @@ describe("fetchWithTimeout", () => {
     }) as unknown as typeof fetch;
     try {
       await expect(fetchWithTimeout("https://mail.example/send")).rejects.toBeInstanceOf(TransportHttpError);
-      expect(calls).toHaveLength(1);
+      expect(calls).toHaveLength(3);
     } finally {
       global.fetch = prev;
     }
@@ -94,6 +100,9 @@ describe("fetchWithTimeout", () => {
 });
 
 describe("emailTransport circuit breaker", () => {
+  beforeEach(() => setSleepFn(async () => undefined));
+  afterEach(() => resetSleepFn());
+
   it("trips the breaker after consecutive failures and fails fast", async () => {
     let calls = 0;
     const prev = global.fetch;
@@ -107,10 +116,10 @@ describe("emailTransport circuit breaker", () => {
       for (let i = 0; i < 8; i++) results.push(await t.send(row));
       // Every attempt is retryable (surfaces to the outbox path via markFailed).
       expect(results.every((r) => r.status === "FAILED")).toBe(true);
-      // The breaker opens after the volume threshold, so the downstream is no longer called on
-      // every send — later sends fail fast with the open-breaker reason.
-      expect(calls).toBeGreaterThanOrEqual(5);
-      expect(calls).toBeLessThan(8);
+      // The breaker wraps fetchWithTimeout which now retries 3× internally; 5 fire()
+      // calls (each 3 fetches) trip the breaker, then the remaining 3 fail fast.
+      expect(calls).toBeGreaterThanOrEqual(15);
+      expect(calls).toBeLessThan(24);
       expect(results.some((r) => r.failureReason === "EMAIL 503")).toBe(true);
       expect(results.some((r) => r.failureReason === "Breaker is open")).toBe(true);
     } finally {
@@ -120,6 +129,9 @@ describe("emailTransport circuit breaker", () => {
 });
 
 describe("fcmTransport circuit breaker", () => {
+  beforeEach(() => setSleepFn(async () => undefined));
+  afterEach(() => resetSleepFn());
+
   it("preserves the legacy `FCM <status>` failure reason on 5xx", async () => {
     const prev = global.fetch;
     global.fetch = (async () => new Response(null, { status: 502 })) as unknown as typeof fetch;

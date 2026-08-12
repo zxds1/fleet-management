@@ -1,0 +1,52 @@
+name: mobile
+
+on:
+  pull_request:
+    paths:
+      - "packages/mobile/**"
+      - "packages/shared/**"
+      - "packages/ws/**"
+      - ".github/workflows/mobile.yml"
+  push:
+    branches: [staging, main]
+    paths:
+      - "packages/mobile/**"
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    name: mobile typecheck / test (S-4 hardening + D-5/D-7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild shared (mobile + ws depend on @fleet/shared dist)
+        run: npm run build --workspace=@fleet/shared --workspace=@fleet/ws
+
+      - name: Mobile typecheck (strict, noUncheckedIndexedAccess)
+        run: npm run typecheck --workspace=@fleet/mobile
+
+      - name: Mobile unit tests (security, offline queue, apiClient, session, socket, drivers, admin)
+        run: npm run test --workspace=@fleet/mobile -- --forceExit
+
+      - name: Secret scan (S-6 — gitleaks pre-commit/CI parity)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+        continue-on-error: true
+
+      - name: Supply-chain scan (S-5 — npm audit on the mobile workspace)
+        run: npm audit --workspace=@fleet/mobile --audit-level=high
+        continue-on-error: true

@@ -52,7 +52,8 @@ export function createRedis(env: Env): RedisBundle {
     async get(key) {
       try {
         return await client.get(key);
-      } catch {
+      } catch (e) {
+        logger.warn("redis cache get failed", { op: "cache.get", message: (e as Error).message });
         return null;
       }
     },
@@ -60,15 +61,15 @@ export function createRedis(env: Env): RedisBundle {
       try {
         if (ttlSeconds) await client.set(key, value, "EX", ttlSeconds);
         else await client.set(key, value);
-      } catch {
-        /* best effort */
+      } catch (e) {
+        logger.warn("redis cache set failed", { op: "cache.set", key, message: (e as Error).message });
       }
     },
     async del(key) {
       try {
         await client.del(key);
-      } catch {
-        /* best effort */
+      } catch (e) {
+        logger.warn("redis cache del failed", { op: "cache.del", key, message: (e as Error).message });
       }
     },
   };
@@ -79,7 +80,8 @@ export function createRedis(env: Env): RedisBundle {
     async close() {
       try {
         await client.quit();
-      } catch {
+      } catch (e) {
+        logger.warn("redis shutdown failed", { op: "client.quit", message: (e as Error).message });
         client.disconnect();
       }
     },

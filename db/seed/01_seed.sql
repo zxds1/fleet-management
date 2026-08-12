@@ -15,21 +15,14 @@
 
 SET search_path = app, telemetry, audit, public;
 
--- 14_tenancy.sql enables and FORCES row-level security on every tenant table.
--- Seed rows are reference data (roles, permissions, policies, fixtures) that have
--- no tenant, so without this the FORCE RLS policy would reject every insert under a
--- NULL tenant GUC. Lift the isolation for the duration of this session only — this
--- is a one-off bootstrap, not a request path, and the seed touches no tenant data.
-SET app.current_role = 'SYSTEM_ADMIN';
-
 -- -----------------------------------------------------------------------------
 -- Roles  (C6.1, N4)
 -- -----------------------------------------------------------------------------
 INSERT INTO app.roles (code, name, description, requires_mfa) VALUES
     ('DRIVER',        'Driver',        'Clock in/out, submit inspections, fuel, expenses and accident reports.', false),
     ('DISPATCHER',    'Dispatcher',    'Assign assets, view the live map and read shift data.',                   false),
-    ('FLEET_MANAGER', 'Fleet Manager', 'Dispatcher rights plus verification, quarantine and data overrides.',     false),
-    ('ADMIN',         'Administrator', 'Full system access including user management and audit logs.',            false),
+    ('FLEET_MANAGER', 'Fleet Manager', 'Dispatcher rights plus verification, quarantine and data overrides.',     true),
+    ('ADMIN',         'Administrator', 'Full system access including user management and audit logs.',            true),
     ('FINANCE',       'Finance',       'Read-only financial access; may clear verified receipts for payment.',    false),
     ('AUDITOR',       'Auditor',       'Read-only access to all data including the audit trail.',                 false)
 ON CONFLICT (code) DO NOTHING;
@@ -59,7 +52,6 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('asset:update',            'Edit vehicle and trailer master data',                 1),
     ('asset:quarantine',        'Quarantine an asset',                                  1),
     ('asset:lift_quarantine',   'Lift a quarantine (C3.9)',                             1),
-    ('anomaly:read',            'Read the open-anomaly feed and detail',                1),
     ('document:read',           'Read asset and driver documents',                      1),
     ('document:manage',         'Upload and replace documents',                         1),
     ('geofence:read',           'Read geofences',                                       1),
@@ -99,45 +91,22 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('accident:close',          'Resolve and close an accident',                        3),
     ('hos:read',                'Read hours-of-service state',                          3),
     ('hos:override',            'Assign a non-default HOS policy to a driver (C3.2)',   3),
-    ('maintenance:read',        'Read maintenance schedules',                          3),
-    ('maintenance:manage',       'Define maintenance tasks and intervals',              3),
+    ('maintenance:read',        'Read maintenance schedules',                           3),
+    ('maintenance:manage',      'Define maintenance tasks and intervals',               3),
     ('maintenance:record',      'Record completed maintenance',                         3),
-    ('notification:read',        'Read own notifications',                              3),
-    ('notification:manage',     'Manage templates and the on-call roster',              3),
-    -- Training / LMS (Phase 3)
-    ('training:read',           'Read training courses and lessons',                    3),
-    ('training:manage',          'Author training courses and lessons',                 3),
-    ('training:complete',        'Mark a training lesson complete',                     3),
-    ('training:review',          'Review driver training completion (manager)',        3),
-    -- Driver onboarding / background check (Phase 1 for the driver-facing steps)
-    ('onboarding:read',         'Read own onboarding record',                           1),
-    ('onboarding:submit',       'Submit onboarding + background check',                 1),
-    ('onboarding:review',       'Review and clear driver background checks',            3),
-    -- Driver-reported vehicle issues (14_vehicle_issues.sql)
-    ('vehicle:report',          'Report a vehicle issue / defect (non-accident)',       3),
-    -- Data Subject Access Requests (15_privacy_requests.sql)
-    ('privacy:request_own',     'Submit and view own DSAR export/deletion requests',    1),
-    ('privacy:view_requests_tenant', 'View tenant-wide DSAR requests',                   3)
+    ('notification:manage',     'Manage templates and the on-call roster',              3)
 ON CONFLICT (code) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- Role -> permission mapping  (C6.1, C6.2 union semantics)
 -- -----------------------------------------------------------------------------
--- The driver surface is read-own only: every route granted here resolves the caller's own
--- driver id server-side (accidents/me, fuel/refuel/me, inspections/me, notifications, training
--- enrolment), so these reads can never widen to another driver's data (C6.2 union semantics).
 INSERT INTO app.role_permissions (role_code, permission_code)
 SELECT 'DRIVER', p FROM unnest(ARRAY[
     'shift:clock_in','shift:clock_out','shift:read_own',
-    'inspection:submit','inspection:read','trailer:swap',
-    'fuel:record_gauge','fuel:submit_purchase','fuel:read',
-    'expense:submit','accident:report','accident:read','accident:acknowledge',
-    'hos:read','asset:read','assignment:read',
-    'manage_own_mfa','revoke_device',
-    'notification:read','notification:manage',
-    'training:read','training:complete',
-    'onboarding:read','onboarding:submit',
-    'vehicle:report'
+    'inspection:submit','trailer:swap',
+    'fuel:record_gauge','fuel:submit_purchase',
+    'expense:submit','accident:report','hos:read','asset:read','assignment:read',
+    'manage_own_mfa','revoke_device'
 ]) AS p
 ON CONFLICT DO NOTHING;
 
@@ -161,15 +130,10 @@ SELECT 'FLEET_MANAGER', p FROM unnest(ARRAY[
     'accident:read','accident:acknowledge','accident:update','accident:close',
     'hos:read','hos:override',
     'maintenance:read','maintenance:manage','maintenance:record',
-    'vehicle:report',
-    'notification:read','notification:manage',
-    'training:read','training:manage','training:complete','training:review',
-    'onboarding:read','onboarding:review',
-     'document:read','document:manage','geofence:read','geofence:manage',
-     'report:read','report:export','config:read',
-     'privacy:view_requests_tenant'
- ]) AS p
- ON CONFLICT DO NOTHING;
+    'document:read','document:manage','geofence:read','geofence:manage',
+    'report:read','report:export','config:read'
+]) AS p
+ON CONFLICT DO NOTHING;
 
 -- C6.1: Finance is read-only over data, with the single write action of
 -- clearing an already-verified receipt for payment.
@@ -187,8 +151,7 @@ SELECT 'AUDITOR', p FROM unnest(ARRAY[
     'audit:read','asset:read','assignment:read','shift:read_all','inspection:read',
     'fuel:read','expense:read','accident:read','hos:read','maintenance:read',
     'document:read','geofence:read','telemetry:read_history','report:read',
-    'user:read','config:read','training:read','anomaly:read','notification:read',
-    'onboarding:read'
+    'user:read','config:read'
 ]) AS p
 ON CONFLICT DO NOTHING;
 
@@ -253,7 +216,11 @@ INSERT INTO app.system_config (key, value, value_type, description, min_value, m
     ('retention.accident_days',                  '2557', 'number',  'Accident evidence retention, enforced by S3 Object Lock (C5.3).', 2557, 7300, 'days', 3),
     ('retention.audit_days',                     '2557', 'number',  'Audit trail retention (C6.5).', 2557, 7300, 'days', 1),
     -- Security
-    ('auth.max_concurrent_sessions',            '10',   'number',  'Concurrent admin sessions per user (A1.6).', 1, 50, 'sessions', 1),
+    ('auth.device_offline_max_hours',            '24',   'number',  'Maximum offline operation before a forced online login (B13).', 1, 168, 'hours', 1),
+    ('auth.offline_pin_lockout_attempts',        '5',    'number',  'Offline PIN failures before a temporary lockout (M4).', 3, 10, 'attempts', 1),
+    ('auth.offline_pin_wipe_attempts',           '10',   'number',  'Offline PIN failures before the local PIN hash is wiped (M4).', 5, 20, 'attempts', 1),
+    ('auth.offline_pin_lockout_minutes',         '15',   'number',  'Lockout duration after too many offline PIN failures (M4).', 1, 240, 'minutes', 1),
+    ('auth.max_concurrent_sessions',             '10',   'number',  'Concurrent admin sessions per user (A1.6).', 1, 50, 'sessions', 1),
     -- Localisation
     ('locale.timezone',                          '"Africa/Nairobi"', 'string', 'Operational timezone (A2.3).', NULL, NULL, NULL, 1),
     ('locale.currency',                          '"KES"', 'string', 'Default currency (A2.2).', NULL, NULL, NULL, 1)
