@@ -71,7 +71,7 @@ services:
 
   api:
     build:
-      context: ../..
+      context: ..
       dockerfile: deploy/Dockerfile
       target: dev
     command: ["npm", "run", "dev:api"]
@@ -104,7 +104,7 @@ services:
 
   worker:
     build:
-      context: ../..
+      context: ..
       dockerfile: deploy/Dockerfile
       target: dev
     command: ["npm", "run", "dev:worker"]

@@ -15,7 +15,9 @@
     "db:validate": "node db/validate.mjs",
     "db:validate:bash": "cd db && bash ./validate.sh",
     "db:types": "node scripts/generate-db-types.mjs",
-    "db:types:check": "node scripts/generate-db-types.mjs --check"
+    "db:types:check": "node scripts/generate-db-types.mjs --check",
+    "dev:api": "npm run build && npm --workspace @fleet/api start",
+    "dev:worker": "npm run build && npm --workspace @fleet/worker start"
   },
   "devDependencies": {
     "turbo": "^2.0.0",
@@ -23,6 +25,7 @@
   },
   "dependencies": {
     "babel-plugin-module-resolver": "^5.0.3",
+    "expo": "^57.0.12",
     "prom-client": "^15.1.3"
   }
 }
