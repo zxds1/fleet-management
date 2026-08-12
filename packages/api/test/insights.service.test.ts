@@ -5,7 +5,7 @@
 
 import { ok, type Result, type DbClient } from "@fleet/shared";
 import { AnomalyQuery, DocumentQuery, DashboardQuery } from "../src/services/queries";
-import type { AssetDocumentRow } from "@fleet/shared";
+import type { DocumentSummaryRow } from "../src/services/queries";
 
 function fakeClient(rows: Record<string, unknown>[], columns: string[] = []): DbClient {
   return {
@@ -70,13 +70,18 @@ describe("AnomalyQuery.feed", () => {
 describe("DocumentQuery.expiring", () => {
   it("returns documents expiring within the window", async () => {
     const client = fakeClient([
-      { id: "doc-1", expires_on: "2026-09-01", vehicle_id: "v1" },
+      { document_id: "doc-1", expires_on: "2026-09-01", subject_id: "v1", subject_name: "Truck-1", days_remaining: 20, subject_type: "VEHICLE", document_type: "INSURANCE", linked_asset: "Truck-1", is_blocking: false, document_number: "P-1", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z" },
     ]);
-    const q = new DocumentQuery(client);
-    const r: Result<{ data: AssetDocumentRow[]; next_cursor: string | null; has_more: boolean }> =
-      await q.expiring({ withinDays: 30, limit: 10 });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.data).toHaveLength(1);
+     const q = new DocumentQuery(client);
+     const r: Result<{ data: DocumentSummaryRow[]; next_cursor: string | null; has_more: boolean }> =
+       await q.expiring({ withinDays: 30, limit: 10 });
+     expect(r.ok).toBe(true);
+     if (r.ok) {
+       expect(r.value.data).toHaveLength(1);
+       expect(r.value.data[0]!.document_id).toBe("doc-1");
+       expect(r.value.data[0]!.subject_name).toBe("Truck-1");
+       expect(r.value.data[0]!.days_remaining).toBe(20);
+     }
   });
 
   it("restricts the window to the driver's own documents when scoped", async () => {

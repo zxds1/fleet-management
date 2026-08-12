@@ -5,7 +5,6 @@
 // client-branchable member, so a malformed cursor maps to VALIDATION_ERROR (08 §1).
 
 import { type DbClient, type Result, ok, err, NotFound } from "@fleet/shared";
-import type { AssetDocumentRow } from "@fleet/shared";
 import { MAX_PAGE_LIMIT, decodeCursor, buildPage } from "../http/pagination";
 
 export interface AnomalyRow {
@@ -212,6 +211,27 @@ export interface DocumentMetadataEntry {
 }
 
 /**
+ * List projection for `GET /documents/expiring` (B.19). The mobile `DocSummarySchema` reads
+ * exactly these fields, so the list must project them (alias `id` → `document_id`, resolve the
+ * subject from whichever owner column is set, and compute `days_remaining`) rather than returning
+ * raw `asset_documents` columns — see the matching projection in `getDocument`.
+ */
+export interface DocumentSummaryRow {
+  document_id: string;
+  document_type: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  subject_type: "VEHICLE" | "TRAILER" | "DRIVER" | null;
+  linked_asset: string | null;
+  expires_on: string | null;
+  days_remaining: number | null;
+  is_blocking: boolean;
+  document_number: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Detail projection for `GET /documents/{id}` (C.16). Superset of the expiring-list row the mobile
  * `DocumentDetailSchema` reads (`document_id`, `document_type`, `subject_id`, `subject_name`,
  * `expires_on`, `days_remaining`, `linked_asset`, `renewal_note`).
@@ -241,24 +261,28 @@ export interface DocumentDetailRow {
 export class DocumentQuery {
   constructor(private readonly client: DbClient) {}
 
-  /** Cursor page over `asset_documents` expiring within `withinDays` of today (3.5 / B8). Keyset on (expires_on ASC, id ASC). */
-  async expiring(opts: { withinDays: number; limit: number; cursor?: string; driverId?: string }): Promise<Result<{ data: AssetDocumentRow[]; next_cursor: string | null; has_more: boolean }>> {
+  /** Cursor page over `asset_documents` expiring within `withinDays` of today (3.5 / B8). Keyset on (expires_on ASC, id ASC).
+   *
+   * Returns the `DocumentSummaryRow` projection (matching `getDocument`'s computed columns) so the
+   * mobile `DocSummarySchema` receives `document_id`, `subject_id`, `subject_name`, and
+   * `days_remaining` rather than raw `asset_documents` columns that lack those names. */
+  async expiring(opts: { withinDays: number; limit: number; cursor?: string; driverId?: string }): Promise<Result<{ data: DocumentSummaryRow[]; next_cursor: string | null; has_more: boolean }>> {
     const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
     const withinDays = Math.max(0, opts.withinDays);
     const params: unknown[] = [withinDays];
     const where = [
-      "deleted_at IS NULL",
-      "superseded_by_id IS NULL",
-      "expires_on >= current_date",
-      `expires_on <= (current_date + ($1 || ' days')::interval)`,
+      "d.deleted_at IS NULL",
+      "d.superseded_by_id IS NULL",
+      "d.expires_on >= current_date",
+      `d.expires_on <= (current_date + ($1 || ' days')::interval)`,
     ];
 
     // A DRIVER only ever sees their own documents plus those of the vehicle they are driving (B.19).
     if (opts.driverId) {
       params.push(opts.driverId);
       where.push(
-        `(driver_id = $${params.length}::uuid
-          OR vehicle_id IN (SELECT vehicle_id FROM app.shifts
+        `(d.driver_id = $${params.length}::uuid
+          OR d.vehicle_id IN (SELECT vehicle_id FROM app.shifts
                              WHERE driver_id = $${params.length}::uuid AND state = 'OPEN'))`,
       );
     }
@@ -266,17 +290,51 @@ export class DocumentQuery {
     const cursor = decodeCursor(opts.cursor);
     if (cursor) {
       params.push(cursor.sort, cursor.id);
-      where.push(`(expires_on, id) > ($${params.length - 1}::date, $${params.length})`);
+      where.push(`(d.expires_on, d.id) > ($${params.length - 1}::date, $${params.length})`);
     }
 
-    const res = await this.client.query<AssetDocumentRow>(
-      `SELECT * FROM app.asset_documents WHERE ${where.join(" AND ")}
-        ORDER BY expires_on ASC, id ASC
-        LIMIT $${params.length + 1}`,
+    const res = await this.client.query<DocumentSummaryRow>(
+      `SELECT d.id                 AS document_id,
+              d.document_type::text AS document_type,
+              d.document_number,
+              d.is_blocking,
+              d.expires_on,
+              (d.expires_on - current_date) AS days_remaining,
+              d.created_at,
+              d.updated_at,
+              d.media_object_id,
+              CASE
+                WHEN d.vehicle_id IS NOT NULL THEN d.vehicle_id
+                WHEN d.trailer_id IS NOT NULL THEN d.trailer_id
+                WHEN d.driver_id   IS NOT NULL THEN d.driver_id
+                ELSE NULL
+              END AS subject_id,
+              CASE
+                WHEN d.vehicle_id IS NOT NULL THEN 'VEHICLE'::text
+                WHEN d.trailer_id IS NOT NULL THEN 'TRAILER'::text
+                WHEN d.driver_id   IS NOT NULL THEN 'DRIVER'::text
+                ELSE NULL
+              END AS subject_type,
+              COALESCE(v.license_plate, t.license_plate, u.full_name) AS linked_asset,
+              COALESCE(v.license_plate, t.license_plate, u.full_name) AS subject_name
+         FROM app.asset_documents d
+         LEFT JOIN app.vehicles v ON v.id = d.vehicle_id
+         LEFT JOIN app.trailers t ON t.id = d.trailer_id
+         LEFT JOIN app.drivers  dr ON dr.id = d.driver_id
+         LEFT JOIN app.users    u ON u.id = dr.user_id
+         WHERE ${where.join(" AND ")}
+         ORDER BY d.expires_on ASC, d.id ASC
+         LIMIT $${params.length + 1}`,
       [...params, limit + 1],
     );
 
-    const page = buildPage(res.rows, limit, (row) => ({ sort: String(row.expires_on ?? ""), id: row.id }));
+    // Subject name is resolved in JS after the keyset page is bounded, so `days_remaining`/`id`
+    // drive ordering identically to the detail endpoint.
+    const out = res.rows.map((row) => ({
+      ...row,
+      days_remaining: row.days_remaining != null ? Number(row.days_remaining) : null,
+    }));
+    const page = buildPage(out, limit, (row) => ({ sort: String(row.expires_on ?? ""), id: row.document_id }));
     return ok(page);
   }
 
