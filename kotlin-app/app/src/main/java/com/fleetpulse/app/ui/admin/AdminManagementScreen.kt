@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.FleetButton
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -47,7 +48,7 @@ fun AdminManagementScreen(repository: FleetRepository, locale: String, nav: NavC
         var role by remember { mutableStateOf("FLEET_MANAGER") }
         var roleExpanded by remember { mutableStateOf(false) }
         // Backend InviteUserSchema only allows these two roles.
-        val roles = listOf("FLEET_MANAGER", "ADMIN")
+        val roles = AppConstants.INVITE_ROLES
         AlertDialog(onDismissRequest = { showInvite = false }, title = { Text("Invite user") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {

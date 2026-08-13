@@ -51,8 +51,6 @@ private val TITLES = mapOf(
     "document_detail" to "Document Detail",
     "training_review" to "Training Review",
     "vehicle_detail" to "Vehicle Detail",
-    "geofence" to "Geofence Zones",
-    "dispatch" to "Dispatch Waypoints",
     "analytics" to "Analytics",
     "maintenance" to "Maintenance",
     "anomaly_detail" to "Anomaly Detail",
@@ -181,8 +179,6 @@ fun AdminApp(repository: FleetRepository, isConnected: Boolean, pendingCount: In
             }
             composable("privacy") { PrivacyRequestsScreen(repository, locale, navController) }
             composable("trailer") { TrailerSwapScreen(repository, locale, navController) }
-            composable("geofence") { GeofenceZonesScreen(repository, locale, navController) }
-            composable("dispatch") { DispatchWaypointsScreen(repository, locale, navController) }
             composable("analytics") { AnalyticsReportScreen(repository, locale, navController) }
             composable("maintenance") { MaintenanceScheduleScreen(repository, locale, navController) }
             composable("anomaly_feed") { AnomalyFeedScreen(repository, locale, navController) }

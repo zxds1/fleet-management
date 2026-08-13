@@ -381,7 +381,23 @@ class FleetRepository(private val context: Context) {
     private suspend fun loadDriverRoster() = safe { /* admin-scoped; filled by admin loader */ }
     private suspend fun loadHardware() = safe { /* admin-scoped */ }
     private suspend fun loadTraining() = safe { /* training list endpoint; best-effort */ }
-    private suspend fun loadTrailerAssignments() = safe { /* trailer endpoint; best-effort */ }
+    suspend fun loadTrailerAssignments() = safe {
+        val res = trailerApi.assignments()
+        if (res.isSuccessful && res.body() != null) {
+            _trailerAssignments.value = mapTrailerAssignments(res.body()!!)
+        }
+    }
+    private fun mapTrailerAssignments(body: Map<String, Any?>): List<TrailerAssignment> {
+        val list = (body["data"] as? List<*>) ?: return emptyList()
+        return list.mapNotNull { it as? Map<String, Any?> }.map {
+            TrailerAssignment(
+                trailerId = it["trailer_id"]?.toString() ?: "",
+                vehicleId = it["vehicle_id"]?.toString(),
+                vehiclePlate = it["vehicle_plate"]?.toString(),
+                hookedAt = it["hooked_at"]?.toString(),
+            )
+        }
+    }
 
     private suspend inline fun safe(block: suspend () -> Unit) {
         try { block() } catch (_: Exception) { /* never crash a screen on a failed fetch */ }
@@ -584,8 +600,7 @@ class FleetRepository(private val context: Context) {
 
     /**
      * Resolve the assignment id required by Clock-In. Tries the backend's `/drivers/me/assignment`;
-     * returns null if unavailable (offline or no assignment yet). The Clock-In screen leaves a TODO
-     * and blocks submission without it — no endpoint is invented beyond this best-effort read.
+     * returns null if unavailable (offline or no assignment yet).
      */
     suspend fun fetchMyAssignment(): String? = withContext(Dispatchers.IO) {
         try {

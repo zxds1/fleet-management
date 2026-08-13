@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.ui.theme.*
 
 /**
@@ -36,7 +37,7 @@ object AuthStrings {
     fun phoneTab(l: String) = pick(l, "Driver (phone)", "Dereva (simu)")
     fun emailTab(l: String) = pick(l, "Admin (email)", "Msimamizi (barua pepe)")
     fun phoneLabel(l: String) = pick(l, "Phone number", "Namba ya simu")
-    fun phoneHint(l: String) = pick(l, "+254712345678", "+254712345678")
+    fun phoneHint(l: String) = pick(l, AppConstants.SAMPLE_PHONE_HINT, AppConstants.SAMPLE_PHONE_HINT)
     fun emailLabel(l: String) = pick(l, "Email address", "Barua pepe")
     fun emailHint(l: String) = pick(l, "you@company.com", "wewe@kampuni.com")
     fun passwordLabel(l: String) = pick(l, "Password", "Nenosiri")
@@ -293,7 +294,7 @@ private fun AuthBrandMark() {
             Icon(
                 imageVector = Icons.Default.LocalShipping,
                 contentDescription = null,
-                tint = Color.White,
+                tint = BentoTextPrimary,
                 modifier = Modifier.padding(8.dp).size(24.dp),
             )
         }
@@ -400,7 +401,7 @@ fun AuthSegmentedToggle(
             options.forEachIndexed { index, label ->
                 val selected = index == selectedIndex
                 Surface(
-                    color = if (selected) BentoPurplePrimary else Color.Transparent,
+                    color = if (selected) BentoPurplePrimary else BentoDarkBadge,
                     shape = CircleShape,
                     modifier = Modifier.weight(1f),
                 ) {
@@ -414,7 +415,7 @@ fun AuthSegmentedToggle(
                             text = label,
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) Color.White else BentoTextSecondary,
+                            color = if (selected) BentoTextPrimary else BentoTextSecondary,
                         )
                     }
                 }

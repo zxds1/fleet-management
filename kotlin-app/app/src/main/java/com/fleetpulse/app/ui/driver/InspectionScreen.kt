@@ -76,7 +76,7 @@ fun InspectionScreen(repository: FleetRepository, nav: NavController, locale: St
                             modifier = Modifier.weight(1f).testTag("dvir_${it.id}_${r.name}"),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (results[it.id] == r) BentoPurplePrimary else BentoCardBg,
-                                contentColor = if (results[it.id] == r) androidx.compose.ui.graphics.Color.White else BentoTextPrimary,
+                                contentColor = if (results[it.id] == r) BentoTextPrimary else BentoTextPrimary,
                             ),
                             contentPadding = PaddingValues(4.dp, 8.dp),
                         ) { Text(r.name.replace("_", " "), style = MaterialTheme.typography.bodySmall) }

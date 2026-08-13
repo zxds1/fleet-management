@@ -12,6 +12,7 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -29,6 +30,26 @@ export function createTrailerRouter(deps: TrailerRouterDeps): Router {
   const { pool, idempotency: idem, releaseClaim, infra } = deps;
   const writer = (req: Request, res: Response, fn: Parameters<typeof executeWrite>[3]) =>
     executeWrite(req, res, { pool, idempotency: idem, releaseClaim }, fn);
+
+  // ── Active trailer↔vehicle assignments (list, tenant-scoped) ────────────────────────────
+  router.get(
+    "/trailer/assignments",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("trailer:read")),
+    asyncHandler((req, res) => {
+      const principal = (req as { principal?: Principal }).principal as Principal;
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
+        const svc = makeServices(client, infra);
+        const result = await svc.trailer.listActiveAssignments(principal.tenantId);
+        if (!result.ok) {
+          const status = result.error.httpStatus ?? 422;
+          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          return;
+        }
+        res.status(200).json({ data: result.value });
+      });
+    }),
+  );
 
   // ── Hook / drop a trailer (1.3) ──────────────────────────────────────────────────────────
   router.post(

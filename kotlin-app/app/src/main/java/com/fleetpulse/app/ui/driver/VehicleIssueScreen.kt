@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.AnomalySeverity
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.SectionCard
 import com.fleetpulse.app.ui.theme.*
@@ -20,8 +21,8 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
     val vehicles by repository.vehicles.collectAsState()
     val shift by repository.activeShift.collectAsState()
     val scope = rememberCoroutineScope()
-    val categories = listOf("MECHANICAL", "ELECTRICAL", "TIRE", "BRAKES", "BODY", "OTHER")
-    val severities = listOf("INFO", "WARNING", "CRITICAL")
+    val categories = AppConstants.VEHICLE_ISSUE_CATEGORIES
+    val severities = AppConstants.VEHICLE_ISSUE_SEVERITIES
 
     var category by remember { mutableStateOf(categories[0]) }
     var severity by remember { mutableStateOf("WARNING") }
@@ -62,7 +63,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
                     Button(
                         onClick = { category = c },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (category == c) BentoPurplePrimary else BentoCardBg, contentColor = if (category == c) androidx.compose.ui.graphics.Color.White else BentoTextPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (category == c) BentoPurplePrimary else BentoCardBg, contentColor = if (category == c) BentoTextPrimary else BentoTextPrimary),
                         contentPadding = PaddingValues(4.dp, 8.dp),
                     ) { Text(c, style = MaterialTheme.typography.bodySmall) }
                 }
@@ -75,7 +76,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
                     Button(
                         onClick = { severity = s },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (severity == s) BentoPurplePrimary else BentoCardBg, contentColor = if (severity == s) androidx.compose.ui.graphics.Color.White else BentoTextPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (severity == s) BentoPurplePrimary else BentoCardBg, contentColor = if (severity == s) BentoTextPrimary else BentoTextPrimary),
                         contentPadding = PaddingValues(4.dp, 8.dp),
                     ) { Text(s, style = MaterialTheme.typography.bodySmall) }
                 }

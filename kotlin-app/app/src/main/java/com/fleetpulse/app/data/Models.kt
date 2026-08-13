@@ -341,12 +341,10 @@ data class GeofenceZone(
 )
 
 data class TrailerAssignment(
-    val id: String,
-    val trailerId: String?,
-    val vehicleId: String,
-    val status: String = "ACTIVE", // ACTIVE / COMPLETED
-    val hookedAt: Long? = null,
-    val droppedAt: Long? = null,
+    val trailerId: String,
+    val vehicleId: String? = null,
+    val vehiclePlate: String? = null,
+    val hookedAt: String? = null,
 )
 
 data class VehicleIssue(

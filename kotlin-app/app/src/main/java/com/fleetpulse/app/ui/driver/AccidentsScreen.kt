@@ -77,7 +77,7 @@ fun AccidentsScreen(repository: FleetRepository, nav: NavController, locale: Str
                 },
                 enabled = !submitting,
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("mayday_btn"),
-                colors = ButtonDefaults.buttonColors(containerColor = StatusDanger, contentColor = androidx.compose.ui.graphics.Color.White),
+                colors = ButtonDefaults.buttonColors(containerColor = StatusDanger, contentColor = BentoTextPrimary),
             ) { Text("TRIGGER MAYDAY") }
         }
 

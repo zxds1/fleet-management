@@ -22,8 +22,26 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+    // Production/release builds MUST supply API_BASE_URL via -PAPI_BASE_URL=, the
+    // API_BASE_URL env var, or local.properties. Precedence (highest first):
+    // gradle property > env var > local.properties > emulator fallback.
+    val localPropsUrl: String? = run {
+      val props = java.util.Properties()
+      val file = File(rootDir, "local.properties")
+      if (file.exists()) {
+        try {
+          file.inputStream().use { props.load(it) }
+          props.getProperty("API_BASE_URL")
+        } catch (e: Exception) {
+          null
+        }
+      } else {
+        null
+      }
+    }
     val apiBaseUrl: String = (project.findProperty("API_BASE_URL") as? String)
       ?: System.getenv("API_BASE_URL")
+      ?: localPropsUrl
       ?: "http://10.0.2.2:8787/api/v1"
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
   }

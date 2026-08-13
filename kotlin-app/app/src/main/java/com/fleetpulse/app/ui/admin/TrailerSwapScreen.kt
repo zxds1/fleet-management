@@ -11,6 +11,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.repo.FleetRepository
+import com.fleetpulse.app.ui.admin.AdminRowCard
 import com.fleetpulse.app.ui.components.FleetButton
 import com.fleetpulse.app.ui.theme.*
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TrailerSwapScreen(repository: FleetRepository, locale: String, nav: NavController) {
     val vehicles by repository.vehicleMaster.collectAsState()
+    val trailerAssignments by repository.trailerAssignments.collectAsState()
     val scope = rememberCoroutineScope()
     var trailerId by remember { mutableStateOf("") }
     var vehicleId by remember { mutableStateOf(vehicles.firstOrNull()?.id ?: "") }
@@ -26,7 +28,10 @@ fun TrailerSwapScreen(repository: FleetRepository, locale: String, nav: NavContr
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { repository.loadVehicleMaster() }
+    LaunchedEffect(Unit) {
+        repository.loadVehicleMaster()
+        repository.loadTrailerAssignments()
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Trailer Swap", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
@@ -56,5 +61,21 @@ fun TrailerSwapScreen(repository: FleetRepository, locale: String, nav: NavContr
             enabled = trailerId.isNotBlank() && !busy,
             modifier = Modifier.testTag("trailer_swap_confirm"),
         )
+
+        Spacer(Modifier.height(24.dp))
+        Text("Current Trailer Assignments", style = MaterialTheme.typography.titleMedium, color = BentoTextPrimary)
+        if (trailerAssignments.isEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text("No active trailer assignments", style = MaterialTheme.typography.bodySmall, color = BentoTextSecondary)
+        } else {
+            trailerAssignments.forEach { a ->
+                AdminRowCard(
+                    title = "Trailer ${a.trailerId}",
+                    subtitle = "Vehicle: ${a.vehiclePlate ?: a.vehicleId ?: "—"}",
+                    trailing = a.hookedAt?.let { "Hooked $it" },
+                    modifier = Modifier.testTag("trailer_assignment_${a.trailerId}"),
+                )
+            }
+        }
     }
 }

@@ -5,44 +5,49 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.repo.FleetRepository
+import com.fleetpulse.app.data.VehicleDisplayState
 import com.fleetpulse.app.ui.components.EmptyState
 import com.fleetpulse.app.ui.theme.*
 
 @Composable
-private fun Placeholder(route: String, repository: FleetRepository, locale: String, nav: NavController, icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, note: String) {
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f)) { EmptyState(icon = icon, title = title, message = note) }
-    }
-}
-
-@Composable
-fun GeofenceZonesScreen(repository: FleetRepository, locale: String, nav: NavController) {
-    Placeholder("geofence", repository, locale, nav, Icons.Filled.Map, "Geofence Zones", "Geofence definitions are managed in the backend. No local data yet.")
-}
-
-@Composable
-fun DispatchWaypointsScreen(repository: FleetRepository, locale: String, nav: NavController) {
-    Placeholder("dispatch", repository, locale, nav, Icons.Filled.Route, "Dispatch Waypoints", "Dispatch waypoints come from the backend dispatch service.")
-}
-
-@Composable
 fun AnalyticsReportScreen(repository: FleetRepository, locale: String, nav: NavController) {
     val vehicles by repository.vehicles.collectAsState()
-    val purchases by repository.refuelPurchases.collectAsState()
     val accidents by repository.accidentReports.collectAsState()
+    val purchases by repository.refuelPurchases.collectAsState()
+    val dash by repository.adminDashboard.collectAsState()
+
+    LaunchedEffect(Unit) { repository.loadAdminDashboard() }
+
+    val active = dash?.activeFleet ?: vehicles.count { it.displayState == VehicleDisplayState.MOVING || it.displayState == VehicleDisplayState.IDLING }
+    val quarantined = vehicles.count { it.displayState == VehicleDisplayState.QUARANTINED }
+    val openAccidents = dash?.openAccidents ?: accidents.count { it.status.name != "RESOLVED" && it.status.name != "CLOSED" }
+    val pendingFuel = purchases.count { it.approvalStatus.name == "PENDING" }
+    val expiringDocs = dash?.expiringDocs ?: 0
+    val fuelSpend30d = dash?.fuelSpend30d ?: 0.0
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Analytics", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            KpiCard("Vehicles", vehicles.size.toString(), Icons.Filled.DirectionsCar, StatusSafe, Modifier.weight(1f))
-            KpiCard("Fuel spend", purchases.sumOf { it.amountSpent ?: 0.0 }.let { "%.0f".format(it) }, Icons.Filled.LocalGasStation, BentoPurplePrimary, Modifier.weight(1f))
+            KpiCard("Active", active.toString(), Icons.Filled.DirectionsCar, StatusSafe, Modifier.weight(1f))
+            KpiCard("Quarantined", quarantined.toString(), Icons.Filled.Lock, StatusDanger, Modifier.weight(1f))
         }
-        KpiCard("Accidents", accidents.size.toString(), Icons.Filled.Warning, StatusWarning, Modifier.fillMaxWidth())
-        Text("Detailed analytics reports are served by the backend.", style = MaterialTheme.typography.bodySmall, color = BentoTextSecondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            KpiCard("Open Accidents", openAccidents.toString(), Icons.Filled.Warning, StatusWarning, Modifier.weight(1f))
+            KpiCard("Pending Fuel", pendingFuel.toString(), Icons.Filled.LocalGasStation, BentoPurplePrimary, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            KpiCard("Expiring Docs", expiringDocs.toString(), Icons.Filled.Description, StatusWarning, Modifier.weight(1f))
+            KpiCard("Fuel Spend (30d)", "Ksh ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoPurplePrimary, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            KpiCard("Vehicles", vehicles.size.toString(), Icons.Filled.DirectionsCar, StatusInfo, Modifier.weight(1f))
+            KpiCard("Accidents", accidents.size.toString(), Icons.Filled.BugReport, StatusInfo, Modifier.weight(1f))
+        }
+        KpiCard("Refuel Purchases", purchases.size.toString(), Icons.Filled.LocalGasStation, StatusSafe, Modifier.fillMaxWidth())
     }
 }
 

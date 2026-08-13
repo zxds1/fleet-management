@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.ActiveShell
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.theme.*
 import kotlinx.coroutines.launch
@@ -43,7 +44,7 @@ fun AdminProfileScreen(
 
         Text("Locale", style = MaterialTheme.typography.titleMedium, color = BentoTextPrimary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("en" to "English", "sw" to "Kiswahili").forEach { (code, label) ->
+            AppConstants.APP_LOCALES.forEach { (code, label) ->
                 val selected = lang == code
                 Button(onClick = { lang = code; repository.setLanguage(code); scope.launch { repository.updateOwnProfile(locale = code) }.invokeOnCompletion { status = "Locale updated." } },
                     colors = ButtonDefaults.buttonColors(containerColor = if (selected) BentoPurplePrimary else BentoCardBg),

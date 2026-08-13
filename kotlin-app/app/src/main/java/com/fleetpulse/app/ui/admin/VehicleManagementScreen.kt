@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.remote.VehicleCreateRequest
 import com.fleetpulse.app.data.remote.VehicleUpdateRequest
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.EmptyState
 import com.fleetpulse.app.ui.components.FleetButton
@@ -83,7 +84,7 @@ private fun CreateVehicleDialog(
     var year by remember { mutableStateOf("") }
     var vehClass by remember { mutableStateOf("RIGID") }
     var classExpanded by remember { mutableStateOf(false) }
-    val classes = listOf("TRACTOR", "RIGID", "VAN", "PICKUP")
+    val classes = AppConstants.VEHICLE_CLASSES
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 

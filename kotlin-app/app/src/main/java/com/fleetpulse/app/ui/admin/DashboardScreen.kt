@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.data.VehicleDisplayState
+import com.fleetpulse.app.data.AppConstants
 import com.fleetpulse.app.ui.theme.*
 
 @Composable
@@ -46,7 +47,7 @@ fun DashboardScreen(repository: FleetRepository, locale: String, nav: NavControl
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Expiring Docs", expiringDocs.toString(), Icons.Filled.Description, StatusWarning, Modifier.weight(1f), "kpi_docs")
-            KpiCard("Fuel Spend (30d)", "Ksh ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoPurplePrimary, Modifier.weight(1f), "kpi_fuel_spend")
+            KpiCard("Fuel Spend (30d)", "${AppConstants.CURRENCY_SYMBOL} ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoPurplePrimary, Modifier.weight(1f), "kpi_fuel_spend")
         }
         KpiCard("Anomalies", openAnomalies.toString(), Icons.Filled.BugReport, StatusInfo, Modifier.fillMaxWidth(), "kpi_anomalies")
 

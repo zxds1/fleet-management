@@ -30,7 +30,7 @@ fun VehicleMasterDetailScreen(repository: FleetRepository, locale: String, vehic
     var notes by remember { mutableStateOf(vehicle?.notes ?: "") }
     var status by remember { mutableStateOf(vehicle?.status ?: "AVAILABLE") }
     var statusExpanded by remember { mutableStateOf(false) }
-    val statuses = listOf("AVAILABLE", "IN_USE", "MAINTENANCE", "QUARANTINED", "RETIRED", "EXTERNAL")
+    val statuses = AppConstants.VEHICLE_STATUSES
     val assignedDriverIds = remember { mutableStateListOf<String>() }
 
     LaunchedEffect(vehicleId) {

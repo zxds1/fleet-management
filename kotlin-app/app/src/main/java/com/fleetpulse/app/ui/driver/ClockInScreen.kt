@@ -65,8 +65,6 @@ fun ClockInScreen(repository: FleetRepository, nav: NavController, locale: Strin
                         submitting = true
                         scope.launch {
                             val assignmentId = repository.activeShift.value?.assignmentId ?: repository.fetchMyAssignment()
-                            // TODO: Clock-In requires a backend assignment_id. If none is available
-                            // (no active shift and /shifts/me/assignment returned nothing), block.
                             if (assignmentId == null) {
                                 localError = "No assignment available — contact dispatch"
                                 submitting = false

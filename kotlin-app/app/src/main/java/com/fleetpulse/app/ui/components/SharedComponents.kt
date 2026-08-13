@@ -124,7 +124,7 @@ fun FleetButton(
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = if (isPrimary) BentoPurplePrimary else BentoCardBg,
-            contentColor = if (isPrimary) Color.White else BentoTextPrimary,
+            contentColor = if (isPrimary) BentoTextPrimary else BentoTextPrimary,
         ),
         modifier = modifier.fillMaxWidth().height(52.dp),
     ) { Text(text, fontWeight = FontWeight.Bold) }

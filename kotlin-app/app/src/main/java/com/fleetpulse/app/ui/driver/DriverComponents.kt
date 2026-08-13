@@ -93,7 +93,7 @@ fun GaugeSelector(selected: FuelGaugeLevel, onSelect: (FuelGaugeLevel) -> Unit, 
                 modifier = Modifier.weight(1f).testTag("$testTagPrefix-${g.name}"),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (sel) BentoPurplePrimary else BentoCardBg,
-                    contentColor = if (sel) Color.White else BentoTextPrimary,
+                    contentColor = if (sel) BentoTextPrimary else BentoTextPrimary,
                 ),
                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
             ) { Text(g.name.replace("_", " "), style = MaterialTheme.typography.bodySmall) }

@@ -302,6 +302,7 @@ interface VehicleApi {
 
 interface TrailerApi {
     @POST("/trailer/swap") suspend fun swap(@Body body: TrailerSwapRequest): Response<TrailerSwapResponse>
+    @GET("/trailer/assignments") suspend fun assignments(): Response<Map<String, Any?>>
 }
 
 // ---- Maintenance ----

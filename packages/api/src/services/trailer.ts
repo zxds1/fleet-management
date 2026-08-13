@@ -28,6 +28,14 @@ export interface TrailerSwapOutcome {
   createdTrailerId: string | null;
 }
 
+/** A single ACTIVE trailer↔vehicle hook, shaped for the admin list endpoint. */
+export interface TrailerAssignmentListItem {
+  trailer_id: string;
+  vehicle_id: string;
+  vehicle_plate: string | null;
+  hooked_at: string | null;
+}
+
 export class TrailerService {
   constructor(
     private readonly assignments: TrailerAssignmentRepository,
@@ -137,5 +145,34 @@ export class TrailerService {
     });
 
     return ok({ trailerAssignmentId: assignmentId, droppedTrailerId, createdTrailerId });
+  }
+
+  /**
+   * Tenant-scoped list of ACTIVE trailer↔vehicle hooks (the hook/drop ledger, app.trailer_assignments).
+   * "Active" = not yet dropped (unassigned_at IS NULL) and carrying a trailer. The vehicle plate is
+   * joined in (mirrors the onboarding dispatch query). Tenant isolation is enforced by RLS on the
+   * read client; trailer_id/trailer assignments carry no denormalised tenant column.
+   */
+  async listActiveAssignments(tenantId: string): Promise<Result<TrailerAssignmentListItem[]>> {
+    const res = await this.assignments.dbClient.query<TrailerAssignmentListItem & Record<string, unknown>>(
+      `SELECT ta.trailer_id                                   AS trailer_id,
+              ta.vehicle_id                                   AS vehicle_id,
+              v.license_plate                                 AS vehicle_plate,
+              ta.assigned_at::text                            AS hooked_at
+         FROM app.trailer_assignments ta
+         LEFT JOIN app.vehicles v ON v.id = ta.vehicle_id
+        WHERE ta.unassigned_at IS NULL
+          AND ta.trailer_id IS NOT NULL
+        ORDER BY ta.assigned_at DESC`,
+      [],
+    );
+    return ok(
+      res.rows.map((r) => ({
+        trailer_id: r.trailer_id,
+        vehicle_id: r.vehicle_id,
+        vehicle_plate: r.vehicle_plate,
+        hooked_at: r.hooked_at,
+      })),
+    );
   }
 }
