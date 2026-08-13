@@ -127,6 +127,30 @@ export class InspectionRepository extends BaseRepository<InspectionRow> {
    * projected as NULL to keep the read model stable for the client contract.
    * `driverId` narrows the lookup to that driver's own submission (C6.2).
    */
+  /**
+   * Tenant-wide DVIR submissions for the admin review inbox. Keyset paginated on (performed_at, id).
+   * RLS already fences every row to the caller's tenant; this is the unfiltered company view that an
+   * ADMIN/FLEET_MANAGER with inspection:read may see.
+   */
+  async listAll(opts: { limit: number; cursorSort?: string; cursorId?: string }): Promise<DvirSummaryRow[]> {
+    const params: unknown[] = [];
+    let keyset = "";
+    if (opts.cursorSort && opts.cursorId) {
+      params.push(opts.cursorSort, opts.cursorId);
+      keyset = `AND (i.performed_at, i.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    }
+    params.push(opts.limit);
+    const res = await this.client.query<DvirSummaryRow>(
+      `SELECT ${DVIR_DERIVED_SQL}
+         FROM app.inspections i ${DVIR_JOINS_SQL}
+        WHERE i.deleted_at IS NULL ${keyset}
+        ORDER BY i.performed_at DESC, i.id DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+    return res.rows;
+  }
+
   async getDetailById(inspectionId: string, driverId?: string): Promise<DvirDetailRow | null> {
     const params: unknown[] = [inspectionId];
     let scope = "";

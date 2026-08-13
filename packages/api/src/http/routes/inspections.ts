@@ -128,5 +128,26 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     ),
   );
 
+  // ── Tenant-wide DVIR list (admin review inbox) ───────────────────────────────────────────────
+  // Read-only, tenant-scoped via RLS; requires inspection:read like every other DVIR read. The
+  // cursor envelope matches listMine so the mobile client can reuse the same parser.
+  router.get(
+    "/",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("inspection:read")),
+    asyncHandler((req, res) =>
+      withClient(pool, async (client) => {
+        const query = parseQuery(CursorQuerySchema, req);
+        const svc = makeServices(client, infra);
+        const result = await svc.inspectionQuery.listAll({ limit: query.limit, cursor: query.cursor });
+        if (!result.ok) {
+          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          return;
+        }
+        res.status(200).json(result.value);
+      }),
+    ),
+  );
+
   return router;
 }

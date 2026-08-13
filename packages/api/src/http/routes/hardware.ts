@@ -213,6 +213,84 @@ export function createHardwareRouter(deps: HardwareRouterDeps): Router {
     ),
   );
 
+  // ── Unpair a tracker from a vehicle ─────────────────────────────────────────────────────────
+  // Clears the device binding (IMEI / brand / SIM / paired-at) on the vehicle. The device itself
+  // is unaware of the change and will keep reporting; the binding is purely an asset record, so
+  // unpairing is a no-op against the hardware and an idempotent clear against our row. A vehicle
+  // with no tracker returns success (already unpaired) rather than 404.
+  router.delete(
+    "/:vehicleId/tracker",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("asset:update")),
+    idempotency({ idempotency: idem }),
+    asyncHandler((req, res) =>
+      writer(req, res, async (tx, ctx) => {
+        const principal = ctx.principal as Principal;
+        const vehicleId = String(req.params.vehicleId);
+
+        const target = await tx.client.query<{ license_plate: string; tracker_imei: string | null }>(
+          `SELECT license_plate, tracker_imei FROM app.vehicles
+             WHERE id = $1 AND deleted_at IS NULL
+             LIMIT 1`,
+          [vehicleId],
+        );
+        const vehicle = target.rows[0];
+        if (!vehicle) return new NotFound("Vehicle not found") as never;
+
+        // Nothing bound: report success so a repeated unpair (e.g. after a failed earlier call)
+        // is safe and the client can always converge to an unpaired state.
+        if (!vehicle.tracker_imei) {
+          return {
+            status: 200,
+            body: {
+              success: true,
+              message: `Vehicle ${vehicle.license_plate} has no tracker paired.`,
+              vehicleId,
+              trackerImei: null,
+            },
+          } as never;
+        }
+
+        await tx.client.query(
+          `UPDATE app.vehicles
+               SET tracker_imei       = NULL,
+                   tracker_brand      = NULL,
+                   tracker_sim_number = NULL,
+                   tracker_paired_at  = NULL,
+                   updated_at         = now()
+             WHERE id = $1 AND deleted_at IS NULL`,
+          [vehicleId],
+        );
+
+        tx.audit({
+          action: "UPDATE",
+          entity_table: "app.vehicles",
+          entity_id: vehicleId,
+          actor_user_id: principal.userId,
+          actor_email: principal.email,
+          actor_role_codes: principal.roles,
+          changed_fields: ["tracker_imei", "tracker_brand", "tracker_sim_number", "tracker_paired_at"],
+          old_value: { tracker_imei: vehicle.tracker_imei },
+          new_value: { tracker_imei: null },
+          reason: "tracker_unpairing",
+          request_id: req.requestId,
+          endpoint: req.path,
+          http_method: req.method,
+        });
+
+        return {
+          status: 200,
+          body: {
+            success: true,
+            message: `Tracker ${vehicle.tracker_imei} unpaired from vehicle ${vehicle.license_plate}.`,
+            vehicleId,
+            trackerImei: vehicle.tracker_imei,
+          },
+        } as never;
+      }),
+    ),
+  );
+
   // ── Provisioning inbox: has each paired tracker phoned home? ────────────────────────────────
   router.get(
     "/pending",

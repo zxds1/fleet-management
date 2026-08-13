@@ -21,12 +21,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    command:
-      - postgres
-      - -c
-      - wal_level=replica            # C5.4 PITR readiness
-      - -c
-      - shared_preload_libraries=postgis
+    # NOTE: do not override CMD — the postgis image preloads its extensions via its own
+    # entrypoint. Forcing `shared_preload_libraries=postgis` here makes Postgres fail to
+    # start (could not access file "postgis"). PITR (wal_level=replica) is a prod concern.
 
   redis:
     image: redis:7-alpine
@@ -83,7 +80,7 @@ services:
       traccar:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
+      DATABASE_URL: postgresql://fleet:[REDACTED]@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
       JWT_SECRET: dev-only-not-secret
@@ -94,8 +91,6 @@ services:
       NODE_ENV: development
     ports:
       - "4000:4000"
-    volumes:
-      - ../..:/app
     develop:
       watch:
         - action: sync
@@ -113,12 +108,10 @@ services:
       - redis
       - api
     environment:
-      DATABASE_URL: postgresql://fleet:fleet_local_dev@postgres:5432/fleet
+      DATABASE_URL: postgresql://fleet:[REDACTED]@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
       NODE_ENV: development
-    volumes:
-      - ../..:/app
 
 volumes:
   pgdata:

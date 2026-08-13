@@ -43,6 +43,15 @@ export const HardwarePairResultSchema = z.object({
 });
 export type HardwarePairResult = z.infer<typeof HardwarePairResultSchema>;
 
+/** `DELETE /admin/hardware/:vehicleId/tracker` 2xx body — confirms the binding was cleared. */
+export const HardwareUnpairResultSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  vehicleId: z.string().uuid(),
+  trackerImei: z.string().nullable(),
+});
+export type HardwareUnpairResult = z.infer<typeof HardwareUnpairResultSchema>;
+
 /** One row of `GET /admin/hardware/pending` — the tracker status board. */
 export const HardwareTrackerStatusSchema = z.object({
   imei: z.string(),
