@@ -74,7 +74,7 @@ fun VehicleMasterDetailScreen(repository: FleetRepository, locale: String, vehic
                         label = { Text(d.name) },
                         modifier = Modifier.testTag("driver_chip_${d.id}"),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = BentoPurpleContainer,
+                            selectedContainerColor = BentoBluePrimaryContainer,
                             selectedLabelColor = BentoTextPrimary,
                             containerColor = BentoCardBg,
                             labelColor = BentoTextSecondary,
@@ -101,7 +101,7 @@ fun VehicleMasterDetailScreen(repository: FleetRepository, locale: String, vehic
                     val res = repository.updateVehicle(vehicle.id, VehicleUpdateRequest(status = status, notes = notes.ifBlank { null }))
                     res.onSuccess { statusField = "Saved." }.onFailure { e -> statusField = errorCopy((e as? com.fleetpulse.app.data.remote.AppException)?.errorCode ?: "UNKNOWN", locale) }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.testTag("vm_save")) {
+            }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.testTag("vm_save")) {
                 Icon(Icons.Filled.Save, null); Spacer(Modifier.width(6.dp)); Text("Save")
             }
         }

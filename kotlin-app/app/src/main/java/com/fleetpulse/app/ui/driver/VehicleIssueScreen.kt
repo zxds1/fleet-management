@@ -39,7 +39,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
             Spacer(Modifier.height(16.dp))
             Text("Issue reported", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
             Spacer(Modifier.height(16.dp))
-            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) { Text(t(locale, "common.back")) }
+            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) { Text(t(locale, "common.back")) }
         }
         return
     }
@@ -63,7 +63,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
                     Button(
                         onClick = { category = c },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (category == c) BentoPurplePrimary else BentoCardBg, contentColor = if (category == c) BentoTextPrimary else BentoTextPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (category == c) BentoBluePrimary else BentoCardBg, contentColor = if (category == c) BentoTextPrimary else BentoTextPrimary),
                         contentPadding = PaddingValues(4.dp, 8.dp),
                     ) { Text(c, style = MaterialTheme.typography.bodySmall) }
                 }
@@ -76,7 +76,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
                     Button(
                         onClick = { severity = s },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (severity == s) BentoPurplePrimary else BentoCardBg, contentColor = if (severity == s) BentoTextPrimary else BentoTextPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (severity == s) BentoBluePrimary else BentoCardBg, contentColor = if (severity == s) BentoTextPrimary else BentoTextPrimary),
                         contentPadding = PaddingValues(4.dp, 8.dp),
                     ) { Text(s, style = MaterialTheme.typography.bodySmall) }
                 }
@@ -99,7 +99,7 @@ fun VehicleIssueScreen(repository: FleetRepository, nav: NavController, locale: 
             },
             enabled = !submitting,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("issue_submit"),
-            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
         ) { Text("Submit report") }
     }
 }

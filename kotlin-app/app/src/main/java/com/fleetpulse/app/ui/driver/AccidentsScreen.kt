@@ -90,6 +90,6 @@ fun AccidentsScreen(repository: FleetRepository, nav: NavController, locale: Str
             Text(localError!!, color = StatusDanger)
         }
         Spacer(Modifier.height(12.dp))
-        TextButton(onClick = { nav.navigate("my_accidents") }) { Text("View my accidents", color = BentoPurplePrimary) }
+        TextButton(onClick = { nav.navigate("my_accidents") }) { Text("View my accidents", color = BentoBluePrimary) }
     }
 }

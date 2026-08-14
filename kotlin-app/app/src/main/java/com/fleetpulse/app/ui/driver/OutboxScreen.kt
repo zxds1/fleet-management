@@ -71,7 +71,7 @@ fun OutboxScreen(repository: FleetRepository, nav: NavController, locale: String
                         Button(
                             onClick = { repository.retryQueueItem(item.id) },
                             modifier = Modifier.weight(1f).height(44.dp).testTag("outbox_retry"),
-                            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+                            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
                         ) { Text(t(locale, "common.retry")) }
                         Button(
                             onClick = { repository.discardQueueItem(item.id) },

@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -7,6 +8,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -26,7 +28,7 @@ android {
     // API_BASE_URL env var, or local.properties. Precedence (highest first):
     // gradle property > env var > local.properties > emulator fallback.
     val localPropsUrl: String? = run {
-      val props = java.util.Properties()
+      val props = Properties()
       val file = File(rootDir, "local.properties")
       if (file.exists()) {
         try {
@@ -113,7 +115,10 @@ dependencies {
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
+  implementation(libs.androidx.compose.foundation)
+  implementation(libs.androidx.compose.foundation.layout)
   implementation(libs.androidx.core.ktx)
+
   implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -134,7 +139,10 @@ dependencies {
   implementation(libs.okhttp.okio)
   implementation(libs.retrofit)
   implementation(libs.retrofit.converter.moshi)
+  implementation(libs.retrofit.kotlinx.serialization)
+  implementation(libs.kotlinx.serialization.json)
   implementation(libs.play.services.location)
+
   implementation(libs.maps.compose)
   implementation(libs.play.services.maps)
   implementation(libs.socket.io.client)

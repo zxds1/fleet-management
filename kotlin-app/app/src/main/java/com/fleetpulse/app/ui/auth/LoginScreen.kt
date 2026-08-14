@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.FleetButton
 import com.fleetpulse.app.ui.components.SectionCard
-import com.fleetpulse.app.ui.theme.BentoPurplePrimary
+import com.fleetpulse.app.ui.theme.BentoBluePrimary
 import com.fleetpulse.app.ui.theme.BentoTextSecondary
 import com.fleetpulse.app.ui.theme.StatusWarning
 import kotlinx.coroutines.launch
@@ -146,7 +146,7 @@ fun LoginScreen(
                 onClick = onNavigateToForgot,
                 enabled = !submitting,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) { Text(AuthStrings.forgotPassword(locale), color = BentoPurplePrimary) }
+            ) { Text(AuthStrings.forgotPassword(locale), color = BentoBluePrimary) }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -154,6 +154,6 @@ fun LoginScreen(
             onClick = onNavigateToSignup,
             enabled = !submitting,
             modifier = Modifier.testTag("go_signup_btn"),
-        ) { Text(AuthStrings.createCompany(locale), color = BentoPurplePrimary) }
+        ) { Text(AuthStrings.createCompany(locale), color = BentoBluePrimary) }
     }
 }

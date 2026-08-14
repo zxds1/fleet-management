@@ -39,7 +39,7 @@ fun DriverHomeScreen(repository: FleetRepository, nav: NavController, locale: St
             Button(
                 onClick = { if (shift == null) nav.navigate("clock_in") else nav.navigate("clock_out") },
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("nav_driver_home"),
-                colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+                colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
             ) {
                 Icon(if (shift == null) Icons.Filled.Login else Icons.Filled.Logout, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -119,13 +119,13 @@ private data class QuickAction(val key: String, val icon: ImageVector, val label
 private fun QuickActionTile(qa: QuickAction) {
     Surface(
         onClick = qa.onClick,
-        color = if (qa.danger) BentoPurpleContainer else BentoCardBg,
+        color = if (qa.danger) BentoBluePrimaryContainer else BentoCardBg,
         shape = MaterialTheme.shapes.medium,
         border = if (qa.danger) null else androidx.compose.foundation.BorderStroke(1.dp, BentoBorder),
         modifier = Modifier.fillMaxWidth().testTag("qa_${qa.key}").height(96.dp),
     ) {
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(qa.icon, contentDescription = null, tint = if (qa.danger) StatusDanger else BentoPurplePrimary)
+            Icon(qa.icon, contentDescription = null, tint = if (qa.danger) StatusDanger else BentoBluePrimary)
             Spacer(Modifier.height(6.dp))
             Text(qa.label, style = MaterialTheme.typography.bodyMedium, color = BentoTextPrimary)
         }

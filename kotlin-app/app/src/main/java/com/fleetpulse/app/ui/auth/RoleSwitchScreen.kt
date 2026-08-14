@@ -87,10 +87,10 @@ private fun ShellOptionCard(
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) BentoPurpleContainer else BentoCardBg,
+            containerColor = if (selected) BentoBluePrimaryContainer else BentoCardBg,
         ),
         shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, if (selected) BentoPurplePrimary else BentoBorder),
+        border = BorderStroke(1.dp, if (selected) BentoBluePrimary else BentoBorder),
         modifier = Modifier
             .fillMaxWidth()
             .selectable(selected = selected, onClick = onSelect)
@@ -101,7 +101,7 @@ private fun ShellOptionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Icon(icon, contentDescription = null, tint = BentoPurplePrimary, modifier = Modifier.size(28.dp))
+            Icon(icon, contentDescription = null, tint = BentoBluePrimary, modifier = Modifier.size(28.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = BentoTextPrimary)
                 Spacer(Modifier.height(2.dp))
@@ -110,7 +110,7 @@ private fun ShellOptionCard(
             RadioButton(
                 selected = selected,
                 onClick = onSelect,
-                colors = RadioButtonDefaults.colors(selectedColor = BentoPurplePrimary, unselectedColor = BentoTextSecondary),
+                colors = RadioButtonDefaults.colors(selectedColor = BentoBluePrimary, unselectedColor = BentoTextSecondary),
             )
         }
     }

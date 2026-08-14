@@ -43,7 +43,7 @@ fun OutboxScreen(repository: FleetRepository, locale: String, nav: NavController
                     if (item.status == QueueStatus.FAILED_REVIEW || item.status == QueueStatus.PENDING) {
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { repository.retryQueueItem(item.id) }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.weight(1f)) { Text("Retry") }
+                            Button(onClick = { repository.retryQueueItem(item.id) }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.weight(1f)) { Text("Retry") }
                             Button(onClick = { repository.discardQueueItem(item.id) }, colors = ButtonDefaults.buttonColors(containerColor = StatusDanger), modifier = Modifier.weight(1f)) { Text("Discard") }
                         }
                     }

@@ -68,7 +68,7 @@ fun OfflinePinScreen(
     ) {
         SectionCard {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Default.Lock, contentDescription = null, tint = BentoPurplePrimary, modifier = Modifier.size(22.dp))
+                Icon(Icons.Default.Lock, contentDescription = null, tint = BentoBluePrimary, modifier = Modifier.size(22.dp))
                 Text(
                     text = AuthStrings.pinLabel(locale),
                     style = MaterialTheme.typography.titleSmall,

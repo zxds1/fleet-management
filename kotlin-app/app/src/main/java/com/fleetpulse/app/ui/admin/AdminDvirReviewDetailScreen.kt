@@ -20,22 +20,49 @@ fun AdminDvirReviewDetailScreen(repository: FleetRepository, locale: String, id:
     val principal by repository.principal.collectAsState()
     val scope = rememberCoroutineScope()
     val report = reports.firstOrNull { it.id == id }
+    var detail by remember { mutableStateOf<Map<String, Any?>?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     var flagReason by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<String?>(null) }
     val canReview = principal?.hasPermission(Permission.INSPECTION_REVIEW) ?: false
 
-    if (report == null) {
+    LaunchedEffect(id, report) {
+        if (report == null && detail == null && !loading) {
+            loading = true
+            repository.fetchInspectionDetail(id)
+                .onSuccess { detail = it }
+                .onFailure { error = it.localizedMessage ?: "Failed to load inspection" }
+            loading = false
+        }
+    }
+
+    val resolvedReport = report ?: (detail?.let { repository.mapInspectionDetail(it) })
+
+    if (resolvedReport == null) {
+        if (loading) {
+            Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = BentoBluePrimary)
+            }
+            return
+        }
+        error?.let {
+            Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text(it, color = StatusDanger) }
+            return
+        }
         Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) { Text("Inspection not found", color = BentoTextSecondary) }
         return
     }
 
+    val r = resolvedReport
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Inspection ${report.id.take(8)}", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
-        StatusChip(text = report.overallStatus, color = if (report.defectCount > 0) StatusWarning else StatusSafe)
-        AdminRowCard(title = "Vehicle", subtitle = report.vehicleId ?: "—")
-        AdminRowCard(title = "Driver", subtitle = report.driverName ?: "—")
-        AdminRowCard(title = "Defects", subtitle = "${report.defectCount}")
-        AdminRowCard(title = "Signature", subtitle = report.signatureName.ifEmpty { "—" })
+        Text("Inspection ${r.id.take(8)}", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
+        StatusChip(text = r.overallStatus, color = if (r.defectCount > 0) StatusWarning else StatusSafe)
+        AdminRowCard(title = "Vehicle", subtitle = r.vehicleId ?: "—")
+        AdminRowCard(title = "Driver", subtitle = r.driverName ?: "—")
+        AdminRowCard(title = "Defects", subtitle = "${r.defectCount}")
+        AdminRowCard(title = "Signature", subtitle = r.signatureName.ifEmpty { "—" })
 
         result?.let { Text(it, color = StatusSafe, style = MaterialTheme.typography.bodySmall) }
 

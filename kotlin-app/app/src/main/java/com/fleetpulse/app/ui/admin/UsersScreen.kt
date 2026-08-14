@@ -41,7 +41,7 @@ fun UsersScreen(repository: FleetRepository, locale: String, nav: NavController)
                         StatusChip(text = u.status, color = color)
                     }
                     Text(u.email, style = MaterialTheme.typography.bodySmall, color = BentoTextSecondary)
-                    if (u.roles.isNotEmpty()) Text(u.roles.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = BentoPurplePrimary)
+                    if (u.roles.isNotEmpty()) Text(u.roles.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = BentoBluePrimary)
                 }
             }
         }

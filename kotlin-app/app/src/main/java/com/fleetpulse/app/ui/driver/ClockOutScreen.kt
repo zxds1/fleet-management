@@ -89,7 +89,7 @@ fun ClockOutScreen(repository: FleetRepository, nav: NavController, locale: Stri
             },
             enabled = !submitting,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("clock_out_submit"),
-            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
         ) {
             Text(if (submitting) t(locale, "common.pending") else t(locale, "home.clockOut"))
         }

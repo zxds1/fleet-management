@@ -54,6 +54,8 @@ private val TITLES = mapOf(
     "analytics" to "Analytics",
     "maintenance" to "Maintenance",
     "anomaly_detail" to "Anomaly Detail",
+    "fuel_card" to "Fuel Card",
+    "inspection_detail" to "Inspection Detail",
     "admin_management" to "Admin Management",
     "users" to "Users",
     "user_detail" to "User Detail",
@@ -132,8 +134,8 @@ fun AdminApp(repository: FleetRepository, isConnected: Boolean, pendingCount: In
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(icon, contentDescription = label, tint = if (selected) BentoPurplePrimary else BentoTextSecondary) },
-                        label = { Text(label, color = if (selected) BentoPurplePrimary else BentoTextSecondary) },
+                        icon = { Icon(icon, contentDescription = label, tint = if (selected) BentoBluePrimary else BentoTextSecondary) },
+                        label = { Text(label, color = if (selected) BentoBluePrimary else BentoTextSecondary) },
                     )
                 }
             }
@@ -182,6 +184,16 @@ fun AdminApp(repository: FleetRepository, isConnected: Boolean, pendingCount: In
             composable("analytics") { AnalyticsReportScreen(repository, locale, navController) }
             composable("maintenance") { MaintenanceScheduleScreen(repository, locale, navController) }
             composable("anomaly_feed") { AnomalyFeedScreen(repository, locale, navController) }
+            composable("anomaly_detail/{id}") {
+                AdminAnomalyDetailScreen(repository, locale, it.arguments?.getString("id") ?: "", navController)
+            }
+            composable("inspection_detail/{id}") {
+                AdminInspectionDetailScreen(repository, locale, it.arguments?.getString("id") ?: "", navController)
+            }
+            composable("fuel_card") { AdminFuelCardScreen(repository, locale, navController) }
+            composable("training_lesson/{id}") {
+                AdminTrainingLessonDetailScreen(repository, locale, it.arguments?.getString("id") ?: "", navController)
+            }
             composable("admin_management") { AdminManagementScreen(repository, locale, navController) }
             composable("users") { UsersScreen(repository, locale, navController) }
             composable("user_detail/{id}") {

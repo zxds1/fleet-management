@@ -40,7 +40,7 @@ fun HardwareProvisioningScreen(repository: FleetRepository, locale: String, nav:
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(t(locale, "hw.title"), style = MaterialTheme.typography.titleMedium, color = BentoTextPrimary, modifier = Modifier.weight(1f))
-            Button(onClick = { showPair = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.testTag("hw_pair_new")) {
+            Button(onClick = { showPair = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.testTag("hw_pair_new")) {
                 Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("Pair tracker")
             }
         }
@@ -171,7 +171,7 @@ private fun PairTrackerDialog(
                 }
                 sms?.let {
                     Spacer(Modifier.height(12.dp))
-                    Surface(color = BentoPurpleContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Surface(color = BentoBluePrimaryContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Send this SMS to the tracker SIM:", color = BentoTextPrimary, style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.height(4.dp))

@@ -37,11 +37,11 @@ fun AnalyticsReportScreen(repository: FleetRepository, locale: String, nav: NavC
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Open Accidents", openAccidents.toString(), Icons.Filled.Warning, StatusWarning, Modifier.weight(1f))
-            KpiCard("Pending Fuel", pendingFuel.toString(), Icons.Filled.LocalGasStation, BentoPurplePrimary, Modifier.weight(1f))
+            KpiCard("Pending Fuel", pendingFuel.toString(), Icons.Filled.LocalGasStation, BentoBluePrimary, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Expiring Docs", expiringDocs.toString(), Icons.Filled.Description, StatusWarning, Modifier.weight(1f))
-            KpiCard("Fuel Spend (30d)", "Ksh ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoPurplePrimary, Modifier.weight(1f))
+            KpiCard("Fuel Spend (30d)", "Ksh ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoBluePrimary, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Vehicles", vehicles.size.toString(), Icons.Filled.DirectionsCar, StatusInfo, Modifier.weight(1f))

@@ -37,7 +37,7 @@ fun RefuelScreen(repository: FleetRepository, nav: NavController, locale: String
             Spacer(Modifier.height(16.dp))
             Text("Refuel queued", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
             Spacer(Modifier.height(16.dp))
-            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.testTag("refuel_done")) {
+            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.testTag("refuel_done")) {
                 Text(t(locale, "common.back"))
             }
         }
@@ -103,7 +103,7 @@ fun RefuelScreen(repository: FleetRepository, nav: NavController, locale: String
             },
             enabled = !submitting,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("refuel_submit"),
-            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
         ) {
             Text(if (submitting) t(locale, "common.pending") else t(locale, "tabs.refuel"))
         }

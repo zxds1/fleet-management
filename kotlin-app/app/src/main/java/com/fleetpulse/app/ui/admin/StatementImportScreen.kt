@@ -58,7 +58,7 @@ fun StatementImportScreen(repository: FleetRepository, locale: String, nav: NavC
                         .onFailure { status = errorCopy((it as? com.fleetpulse.app.data.remote.AppException)?.errorCode ?: "UNKNOWN", locale) }
                 }
             },
-            enabled = ready, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            enabled = ready, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
             modifier = Modifier.fillMaxWidth().testTag("upload_csv"),
         ) { Text(if (locale == "sw") "Pakia" else "Upload") }
     }

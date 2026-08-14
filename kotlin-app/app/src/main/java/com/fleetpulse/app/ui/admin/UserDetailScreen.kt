@@ -48,7 +48,7 @@ fun UserDetailScreen(repository: FleetRepository, locale: String, userId: String
         Text(user.fullName ?: user.email, style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
         Row(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusChip(text = user.status, color = if (user.status == "SUSPENDED") StatusDanger else StatusSafe)
-            StatusChip(text = user.roles.firstOrNull() ?: "—", color = BentoPurplePrimary)
+            StatusChip(text = user.roles.firstOrNull() ?: "—", color = BentoBluePrimary)
         }
         statusField?.let { Text(it, color = StatusSafe, style = MaterialTheme.typography.bodySmall) }
 
@@ -89,7 +89,7 @@ fun UserDetailScreen(repository: FleetRepository, locale: String, userId: String
                         label = { Text(v.plateNumber) },
                         modifier = Modifier.testTag("scope_vehicle_${v.id}"),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = BentoPurpleContainer, selectedLabelColor = BentoTextPrimary,
+                            selectedContainerColor = BentoBluePrimaryContainer, selectedLabelColor = BentoTextPrimary,
                             containerColor = BentoCardBg, labelColor = BentoTextSecondary,
                         ),
                     )
@@ -105,7 +105,7 @@ fun UserDetailScreen(repository: FleetRepository, locale: String, userId: String
                         label = { Text(d.name) },
                         modifier = Modifier.testTag("scope_driver_${d.id}"),
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = BentoPurpleContainer, selectedLabelColor = BentoTextPrimary,
+                            selectedContainerColor = BentoBluePrimaryContainer, selectedLabelColor = BentoTextPrimary,
                             containerColor = BentoCardBg, labelColor = BentoTextSecondary,
                         ),
                     )

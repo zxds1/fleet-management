@@ -361,7 +361,7 @@ class FleetRepository(private val context: Context) {
         if (res.isSuccessful) _anomalies.value = (res.body()?.data ?: emptyList()).map { mapAnomaly(it) }
     }
     private suspend fun loadRefuelInbox() = safe {
-        val res = fuelApi.reconciliationInbox()
+        val res = fuelApi.fuelPending()
         if (res.isSuccessful) _refuelPurchases.value = mapReconcile(res.body())
     }
     private suspend fun loadDvirInbox() = safe {
@@ -578,17 +578,7 @@ class FleetRepository(private val context: Context) {
      * Mark a training lesson complete (best-effort). POSTs to `/training/lessons/{id}/complete` and
      * flips the local lesson to completed on success.
      */
-    suspend fun completeTrainingLesson(id: String) = withContext(Dispatchers.IO) {
-        try {
-            val req = Request.Builder().url(BuildConfig.API_BASE_URL + "/training/lessons/$id/complete")
-                .post("{}".toRequestBody("application/json".toMediaType()))
-                .header("Authorization", "Bearer ${SessionHolder.get()}").build()
-            okHttp.newCall(req).execute().use { }
-        } catch (_: Exception) { /* offline: keep local state */ }
-        _trainingLessons.value = _trainingLessons.value.map { if (it.id == id) it.copy(isCompleted = true, progressPct = 100) else it }
-    }
-
-    fun reportVehicleIssue(vehicleId: String, category: String, description: String, severity: String) {
+    suspend fun reportVehicleIssue(vehicleId: String, category: String, description: String, severity: String) {
         val body = mapOf(
             "category" to category,
             "description" to description,
@@ -653,7 +643,7 @@ class FleetRepository(private val context: Context) {
         if (idx >= 0) current[idx] = report else current.add(0, report)
         _accidentReports.value = current
     }
-    private fun mapAccident(m: Map<String, Any?>): AccidentReport = AccidentReport(
+    fun mapAccident(m: Map<String, Any?>): AccidentReport = AccidentReport(
         id = (m["id"] ?: m["accident_id"]).toString(),
         vehicleId = m["vehicle_id"]?.toString(),
         driverName = (m["driver_name"] ?: m["driver_id"]?.toString())?.toString(),
@@ -841,7 +831,7 @@ class FleetRepository(private val context: Context) {
                 category = (it["course_code"] ?: it["course_title"] ?: "").toString(),
                 durationMinutes = (it["duration_minutes"] as? Number)?.toInt() ?: 0,
                 progressPct = (it["progress_pct"] as? Number)?.toInt() ?: 0,
-                isCompleted = it["is_mandatory"] as? Boolean ?: false,
+                isCompleted = (it["is_completed"] ?: it["completed"] ?: false) as? Boolean ?: false,
             )
         }
     }
@@ -857,6 +847,7 @@ class FleetRepository(private val context: Context) {
 
     // ---- public refresh helpers (wrappers over private loaders) ----
     fun refreshDvirInbox() { scope.launch { loadDvirInbox() } }
+    fun refreshFuelReconciliationInbox() { scope.launch { loadRefuelInbox() } }
 
     /**
      * Import a fuel statement CSV. Per the backend contract the file is first uploaded as a
@@ -1222,6 +1213,126 @@ class FleetRepository(private val context: Context) {
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    // ---- single-resource fetch helpers (for detail screens with fallback) ----
+    suspend fun fetchOcrPreview(purchaseId: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = fuelApi.ocrPreview(purchaseId)
+            if (res.isSuccessful && res.body() != null) {
+                val body = res.body()!!
+                val ocr = body.ocr
+                if (ocr == null) Result.success(emptyMap())
+                else Result.success(mapOf(
+                    "status" to body.status,
+                    "litres_pumped" to ocr.liters,
+                    "amount_spent" to ocr.amount,
+                    "receipt_date" to ocr.date,
+                    "station_name" to ocr.station,
+                    "confidence_score" to ocr.confidence,
+                ))
+            } else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun correctFuelPurchase(
+        purchaseId: String, litres: Double? = null, amount: String? = null,
+        notes: String? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val req = FuelCorrectionRequest(
+                purchase_id = purchaseId,
+                corrected_liters = litres,
+                corrected_amount = amount?.toDoubleOrNull(),
+                corrected_station = notes,
+            )
+            val res = fuelApi.correctPurchase(req)
+            if (res.isSuccessful) Result.success(Unit)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun createFuelCard(label: String, lastFour: String, provider: String, isPooled: Boolean, assignedVehicleId: String? = null): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val req = FuelCardCreateRequest(label, lastFour, provider, isPooled, assignedVehicleId)
+            val res = fuelApi.createFuelCard(req)
+            if (res.isSuccessful && res.body() != null) {
+                val id = (res.body() as Map<String, Any?>)["fuel_card_id"]?.toString() ?: UUID.randomUUID().toString()
+                Result.success(id)
+            } else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchInspectionDetail(id: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = inspectionsApi.detail(id)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchAccidentDetail(id: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = accidentsApi.detail(id)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchAnomalyDetail(id: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = dashboardApi.anomalyDetail(id)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchTrainingLesson(id: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = dashboardApi.trainingLesson(id)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchMediaObject(id: String): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = mediaApi.get(id)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchAnomalySignal(id: String): Result<Map<String, Any?>> = fetchAnomalyDetail(id)
+
+    suspend fun listTriggers(): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            val res = dashboardApi.listTriggers()
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun verifyTelemetryChain(accidentId: String): Result<List<Map<String, Any?>>> = withContext(Dispatchers.IO) {
+        try {
+            val res = accidentsApi.verifyTelemetry(accidentId)
+            if (res.isSuccessful && res.body() != null) {
+                val body = res.body()!!
+                val rows = (body["rows"] as? List<*>?)?.filterIsInstance<Map<String, Any?>>()
+                    ?: (body["data"] as? List<*>?)?.filterIsInstance<Map<String, Any?>>()
+                    ?: emptyList()
+                Result.success(rows)
+            } else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun revokeSessions(driverId: String? = null): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val body = if (driverId != null) mapOf("user_id" to driverId) else emptyMap()
+            val res = dashboardApi.revokeSessions(body)
+            if (res.isSuccessful) Result.success(Unit)
+            else Result.failure(ErrorParser.parse(res.code(), res.errorBody().stringOrNull(), null))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     // ====================================================================
     // MAPPERS (backend row → domain model). Tolerant: missing fields → safe defaults.
     // ====================================================================
@@ -1261,11 +1372,21 @@ class FleetRepository(private val context: Context) {
         createdAt = (m["created_at"] as? String)?.let { parseIso(it) } ?: 0, vehicleId = m["vehicle_id"]?.toString(),
         severity = runCatching { AnomalySeverity.valueOf((m["severity"] ?: "WARNING").toString()) }.getOrDefault(AnomalySeverity.WARNING),
     )
+
+    fun mapAnomalyDetail(d: Map<String, Any?>, fallbackId: String): AnomalyItem = AnomalyItem(
+        id = d["id"]?.toString() ?: fallbackId,
+        domain = runCatching { AnomalyDomain.valueOf((d["domain"] ?: "SECURITY").toString().uppercase()) }.getOrDefault(AnomalyDomain.SECURITY),
+        title = (d["title"] ?: d["signal"]?.let { (it as? Map<*, *>)?.get("title")?.toString() } ?: "Anomaly").toString(),
+        detail = (d["body"] ?: d["detail"] ?: "").toString(),
+        createdAt = (d["created_at"] as? String)?.let { parseIso(it) } ?: 0,
+        vehicleId = d["vehicle_id"]?.toString() ?: d["vehicle_plate"]?.toString(),
+        severity = runCatching { AnomalySeverity.valueOf((d["severity"] ?: "WARNING").toString().uppercase()) }.getOrDefault(AnomalySeverity.WARNING),
+    )
     private fun mapReconcile(body: Map<String, Any?>?): List<RefuelPurchase> {
-        val list = (body?.get("purchases") as? List<*>) ?: return emptyList()
+        val list = (body?.get("purchases") as? List<*>) ?: (body?.get("data") as? List<*>) ?: return emptyList()
         return list.mapNotNull { it as? Map<String, Any?> }.map {
             RefuelPurchase(
-                id = it["fuel_purchase_id"].toString(), vehicleId = it["vehicle_id"]?.toString(),
+                id = (it["fuel_purchase_id"] ?: it["id"]).toString(), vehicleId = it["vehicle_id"]?.toString(),
                 vehiclePlate = it["vehicle_plate"]?.toString(), driverName = it["driver_name"]?.toString(),
                 stationName = it["station_name"]?.toString(), amountSpent = (it["amount_spent"] as? Number)?.toDouble(),
                 litersPumped = (it["liters_pumped"] as? Number)?.toDouble(), odometerKm = (it["odometer_km"] as? Number)?.toLong(),
@@ -1289,6 +1410,15 @@ class FleetRepository(private val context: Context) {
             )
         }
     }
+
+    fun mapInspectionDetail(m: Map<String, Any?>): InspectionReport = InspectionReport(
+        id = (m["inspection_id"] ?: m["id"]).toString(),
+        vehicleId = m["vehicle_id"]?.toString(), driverName = m["driver_name"]?.toString(),
+        createdAt = (m["created_at"] as? String)?.let { parseIso(it) } ?: 0,
+        subject = runCatching { InspectionSubject.valueOf((m["subject"] ?: "VEHICLE").toString()) }.getOrDefault(InspectionSubject.VEHICLE),
+        overallStatus = (m["overall_status"] ?: m["status"] ?: "PENDING").toString(),
+        defectCount = (m["defect_count"] as? Number)?.toInt() ?: 0, signatureName = (m["signature_name"] ?: "").toString(),
+    )
     private fun mapDocument(m: Map<String, Any?>): DocumentItem = DocumentItem(
         id = m["document_id"].toString(), title = (m["title"] ?: "Document").toString(),
         docType = (m["document_type"] ?: m["doc_type"] ?: "?").toString(), ownerName = (m["owner_name"] ?: "").toString(),

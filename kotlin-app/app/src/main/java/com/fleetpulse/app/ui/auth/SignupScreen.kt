@@ -18,7 +18,7 @@ import com.fleetpulse.app.data.remote.AppException
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.FleetButton
 import com.fleetpulse.app.ui.components.SectionCard
-import com.fleetpulse.app.ui.theme.BentoPurplePrimary
+import com.fleetpulse.app.ui.theme.BentoBluePrimary
 import com.fleetpulse.app.ui.theme.BentoTextSecondary
 import com.fleetpulse.app.ui.theme.StatusWarning
 import kotlinx.coroutines.launch
@@ -175,7 +175,7 @@ fun SignupScreen(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .testTag("signup_login_btn"),
-            ) { Text(AuthStrings.haveAccount(locale), color = BentoPurplePrimary) }
+            ) { Text(AuthStrings.haveAccount(locale), color = BentoBluePrimary) }
         }
     }
 }

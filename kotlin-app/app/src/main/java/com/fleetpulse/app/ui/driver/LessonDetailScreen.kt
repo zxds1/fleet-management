@@ -32,7 +32,7 @@ fun LessonDetailScreen(repository: FleetRepository, nav: NavController, locale: 
             Spacer(Modifier.height(6.dp))
             Text("${lesson.category} • ${lesson.durationMinutes} min", style = MaterialTheme.typography.bodyMedium, color = BentoTextSecondary)
             Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(progress = (if (completed) 100 else lesson.progressPct) / 100f, modifier = Modifier.fillMaxWidth(), color = BentoPurplePrimary)
+            LinearProgressIndicator(progress = (if (completed) 100 else lesson.progressPct) / 100f, modifier = Modifier.fillMaxWidth(), color = BentoBluePrimary)
         }
         Spacer(Modifier.height(20.dp))
         Button(
@@ -42,7 +42,7 @@ fun LessonDetailScreen(repository: FleetRepository, nav: NavController, locale: 
                 completed = true
             },
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("lesson_complete"),
-            colors = ButtonDefaults.buttonColors(containerColor = if (completed) BentoCardBg else BentoPurplePrimary, contentColor = BentoTextPrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = if (completed) BentoCardBg else BentoBluePrimary, contentColor = BentoTextPrimary),
             enabled = !completed,
         ) {
             Text(if (completed) "Completed" else "Mark complete")

@@ -40,6 +40,6 @@ fun TrainingHubScreen(repository: FleetRepository, nav: NavController, locale: S
             }
         }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = { nav.navigate("resource_library") }) { Text("Resource Library", color = BentoPurplePrimary) }
+        TextButton(onClick = { nav.navigate("resource_library") }) { Text("Resource Library", color = BentoBluePrimary) }
     }
 }

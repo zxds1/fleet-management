@@ -8,7 +8,7 @@ import retrofit2.http.*
 
 /**
  * Retrofit service interfaces binding to the FleetPulse backend (docs/backend/03-rest-api.md).
- * Paths mirror the route table; request bodies mirror packages/shared/src/schemas/*.
+ * Paths mirror the route table; request bodies mirror packages/shared/src/schemas.
  * All state-changing calls rely on the AuthInterceptor to attach Idempotency-Key.
  */
 
@@ -145,39 +145,79 @@ interface AuthApi {
     @POST("/auth/refresh") suspend fun refresh(@Body body: RefreshRequest): Response<LoginResponse>
     @POST("/auth/signup") suspend fun signup(@Body body: SignupRequest): Response<LoginResponse>
     @POST("/auth/logout") suspend fun logout(): Response<Unit>
+    @POST("/auth/logout-all") suspend fun logoutAll(): Response<Map<String, Any?>>
     @POST("/auth/consent") suspend fun consent(@Body body: ConsentRequest): Response<Map<String, Any?>>
     @GET("/me/consent") suspend fun consentStatus(): Response<Map<String, Any?>>
     @POST("/auth/devices") suspend fun registerDevice(@Body body: DeviceRegisterRequest): Response<Map<String, Any?>>
     @POST("/auth/devices/pin") suspend fun setPin(): Response<Map<String, Any?>>
     @POST("/auth/mfa/enroll") suspend fun enrollMfa(@Body body: EnrollMfaRequest): Response<Map<String, Any?>>
-    @POST("/admin/users/{id}/revoke-sessions") suspend fun revokeSessions(@Path("id") id: String, @Body body: Map<String, Any?>): Response<Map<String, Any?>>
     @POST("/auth/password-reset/request") suspend fun resetRequest(@Body body: PasswordResetRequestReq): Response<Map<String, Any?>>
     @POST("/auth/password-reset/{id}/complete") suspend fun resetComplete(@Path("id") id: String, @Body body: PasswordResetCompleteReq): Response<Map<String, Any?>>
     @POST("/auth/change-password") suspend fun changePassword(@Body body: AuthChangePasswordRequest): Response<Map<String, Any?>>
+    @POST("/auth/accept-invite") suspend fun acceptInvite(@Body body: AcceptInviteRequest): Response<LoginResponse>
+    @POST("/auth/password-reset/{resetId}/approve") suspend fun approvePasswordReset(@Path("resetId") resetId: String, @Body body: PasswordResetApproveRequest): Response<Map<String, Any?>>
+    @POST("/auth/devices/refresh") suspend fun refreshDevice(): Response<Map<String, Any?>>
+    @POST("/auth/devices/revoke") suspend fun revokeDevice(@Body body: DeviceRevokeRequest): Response<Unit>
 }
 
 @Serializable data class AuthChangePasswordRequest(val current_password: String, val new_password: String)
+@Serializable data class AcceptInviteRequest(val token: String, val password: String, val full_name: String? = null)
+@Serializable data class PasswordResetApproveRequest(val approval_code: String? = null)
+@Serializable data class DeviceRevokeRequest(val device_id_hash: String)
 
 interface ShiftsApi {
     @POST("/shifts/clock-in") suspend fun clockIn(@Body body: ClockInRequest): Response<Map<String, Any?>>
     @POST("/shifts/clock-out") suspend fun clockOut(@Body body: ClockOutRequest): Response<Map<String, Any?>>
     @GET("/shifts/me/active") suspend fun active(): Response<Map<String, Any?>?>
+    @GET("/shifts/me") suspend fun history(@Query("cursor") cursor: String? = null): Response<CursorPage<Map<String, Any?>>>
     @GET("/shifts/verification-inbox") suspend fun verificationInbox(@Query("cursor") cursor: String? = null): Response<CursorPage<Map<String, Any?>>>
     @POST("/shifts/{id}/verify") suspend fun verify(@Path("id") id: String, @Body body: VerifyShiftRequest): Response<Map<String, Any?>>
+    @POST("/shifts/{id}/force-close") suspend fun forceClose(@Path("id") id: String, @Body body: Map<String, Any?> = emptyMap()): Response<Map<String, Any?>>
+    @GET("/shifts/{id}/verification") suspend fun verificationDetail(@Path("id") id: String): Response<Map<String, Any?>>
+    @GET("/shifts/{id}/work-plan") suspend fun workPlan(@Path("id") id: String): Response<Map<String, Any?>>
 }
 
 interface FuelApi {
     @POST("/driver/fuel/purchase") suspend fun photoFirstRefuel(@Body body: PhotoFirstRefuelRequest): Response<Map<String, Any?>>
-    @GET("/fuel/reconciliation-inbox") suspend fun reconciliationInbox(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
+    @POST("/driver/fuel/correct") suspend fun correctPurchase(@Body body: FuelCorrectionRequest): Response<Map<String, Any?>>
+    @GET("/driver/fuel/purchase/{id}/ocr") suspend fun ocrPreview(@Path("id") id: String): Response<OcrPreviewResponse>
+    @GET("/fuel/reconciliation-inbox") suspend fun reconciliationInbox(
+        @Query("cursor") cursor: String? = null,
+        @Query("vehicle_id") vehicleId: String? = null,
+        @Query("verified") verified: String? = null,
+    ): Response<Map<String, Any?>>
     @POST("/fuel/purchases/{id}/verify") suspend fun verify(@Path("id") id: String, @Body body: VerifyPurchaseRequest): Response<Map<String, Any?>>
     @POST("/reconciliation/statements") suspend fun importStatement(@Body body: StatementImportRequest): Response<Map<String, Any?>>
+    @POST("/fuel/cards") suspend fun createFuelCard(@Body body: FuelCardCreateRequest): Response<Map<String, Any?>>
+    @GET("/admin/fuel/pending") suspend fun fuelPending(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
 }
+
+@Serializable data class FuelCorrectionRequest(
+    val purchase_id: String,
+    val corrected_amount: Double? = null,
+    val corrected_liters: Double? = null,
+    val corrected_date: String? = null,
+    val corrected_station: String? = null,
+    val corrected_odometer: Long? = null,
+)
+
+@Serializable data class FuelCardCreateRequest(
+    val label: String, val last_four: String, val provider: String,
+    val is_pooled: Boolean, val assigned_vehicle_id: String? = null,
+)
+
+@Serializable data class OcrPreviewResponse(val status: String, val ocr: OcrData? = null)
+@Serializable data class OcrData(
+    val amount: String? = null, val liters: String? = null,
+    val date: String? = null, val station: String? = null, val confidence: Double? = null,
+)
 
 interface InspectionsApi {
     @POST("/inspections") suspend fun submit(@Body body: InspectionSubmitRequest): Response<Map<String, Any?>>
     @GET("/inspections") suspend fun adminList(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
     @GET("/inspections/templates") suspend fun templates(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
     @GET("/inspections/me") suspend fun mine(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
+    @GET("/inspections/{id}") suspend fun detail(@Path("id") id: String): Response<Map<String, Any?>>
 }
 
 interface AccidentsApi {
@@ -185,18 +225,22 @@ interface AccidentsApi {
     @POST("/accidents") suspend fun create(@Body body: AccidentCreateRequest): Response<Map<String, Any?>>
     @POST("/accidents/{id}/media") suspend fun attachMedia(@Path("id") id: String, @Body body: AccidentMediaRequest): Response<Map<String, Any?>>
     @GET("/accidents/me") suspend fun listMine(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
+    @GET("/accidents/{id}") suspend fun detail(@Path("id") id: String): Response<Map<String, Any?>>
+    @GET("/accidents/{id}/telemetry/verify") suspend fun verifyTelemetry(@Path("id") id: String): Response<Map<String, Any?>>
     @POST("/accidents/{id}/acknowledge") suspend fun acknowledge(@Path("id") id: String): Response<Map<String, Any?>>
 }
 
 interface MediaApi {
     @POST("/media/upload-url") suspend fun uploadUrl(@Body body: MediaUploadRequest): Response<MediaUploadResponse>
+    @GET("/media/{id}") suspend fun get(@Path("id") id: String): Response<Map<String, Any?>>
 }
 
-@Serializable data class VehicleStatesResponse(val vehicles: List<Map<String, Any?>> = emptyList())
+data class VehicleStatesResponse(val vehicles: List<Map<String, Any?>> = emptyList())
 
 interface DashboardApi {
     @GET("/dashboard/vehicle-states") suspend fun vehicleStates(): Response<VehicleStatesResponse>
     @GET("/anomalies") suspend fun anomalies(@Query("cursor") cursor: String? = null): Response<CursorPage<Map<String, Any?>>>
+    @GET("/anomalies/{id}") suspend fun anomalyDetail(@Path("id") id: String): Response<Map<String, Any?>>
     @GET("/notifications") suspend fun notifications(@Query("cursor") cursor: String? = null): Response<CursorPage<Map<String, Any?>>>
     @GET("/documents/expiring") suspend fun expiringDocs(@Query("cursor") cursor: String? = null): Response<CursorPage<Map<String, Any?>>>
     @GET("/documents/{id}") suspend fun document(@Path("id") id: String): Response<Map<String, Any?>>
@@ -206,16 +250,19 @@ interface DashboardApi {
     @POST("/drivers") suspend fun createDriver(@Body body: CreateDriverRequest): Response<Map<String, Any?>>
     @POST("/drivers/{id}/approve") suspend fun approveDriver(@Path("id") id: String): Response<Map<String, Any?>>
     @POST("/admin/users/invite") suspend fun inviteUser(@Body body: Map<String, Any?>): Response<Map<String, Any?>>
-    @GET("/admin/users") suspend fun listUsers(@Query("cursor") cursor: String? = null): Response<List<Map<String, Any?>>>
+    @GET("/admin/users") suspend fun listUsers(@Query("cursor") cursor: String? = null, @Query("role_code") roleCode: String? = null, @Query("status") status: String? = null): Response<List<Map<String, Any?>>>
     @GET("/admin/managers") suspend fun listManagers(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
-    @GET("/drivers") suspend fun driverRoster(): Response<Map<String, Any?>>
+    @GET("/drivers") suspend fun driverRoster(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
     @GET("/admin/hardware/pending") suspend fun hardwarePending(): Response<Map<String, Any?>>
-    @GET("/training/lessons") suspend fun training(): Response<Map<String, Any?>>
-    @GET("/training/roster") suspend fun trainingRoster(): Response<Map<String, Any?>>
+    @GET("/training/lessons") suspend fun training(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
+    @GET("/training/roster") suspend fun trainingRoster(@Query("cursor") cursor: String? = null): Response<Map<String, Any?>>
+    @GET("/training/lessons/{id}") suspend fun trainingLesson(@Path("id") id: String): Response<Map<String, Any?>>
     @POST("/training/lessons/{id}/complete") suspend fun completeLesson(@Path("id") id: String): Response<Map<String, Any?>>
     @POST("/admin/hardware/pair") suspend fun pairHardware(@Body body: Map<String, Any?>): Response<Map<String, Any?>>
     @DELETE("/admin/hardware/{vehicleId}/tracker") suspend fun unpairHardware(@Path("vehicleId") vehicleId: String): Response<HardwareUnpairResponse>
     @PUT("/admin/settings/triggers") suspend fun updateTriggers(@Body body: Map<String, Any?>): Response<Map<String, Any?>>
+    @GET("/admin/settings/triggers") suspend fun listTriggers(): Response<Map<String, Any?>>
+    @POST("/sessions/revoke") suspend fun revokeSessions(@Body body: Map<String, Any?> = emptyMap()): Response<Map<String, Any?>>
     @GET("/me") suspend fun me(): Response<Map<String, Any?>>
     @PUT("/admin/users/me") suspend fun updateOwnProfile(@Body body: Map<String, Any?>): Response<Map<String, Any?>>
     @POST("/admin/managers/{userId}/assign") suspend fun managerAssign(@Path("userId") userId: String, @Body body: ManagerAssignRequest): Response<Map<String, Any?>>
@@ -253,6 +300,10 @@ interface VehicleIssueApi {
 
 interface AnalyticsApi {
     @GET("/analytics/company") suspend fun company(): Response<Map<String, Any?>>
+    @GET("/analytics/manager/{id}") suspend fun manager(@Path("id") id: String): Response<Map<String, Any?>>
+    @GET("/analytics/driver/{id}") suspend fun driver(@Path("id") id: String): Response<Map<String, Any?>>
+    @GET("/analytics/vehicle/{id}") suspend fun vehicle(@Path("id") id: String): Response<Map<String, Any?>>
+    @GET("/analytics/me") suspend fun me(): Response<Map<String, Any?>>
 }
 
 // ---- Vehicle master data ----

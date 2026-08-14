@@ -28,7 +28,7 @@ fun AdminDocumentDetailScreen(repository: FleetRepository, locale: String, id: S
     }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(doc.title, style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
-        StatusChip(text = doc.docType, color = BentoPurplePrimary)
+        StatusChip(text = doc.docType, color = BentoBluePrimary)
         AdminRowCard(title = "Owner", subtitle = doc.ownerName)
         AdminRowCard(title = "Expires", subtitle = doc.expiresOn ?: "—")
         AdminRowCard(title = "Days until expiry", subtitle = doc.daysUntilExpiry?.toString() ?: "—")

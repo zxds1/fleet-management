@@ -32,7 +32,7 @@ fun ExpiringDocsScreen(repository: FleetRepository, locale: String, nav: NavCont
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(d.title, style = MaterialTheme.typography.bodyLarge, color = BentoTextPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        StatusChip(text = d.docType, color = BentoPurplePrimary)
+                        StatusChip(text = d.docType, color = BentoBluePrimary)
                     }
                     Text("${d.ownerName} · ${d.daysUntilExpiry?.let { "$it days left" } ?: d.expiresOn ?: "—"}", style = MaterialTheme.typography.bodySmall, color = if (soon) StatusWarning else BentoTextSecondary)
                 }

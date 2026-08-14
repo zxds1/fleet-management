@@ -86,7 +86,7 @@ fun ClockInScreen(repository: FleetRepository, nav: NavController, locale: Strin
             },
             enabled = !submitting,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("clock_in_submit"),
-            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
         ) {
             Text(if (submitting) t(locale, "common.pending") else t(locale, "home.clockIn"))
         }

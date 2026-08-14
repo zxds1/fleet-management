@@ -28,7 +28,8 @@ fun TrainingReviewScreen(repository: FleetRepository, locale: String, nav: NavCo
     }
     AdminListScaffold(locale, Icons.Filled.School, "No training", "", isEmpty = false) {
         items(lessons, key = { it.id }) { l ->
-            Surface(color = BentoCardBg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, BentoBorder), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = BentoCardBg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, BentoBorder),
+                modifier = Modifier.fillMaxWidth().clickable { nav.navigate("training_lesson/${l.id}") }.testTag("training_row_${l.id}") {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(l.title, style = MaterialTheme.typography.bodyLarge, color = BentoTextPrimary, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -36,7 +37,7 @@ fun TrainingReviewScreen(repository: FleetRepository, locale: String, nav: NavCo
                     }
                     Text("${l.category} · ${l.durationMinutes} min · ${l.progressPct}%", style = MaterialTheme.typography.bodySmall, color = BentoTextSecondary)
                     Spacer(Modifier.height(8.dp))
-                    LinearProgressIndicator(progress = { l.progressPct / 100f }, color = BentoPurplePrimary, modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(progress = { l.progressPct / 100f }, color = BentoBluePrimary, modifier = Modifier.fillMaxWidth())
                     if (!l.isCompleted) {
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = { scope.launch { repository.completeTrainingLesson(l.id) } }, modifier = Modifier.testTag("training_complete_${l.id}")) {

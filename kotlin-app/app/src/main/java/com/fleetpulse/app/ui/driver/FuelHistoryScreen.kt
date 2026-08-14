@@ -47,6 +47,14 @@ fun FuelHistoryScreen(repository: FleetRepository, nav: NavController, locale: S
                 Text("Odometer: ${p.odometerKm ?: "—"} km", style = MaterialTheme.typography.bodyMedium, color = BentoTextSecondary)
                 Text("Litres: ${p.litersPumped ?: "—"}  •  Amount: ${p.amountSpent ?: "—"}", style = MaterialTheme.typography.bodyMedium, color = BentoTextSecondary)
                 if (p.confidenceScore != null) Text("Confidence: ${(p.confidenceScore!! * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = BentoTextSecondary)
+                if (p.badge == com.fleetpulse.app.data.FuelPendingBadge.REVIEW || p.badge == com.fleetpulse.app.data.FuelPendingBadge.FLAGGED) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { nav.navigate("fuel_correction/${p.id}") },
+                        modifier = Modifier.testTag("correct_${p.id}"),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = BentoBluePrimary),
+                    ) { Text("Correct", style = MaterialTheme.typography.bodyMedium) }
+                }
             }
         }
     }

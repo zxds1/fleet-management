@@ -45,7 +45,7 @@ fun ConsentScreen(repository: FleetRepository) {
                     Icon(
                         imageVector = Icons.Default.GpsFixed,
                         contentDescription = null,
-                        tint = BentoPurplePrimary,
+                        tint = BentoBluePrimary,
                         modifier = Modifier.padding(8.dp).size(20.dp),
                     )
                 }
@@ -75,7 +75,7 @@ fun ConsentScreen(repository: FleetRepository) {
                             .padding(top = 6.dp)
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(BentoPurplePrimary),
+                            .background(BentoBluePrimary),
                     )
                     Text(
                         text = point,

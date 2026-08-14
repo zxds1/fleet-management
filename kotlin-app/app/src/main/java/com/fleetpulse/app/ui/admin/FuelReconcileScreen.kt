@@ -20,6 +20,7 @@ import com.fleetpulse.app.ui.theme.*
 @Composable
 fun FuelReconcileScreen(repository: FleetRepository, locale: String, nav: NavController) {
     val purchases by repository.refuelPurchases.collectAsState()
+    LaunchedEffect(Unit) { repository.refreshFuelReconciliationInbox() }
     if (purchases.isEmpty()) {
         EmptyState(icon = Icons.Filled.LocalGasStation, title = "No pending fuel", message = "Reconciliation inbox is empty. Import a statement to populate it.")
         return

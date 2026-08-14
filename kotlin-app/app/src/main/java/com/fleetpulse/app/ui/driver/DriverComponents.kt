@@ -92,7 +92,7 @@ fun GaugeSelector(selected: FuelGaugeLevel, onSelect: (FuelGaugeLevel) -> Unit, 
                 onClick = { onSelect(g) },
                 modifier = Modifier.weight(1f).testTag("$testTagPrefix-${g.name}"),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (sel) BentoPurplePrimary else BentoCardBg,
+                    containerColor = if (sel) BentoBluePrimary else BentoCardBg,
                     contentColor = if (sel) BentoTextPrimary else BentoTextPrimary,
                 ),
                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
@@ -103,7 +103,7 @@ fun GaugeSelector(selected: FuelGaugeLevel, onSelect: (FuelGaugeLevel) -> Unit, 
 
 @Composable
 fun BackButton(onBack: () -> Unit, locale: String) {
-    TextButton(onClick = onBack) { Text("← " + t(locale, "common.back"), color = BentoPurplePrimary) }
+    TextButton(onClick = onBack) { Text("← " + t(locale, "common.back"), color = BentoBluePrimary) }
 }
 
 @Composable
@@ -113,11 +113,11 @@ fun ScreenTitle(title: String) {
 
 @Composable
 fun driverFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = BentoPurplePrimary,
+    focusedBorderColor = BentoBluePrimary,
     unfocusedBorderColor = BentoBorder,
     focusedTextColor = BentoTextPrimary,
     unfocusedTextColor = BentoTextPrimary,
-    cursorColor = BentoPurplePrimary,
+    cursorColor = BentoBluePrimary,
     focusedLabelColor = BentoTextSecondary,
     unfocusedLabelColor = BentoTextSecondary,
 )

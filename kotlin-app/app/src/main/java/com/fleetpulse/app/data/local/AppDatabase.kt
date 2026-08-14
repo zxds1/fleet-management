@@ -1,12 +1,17 @@
 package com.fleetpulse.app.data.local
 
-import androidx.room.*
+import android.content.Context
+import androidx.room.Dao
+import androidx.room.Database
+import androidx.room.Entity
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
+import androidx.room.Query
+import androidx.room.Room
+import androidx.room.RoomDatabase
 import java.util.UUID
 
-/**
- * Offline durable store. The queue is the single source of truth for pending driver writes
- * (docs/backend/03-rest-api.md §8). Force-close must never lose pending ops.
- */
 @Entity(tableName = "offline_queue")
 data class RoomQueueItem(
     @PrimaryKey val id: String,
@@ -18,14 +23,14 @@ data class RoomQueueItem(
     val bodyJson: String,
     val timestamp: Long,
     val attempts: Int,
-    val status: String, // PENDING / INFLIGHT / DONE / FAILED_REVIEW / DISCARDED
+    val status: String,
     val lastErrorCode: String?,
     val lastErrorMessage: String?,
 )
 
 @Entity(tableName = "form_drafts")
 data class RoomFormDraft(
-    @PrimaryKey val formType: String, // CLOCK_IN / REFUEL / DVIR / ACCIDENT / TRAILER_SWAP
+    @PrimaryKey val formType: String,
     val lastUpdated: Long,
     val draftJson: String,
 )
@@ -69,7 +74,14 @@ interface DraftDao {
     suspend fun delete(formType: String)
 }
 
-@Database(entities = [RoomQueueItem::class, RoomFormDraft::class], version = 1, exportSchema = false)
+@Database(
+    entities = [
+        RoomQueueItem::class,
+        RoomFormDraft::class
+    ],
+    version = 1,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun queueDao(): QueueDao
     abstract fun draftDao(): DraftDao
@@ -80,7 +92,8 @@ abstract class AppDatabase : RoomDatabase() {
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext, AppDatabase::class.java, "fleet_pulse_db",
-                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration(true).build().also { INSTANCE = it }
+
             }
     }
 }

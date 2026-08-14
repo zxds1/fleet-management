@@ -70,7 +70,7 @@ fun VehicleStateScreen(repository: FleetRepository, nav: NavController, locale: 
                 Text("Report issue")
             }
             Spacer(Modifier.width(8.dp))
-            Button(onClick = { nav.navigate("vehicle_map") }, modifier = Modifier.weight(1f).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+            Button(onClick = { nav.navigate("vehicle_map") }, modifier = Modifier.weight(1f).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
                 Text("Map")
             }
         }

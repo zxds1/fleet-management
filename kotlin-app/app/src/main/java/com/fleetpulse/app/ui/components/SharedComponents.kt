@@ -51,7 +51,7 @@ fun OfflineBanner(
             )
             if (pendingQueueCount > 0) {
                 TextButton(onClick = onOpenOutbox) {
-                    Text("Outbox", color = BentoPurplePrimary)
+                    Text("Outbox", color = BentoBluePrimary)
                 }
             }
         }
@@ -96,7 +96,7 @@ fun ErrorState(
         Text(message, style = MaterialTheme.typography.bodyMedium, color = BentoTextSecondary)
         if (onRetry != null) {
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+            Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
                 Text("Retry")
             }
         }
@@ -106,7 +106,7 @@ fun ErrorState(
 @Composable
 fun LoadingIndicator(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = BentoPurplePrimary)
+        CircularProgressIndicator(color = BentoBluePrimary)
     }
 }
 
@@ -123,7 +123,7 @@ fun FleetButton(
         enabled = enabled,
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (isPrimary) BentoPurplePrimary else BentoCardBg,
+            containerColor = if (isPrimary) BentoBluePrimary else BentoCardBg,
             contentColor = if (isPrimary) BentoTextPrimary else BentoTextPrimary,
         ),
         modifier = modifier.fillMaxWidth().height(52.dp),

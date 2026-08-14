@@ -43,11 +43,11 @@ fun DashboardScreen(repository: FleetRepository, locale: String, nav: NavControl
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Open Accidents", openAccidents.toString(), Icons.Filled.Warning, StatusWarning, Modifier.weight(1f), "kpi_accidents")
-            KpiCard("Pending Fuel", pendingFuel.toString(), Icons.Filled.LocalGasStation, BentoPurplePrimary, Modifier.weight(1f), "kpi_fuel")
+            KpiCard("Pending Fuel", pendingFuel.toString(), Icons.Filled.LocalGasStation, BentoBluePrimary, Modifier.weight(1f), "kpi_fuel")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             KpiCard("Expiring Docs", expiringDocs.toString(), Icons.Filled.Description, StatusWarning, Modifier.weight(1f), "kpi_docs")
-            KpiCard("Fuel Spend (30d)", "${AppConstants.CURRENCY_SYMBOL} ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoPurplePrimary, Modifier.weight(1f), "kpi_fuel_spend")
+            KpiCard("Fuel Spend (30d)", "${AppConstants.CURRENCY_SYMBOL} ${"%,.0f".format(fuelSpend30d)}", Icons.Filled.AttachMoney, BentoBluePrimary, Modifier.weight(1f), "kpi_fuel_spend")
         }
         KpiCard("Anomalies", openAnomalies.toString(), Icons.Filled.BugReport, StatusInfo, Modifier.fillMaxWidth(), "kpi_anomalies")
 

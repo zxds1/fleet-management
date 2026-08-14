@@ -290,7 +290,7 @@ fun AuthScaffold(
 @Composable
 private fun AuthBrandMark() {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Surface(color = BentoPurplePrimary, shape = RoundedCornerShape(14.dp)) {
+        Surface(color = BentoBluePrimary, shape = RoundedCornerShape(14.dp)) {
             Icon(
                 imageVector = Icons.Default.LocalShipping,
                 contentDescription = null,
@@ -371,13 +371,13 @@ fun AuthTextField(
         supportingText = supportingText?.let { { Text(it, color = BentoTextSecondary) } },
         shape = RoundedCornerShape(14.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = BentoPurplePrimary,
+            focusedBorderColor = BentoBluePrimary,
             unfocusedBorderColor = BentoBorder,
-            focusedLabelColor = BentoPurplePrimary,
+            focusedLabelColor = BentoBluePrimary,
             unfocusedLabelColor = BentoTextSecondary,
             focusedTextColor = BentoTextPrimary,
             unfocusedTextColor = BentoTextPrimary,
-            cursorColor = BentoPurplePrimary,
+            cursorColor = BentoBluePrimary,
             errorBorderColor = StatusDanger,
             errorLabelColor = StatusDanger,
             focusedContainerColor = BentoBackground,
@@ -401,7 +401,7 @@ fun AuthSegmentedToggle(
             options.forEachIndexed { index, label ->
                 val selected = index == selectedIndex
                 Surface(
-                    color = if (selected) BentoPurplePrimary else BentoDarkBadge,
+                    color = if (selected) BentoBluePrimary else BentoDarkBadge,
                     shape = CircleShape,
                     modifier = Modifier.weight(1f),
                 ) {

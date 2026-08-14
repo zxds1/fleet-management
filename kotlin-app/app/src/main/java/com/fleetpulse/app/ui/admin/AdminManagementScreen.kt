@@ -26,7 +26,7 @@ fun AdminManagementScreen(repository: FleetRepository, locale: String, nav: NavC
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Admin & Tenant", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary, modifier = Modifier.weight(1f))
-            Button(onClick = { showInvite = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.testTag("invite_user")) { Icon(Icons.Filled.PersonAdd, null); Spacer(Modifier.width(6.dp)); Text("Invite") }
+            Button(onClick = { showInvite = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.testTag("invite_user")) { Icon(Icons.Filled.PersonAdd, null); Spacer(Modifier.width(6.dp)); Text("Invite") }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { showNewDriver = true }, modifier = Modifier.testTag("new_driver")) { Icon(Icons.Filled.PersonAddAlt1, null); Spacer(Modifier.width(6.dp)); Text("New driver") }
         }
@@ -39,6 +39,7 @@ fun AdminManagementScreen(repository: FleetRepository, locale: String, nav: NavC
         AdminRowCard(title = "Maintenance", subtitle = "Work orders", onClick = { nav.navigate("maintenance") })
         AdminRowCard(title = "Data requests", subtitle = "DSAR export / deletion", onClick = { nav.navigate("privacy") })
         AdminRowCard(title = "Alert triggers", subtitle = "Speed / fuel thresholds", onClick = { nav.navigate("triggers") })
+        AdminRowCard(title = "Fuel cards", subtitle = "Create & manage fuel cards", onClick = { nav.navigate("fuel_card") })
         AdminRowCard(title = "Expiring docs", subtitle = "Licences / road tax", onClick = { nav.navigate("expiring_docs") })
         AdminRowCard(title = "My profile", subtitle = principal?.email ?: "—", onClick = { nav.navigate("profile") })
     }

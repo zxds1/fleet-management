@@ -13,7 +13,7 @@ import com.fleetpulse.app.data.remote.AppException
 import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.FleetButton
 import com.fleetpulse.app.ui.components.SectionCard
-import com.fleetpulse.app.ui.theme.BentoPurplePrimary
+import com.fleetpulse.app.ui.theme.BentoBluePrimary
 import kotlinx.coroutines.launch
 
 /**
@@ -93,7 +93,7 @@ fun MfaScreen(repository: FleetRepository) {
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .testTag("mfa_back_btn"),
-            ) { Text(AuthStrings.backToLogin(locale), color = BentoPurplePrimary) }
+            ) { Text(AuthStrings.backToLogin(locale), color = BentoBluePrimary) }
         }
     }
 }

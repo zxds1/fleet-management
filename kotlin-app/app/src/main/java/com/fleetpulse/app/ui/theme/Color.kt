@@ -6,8 +6,8 @@ import androidx.compose.ui.graphics.Color
 // Bento-style dark fleet console palette (preserved from design direction).
 val BentoBackground = Color(0xFF0E1116)
 val BentoCardBg = Color(0xFF171B22)
-val BentoPurplePrimary = Color(0xFF7C5CFC)
-val BentoPurpleContainer = Color(0xFF2A2150)
+val BentoBluePrimary = Color(0xFF3B82F6)
+val BentoBluePrimaryContainer = Color(0xFF1E3A8A)
 val BentoLilacContainer = Color(0xFFECE7FF)
 val BentoBlueContainer = Color(0xFF1E2A4A)
 val BentoBorder = Color(0xFF2A313C)

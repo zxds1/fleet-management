@@ -66,11 +66,11 @@ fun DriverApp(repository: FleetRepository, isConnected: Boolean, pendingCount: I
                             }
                         },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = BentoPurplePrimary,
-                            selectedTextColor = BentoPurplePrimary,
+                            selectedIconColor = BentoBluePrimary,
+                            selectedTextColor = BentoBluePrimary,
                             unselectedIconColor = BentoTextSecondary,
                             unselectedTextColor = BentoTextSecondary,
-                            indicatorColor = BentoPurpleContainer,
+                            indicatorColor = BentoBluePrimaryContainer,
                         ),
                     )
                 }
@@ -87,6 +87,10 @@ fun DriverApp(repository: FleetRepository, isConnected: Boolean, pendingCount: I
             composable("clock_out") { ClockOutScreen(repository, navController, locale) }
             composable("refuel") { RefuelScreen(repository, navController, locale) }
             composable("fuel_history") { FuelHistoryScreen(repository, navController, locale) }
+            composable(
+                "fuel_correction/{purchaseId}",
+                arguments = listOf(navArgument("purchaseId") { type = NavType.StringType }),
+            ) { back -> FuelCorrectionScreen(repository, navController, locale, back.arguments?.getString("purchaseId") ?: "") }
             composable("inspection") { InspectionScreen(repository, navController, locale) }
             composable("dvir_list") { DvirListScreen(repository, navController, locale) }
             composable(
@@ -134,7 +138,7 @@ private data class BottomNavItem(
 fun TopBarHeader(title: String, subtitle: String, modifier: Modifier = Modifier) {
     Surface(color = BentoBackground, modifier = modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(color = BentoPurplePrimary, shape = MaterialTheme.shapes.small, modifier = Modifier.size(36.dp)) {
+            Surface(color = BentoBluePrimary, shape = MaterialTheme.shapes.small, modifier = Modifier.size(36.dp)) {
                 Box(contentAlignment = Alignment.Center) { Text("FP", color = BentoTextPrimary, style = MaterialTheme.typography.titleMedium) }
             }
             Spacer(Modifier.width(12.dp))
@@ -192,6 +196,7 @@ private val EN = mapOf(
     "resources.title" to "Resource Library",
     "inspection.title" to "DVIR Inspection",
     "fuelHistory.title" to "Fuel History",
+    "fuelCorrection.title" to "Correct Purchase",
     "dvirList.title" to "Inspections",
     "accidents.title" to "Accidents & Mayday",
     "myAccidents.title" to "My Accidents",
@@ -238,6 +243,7 @@ private val SW = mapOf(
     "resources.title" to "Maktaba ya Rasilimali",
     "inspection.title" to "Ukaguzi wa DKP",
     "fuelHistory.title" to "Historia ya Mafuta",
+    "fuelCorrection.title" to "Sahihisha Ununuzi",
     "dvirList.title" to "Ukaguzi",
     "accidents.title" to "Ajali na Tahadhari",
     "myAccidents.title" to "Ajali Zangu",

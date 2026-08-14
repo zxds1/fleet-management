@@ -51,12 +51,12 @@ fun AdminDriverDetailScreen(repository: FleetRepository, locale: String, id: Str
             value = adminPassword, onValueChange = { adminPassword = it },
             label = { Text("Your password (required to enroll MFA)") }, modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BentoPurplePrimary, unfocusedBorderColor = BentoBorder),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BentoBluePrimary, unfocusedBorderColor = BentoBorder),
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (canMfa) Button(onClick = { scope.launch { repository.enrollDriverMfa(adminPassword, driver.id).onSuccess { enrollResult = it; status = "Enrollment ready — show QR to driver" }.onFailure { status = errorCopy((it as? com.fleetpulse.app.data.remote.AppException)?.errorCode ?: "UNKNOWN", locale) } } },
-                colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary), modifier = Modifier.weight(1f).testTag("enroll_mfa")) { Text("Enroll MFA") }
+                colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary), modifier = Modifier.weight(1f).testTag("enroll_mfa")) { Text("Enroll MFA") }
             if (canRevoke) Button(onClick = { scope.launch { repository.revokeDriverSessions(driver.id).onSuccess { status = "Sessions revoked" }.onFailure { status = errorCopy((it as? com.fleetpulse.app.data.remote.AppException)?.errorCode ?: "UNKNOWN", locale) } } },
                 colors = ButtonDefaults.buttonColors(containerColor = StatusDanger), modifier = Modifier.weight(1f).testTag("revoke_sessions")) { Text("Revoke Sessions") }
         }

@@ -55,7 +55,7 @@ fun PrivacyRequestsScreen(repository: FleetRepository, locale: String, nav: NavC
                             }
                             r.downloadUrl?.let {
                                 Spacer(Modifier.height(8.dp))
-                                Text(it, style = MaterialTheme.typography.bodySmall, color = BentoPurplePrimary, modifier = Modifier.clickable { /* open download */ })
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = BentoBluePrimary, modifier = Modifier.clickable { /* open download */ })
                             }
                         }
                     }

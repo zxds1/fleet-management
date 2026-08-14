@@ -54,7 +54,7 @@ fun InspectionScreen(repository: FleetRepository, nav: NavController, locale: St
             Spacer(Modifier.height(16.dp))
             Text("DVIR submitted", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary)
             Spacer(Modifier.height(16.dp))
-            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) { Text(t(locale, "common.back")) }
+            Button(onClick = { nav.popBackStack() }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) { Text(t(locale, "common.back")) }
         }
         return
     }
@@ -75,7 +75,7 @@ fun InspectionScreen(repository: FleetRepository, nav: NavController, locale: St
                             onClick = { results = results + (it.id to r) },
                             modifier = Modifier.weight(1f).testTag("dvir_${it.id}_${r.name}"),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (results[it.id] == r) BentoPurplePrimary else BentoCardBg,
+                                containerColor = if (results[it.id] == r) BentoBluePrimary else BentoCardBg,
                                 contentColor = if (results[it.id] == r) BentoTextPrimary else BentoTextPrimary,
                             ),
                             contentPadding = PaddingValues(4.dp, 8.dp),
@@ -149,7 +149,7 @@ fun InspectionScreen(repository: FleetRepository, nav: NavController, locale: St
             },
             enabled = !submitting,
             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("inspection_submit"),
-            colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary),
+            colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary),
         ) {
             Text(if (submitting) t(locale, "common.pending") else t(locale, "inspection.title"))
         }

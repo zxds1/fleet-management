@@ -161,7 +161,7 @@ fun AdminRowCard(
             }
             if (trailing != null) {
                 Spacer(Modifier.width(8.dp))
-                Text(trailing, style = MaterialTheme.typography.labelMedium, color = BentoPurplePrimary)
+                Text(trailing, style = MaterialTheme.typography.labelMedium, color = BentoBluePrimary)
             }
         }
     }

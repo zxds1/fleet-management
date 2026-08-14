@@ -9,7 +9,7 @@ import androidx.compose.runtime.*
 private val FleetDarkScheme = darkColorScheme(
     background = BentoBackground,
     surface = BentoCardBg,
-    primary = BentoPurplePrimary,
+    primary = BentoBluePrimary,
     onPrimary = BentoTextPrimary,
     onBackground = BentoTextPrimary,
     onSurface = BentoTextPrimary,

@@ -47,7 +47,7 @@ fun AdminProfileScreen(
             AppConstants.APP_LOCALES.forEach { (code, label) ->
                 val selected = lang == code
                 Button(onClick = { lang = code; repository.setLanguage(code); scope.launch { repository.updateOwnProfile(locale = code) }.invokeOnCompletion { status = "Locale updated." } },
-                    colors = ButtonDefaults.buttonColors(containerColor = if (selected) BentoPurplePrimary else BentoCardBg),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selected) BentoBluePrimary else BentoCardBg),
                     modifier = Modifier.weight(1f).testTag("locale_$code")) { Text(label, color = if (selected) BentoTextPrimary else BentoTextSecondary) }
             }
         }

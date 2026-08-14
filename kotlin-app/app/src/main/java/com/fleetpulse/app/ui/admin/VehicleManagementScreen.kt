@@ -34,7 +34,7 @@ fun VehicleManagementScreen(repository: FleetRepository, locale: String, nav: Na
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Vehicle Master", style = MaterialTheme.typography.titleLarge, color = BentoTextPrimary, modifier = Modifier.weight(1f))
-            Button(onClick = { showCreate = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+            Button(onClick = { showCreate = true }, colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
                 Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text("Add vehicle")
             }
         }

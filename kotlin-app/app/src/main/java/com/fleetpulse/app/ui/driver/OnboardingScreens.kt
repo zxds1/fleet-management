@@ -5,9 +5,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.fleetpulse.app.data.repo.FleetRepository
 import com.fleetpulse.app.ui.components.SectionCard
 import com.fleetpulse.app.ui.theme.*
 
@@ -27,7 +30,7 @@ fun OnboardingStep1Screen(repository: FleetRepository, nav: NavController, local
             OutlinedTextField(emergency, { emergency = it }, label = { Text("Emergency contact") }, modifier = Modifier.fillMaxWidth().testTag("onboarding_emergency"), colors = driverFieldColors())
         }
         Spacer(Modifier.height(20.dp))
-        Button(onClick = { nav.navigate("onboarding_step2") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step1_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+        Button(onClick = { nav.navigate("onboarding_step2") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step1_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
             Text("Continue")
         }
     }
@@ -52,7 +55,7 @@ fun OnboardingStep2Screen(repository: FleetRepository, nav: NavController, local
             }
         }
         Spacer(Modifier.height(20.dp))
-        Button(onClick = { nav.navigate("onboarding_step3") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step2_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+        Button(onClick = { nav.navigate("onboarding_step3") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step2_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
             Text("Continue")
         }
         Spacer(Modifier.height(8.dp))
@@ -76,7 +79,7 @@ fun OnboardingStep3Screen(repository: FleetRepository, nav: NavController, local
             }
         }
         Spacer(Modifier.height(20.dp))
-        Button(onClick = { nav.navigate("onboarding_step4") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step3_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+        Button(onClick = { nav.navigate("onboarding_step4") }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step3_next"), colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
             Text("Accept")
         }
         Spacer(Modifier.height(8.dp))
@@ -96,7 +99,7 @@ fun OnboardingStep4Screen(repository: FleetRepository, nav: NavController, local
             Text("Profile, background check and vehicle assignment are complete. You're cleared to start driving.", style = MaterialTheme.typography.bodyMedium, color = BentoTextSecondary)
         }
         Spacer(Modifier.height(20.dp))
-        Button(onClick = { nav.navigate("home") { popUpTo("home") { inclusive = true } } }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step4_start"), colors = ButtonDefaults.buttonColors(containerColor = BentoPurplePrimary)) {
+        Button(onClick = { nav.navigate("home") { popUpTo("home") { inclusive = true } } }, modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_step4_start"), colors = ButtonDefaults.buttonColors(containerColor = BentoBluePrimary)) {
             Text("Start Driving")
         }
     }
