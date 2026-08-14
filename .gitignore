@@ -46,3 +46,32 @@ coverage/
 
 # Docs assets
 docs/apps/screens/
+
+# Android / Gradle build artifacts
+.gradle/
+build/
+**/build/
+**/build-cache/
+*.apk
+*.aab
+*.ap_
+*.jar
+local.properties
+gradle/gradle-daemon-jvm.properties
+gradle/wrapper/gradle-wrapper.jar
+gradle/wrapper/gradle-wrapper.properties
+AGENTS.md
+gradlew
+gradlew.bat
+app/
+settings.gradle.kts
+gradle.properties
+
+# Kotlin app gradle wrapper (managed per-app)
+kotlin-app/gradle/gradle-daemon-jvm.properties
+kotlin-app/gradle/wrapper/gradle-wrapper.jar
+kotlin-app/gradle/wrapper/gradle-wrapper.properties
+
+# Kilo agent memory
+**/.kilocode/
+**/.opencode/
