@@ -1,0 +1,131 @@
+/**
+ * In-code i18n, mirroring the `t(locale, key)` maps in
+ * kotlin-app/.../ui/driver/DriverApp.kt and AdminHelpers.kt. Keys stay
+ * identical so the Expo strings map 1:1 with the Kotlin strings.
+ */
+const EN: Record<string, string> = {
+  "app.title": "FleetPulse",
+  "app.driverShell": "Driver Console",
+  "app.adminShell": "Command Center",
+  "nav.home": "Home",
+  "nav.refuel": "Refuel",
+  "nav.dvir": "DVIR",
+  "nav.mayday": "Mayday",
+  "nav.outbox": "Outbox",
+  "nav.profile": "Profile",
+  "common.back": "Back",
+  "common.cancel": "Cancel",
+  "common.retry": "Retry",
+  "common.discard": "Discard",
+  "common.loading": "Loading…",
+  "common.empty": "Nothing here yet",
+  "common.pending": "Pending",
+  "logout": "Log out",
+  "home.greeting": "Welcome back",
+  "home.clockIn": "Clock In",
+  "home.clockOut": "Clock Out",
+  "home.noActiveShift": "No active shift",
+  "home.quickActions": "Quick Actions",
+  "tabs.refuel": "Refuel",
+  "tabs.inspect": "DVIR",
+  "tabs.accidents": "Accidents",
+  "tabs.training": "Training",
+  "tabs.resources": "Resources",
+  "tabs.anomalies": "Anomalies",
+  "vehicle.title": "My Vehicle",
+  "vehicle.mapTitle": "Vehicle Map",
+  "profile.title": "Profile",
+  "outbox.title": "Outbox",
+  "anomalies.title": "Anomalies",
+  "notifications.title": "Notifications",
+  "myShifts.title": "My Shifts",
+  "documents.title": "Documents",
+  "training.title": "Training Hub",
+  "lesson.title": "Lesson",
+  "resources.title": "Resource Library",
+  "inspection.title": "DVIR Inspection",
+  "fuelHistory.title": "Fuel History",
+  "fuelCorrection.title": "Correct Purchase",
+  "dvirList.title": "Inspections",
+  "accidents.title": "Accidents & Mayday",
+  "myAccidents.title": "My Accidents",
+  "suspended.title": "Account Suspended",
+};
+
+const SW: Record<string, string> = {
+  "app.title": "FleetPulse",
+  "app.driverShell": "Kiwanda cha Dereva",
+  "app.adminShell": "Kituo cha Amri",
+  "nav.home": "Mwanzo",
+  "nav.refuel": "Mafuta",
+  "nav.dvir": "DKP",
+  "nav.mayday": "Tahadhari",
+  "nav.outbox": "Sanduku",
+  "nav.profile": "Wasifu",
+  "common.back": "Rudi",
+  "common.cancel": "Ghairi",
+  "common.retry": "Jaribu tena",
+  "common.discard": "Ondoa",
+  "common.loading": "Inapakia…",
+  "common.empty": "Hakuna kitu hapa bado",
+  "common.pending": "Inasubiri",
+  "logout": "Toka",
+  "home.greeting": "Karibu tena",
+  "home.clockIn": "Ingia Kazi",
+  "home.clockOut": "Toka Kazini",
+  "home.noActiveShift": "Hakuna zamu ya kazini",
+  "home.quickActions": "Vitendo vya Haraka",
+  "tabs.refuel": "Mafuta",
+  "tabs.inspect": "DKP",
+  "tabs.accidents": "Ajali",
+  "tabs.training": "Mafunzo",
+  "training.title": "Kituo cha Mafunzo",
+  "tabs.resources": "Rasilimali",
+  "tabs.anomalies": "Hitilafu",
+  "vehicle.title": "Gari Langu",
+  "vehicle.mapTitle": "Ramani ya Gari",
+  "profile.title": "Wasifu",
+  "outbox.title": "Sanduku la Nje ya Mtandao",
+  "anomalies.title": "Hitilafu",
+  "notifications.title": "Arifa",
+  "myShifts.title": "Zamu Zangu",
+  "documents.title": "Nyaraka",
+  "lesson.title": "Somo",
+  "resources.title": "Maktaba ya Rasilimali",
+  "inspection.title": "Ukaguzi wa DKP",
+  "fuelHistory.title": "Historia ya Mafuta",
+  "fuelCorrection.title": "Sahihisha Ununuzi",
+  "dvirList.title": "Ukaguzi",
+  "accidents.title": "Ajali na Tahadhari",
+  "myAccidents.title": "Ajali Zangu",
+  "suspended.title": "Akaunti Imependwa",
+};
+
+export function t(locale: string, key: string): string {
+  const map = locale === "sw" ? SW : EN;
+  return map[key] ?? EN[key] ?? key;
+}
+
+/** Plain-language error copy keyed by backend error_code (AdminHelpers.errorCopy). */
+const ERROR_EN: Record<string, string> = {
+  UNAUTHENTICATED: "Your session expired. Please sign in again.",
+  FORBIDDEN: "You don't have permission to do that.",
+  NOT_FOUND: "That record could not be found.",
+  VALIDATION_ERROR: "Some details are invalid. Please review and retry.",
+  RATE_LIMITED: "Too many requests. Please wait a moment.",
+  SERVICE_UNAVAILABLE: "The server is temporarily unavailable. Try again shortly.",
+  IDEMPOTENCY_CONFLICT: "This action was already completed.",
+  ODOMETER_DECREASED: "Odometer reading is lower than the last recorded value.",
+  DEFECTS_NOT_REVIEWED: "Outstanding defects must be reviewed first.",
+  CONSENT_REQUIRED: "Consent is required before continuing.",
+  ACCOUNT_SUSPENDED: "This account has been suspended.",
+  DEVICE_REVOKED: "This device has been revoked. Contact an admin.",
+  TRACKER_ALREADY_PAIRED: "This tracker is already paired to another vehicle.",
+  VEHICLE_ALREADY_HAS_TRACKER: "This vehicle already has a tracker. Unpair it first.",
+};
+
+export function errorCopy(code: string, locale: string): string {
+  const map = locale === "sw" ? {} : ERROR_EN;
+  return map[code] ?? "Something went wrong. Please try again.";
+}
+

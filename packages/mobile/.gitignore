@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+android/build/
+android/app/build/
+ios/build/
+*.apk
+*.aab
+*.keystore
+package-lock.json

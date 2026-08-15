@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "FleetPulse",
+    "slug": "fleetpulse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "fleetpulse",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fleetpulse.app"
+    },
+      "android": {
+      "package": "com.fleetpulse.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": [
+      "./plugins/withGradlePluginDedupe.js",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FleetPulse uses your location to clock in/out and raise mayday alerts."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow FleetPulse to access your photos to attach evidence.",
+          "cameraPermission": "Allow FleetPulse to use your camera for photo evidence."
+        }
+      ],
+      "expo-status-bar"
+    ],
+    "extra": {
+      "apiBaseUrl": "http://10.0.2.2:8080/api/v1",
+      "eas": {
+        "projectId": "fleetpulse-mobile"
+      }
+    }
+  }
+}
