@@ -108,9 +108,6 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            // Skip PNG crunching in debug — assets are already optimized and
-            // this step is pure overhead on every rebuild.
-            crunchPngs false
         }
         release {
             // Caution! In production, you need to generate your own keystore file.

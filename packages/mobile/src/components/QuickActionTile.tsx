@@ -1,21 +1,25 @@
 import React from "react";
 import { TouchableOpacity, Text, View, StyleSheet } from "react-native";
 import { colors, spacing, typography } from "../theme";
+import { commandColors } from "../theme/commandColors";
 import { Icon } from "./Icon";
 import { MaterialIcons } from "@expo/vector-icons";
 
 /** 2-up quick action tile — Carbon squared, surfaceContainer bg, IBM Blue accent. */
 export function QuickActionTile({
+  variant = "light",
   label,
   onPress,
   danger = false,
   icon,
 }: {
+  variant?: "light" | "dark";
   label: string;
   onPress: () => void;
   danger?: boolean;
   icon?: keyof typeof MaterialIcons.glyphMap;
 }) {
+  const isDark = variant === "dark";
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -23,13 +27,26 @@ export function QuickActionTile({
       style={[
         tileStyles.tile,
         {
-          backgroundColor: colors.surfaceContainer,
-          borderColor: colors.outlineVariant,
+          backgroundColor: isDark ? commandColors.surface : colors.surfaceContainer,
+          borderColor: isDark ? commandColors.border : colors.outlineVariant,
         },
       ]}
     >
-      {icon ? <Icon name={icon} size={24} color={danger ? colors.error : colors.primary} /> : null}
-      <Text style={[tileStyles.label, { color: danger ? colors.error : colors.primary }]}>{label}</Text>
+      {icon ? (
+        <Icon
+          name={icon}
+          size={24}
+          color={isDark ? (danger ? commandColors.dangerSoft : commandColors.blueSoft) : (danger ? colors.error : colors.primary)}
+        />
+      ) : null}
+      <Text
+        style={[
+          tileStyles.label,
+          { color: isDark ? (danger ? commandColors.dangerSoft : commandColors.blueSoft) : (danger ? colors.error : colors.primary) },
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
