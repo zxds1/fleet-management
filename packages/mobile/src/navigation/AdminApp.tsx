@@ -3,7 +3,6 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { repository } from "../repo/FleetRepository";
 import { useStore } from "../store";
-import { colors } from "../theme";
 import { Icon } from "../components/Icon";
 
 import { DashboardScreen } from "../screens/admin/DashboardScreen";
@@ -36,19 +35,33 @@ function AdminTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.outlineVariant },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.onSurfaceVariant,
+        tabBarStyle: {
+          height: 72,
+          paddingTop: 5,
+          paddingBottom: 8,
+          backgroundColor: "#0D0D10",
+          borderTopColor: "rgba(255,255,255,0.10)",
+        },
+        tabBarLabelStyle: { fontSize: 9, fontWeight: "500" },
+        tabBarActiveTintColor: "#78A9FF",
+        tabBarInactiveTintColor: "#73737B",
+        tabBarActiveBackgroundColor: "rgba(15,98,254,0.035)",
+        tabBarHideOnKeyboard: true,
       }}
     >
-      <Tab.Screen name="dashboard" component={DashboardScreen} options={{ title: "Dashboard", tabBarIcon: ({ color }) => <Icon name="grid-view" color={color} size={22} /> }} />
-      <Tab.Screen name="map" component={VehicleMapScreen} options={{ title: "Map", tabBarIcon: ({ color }) => <Icon name="map" color={color} size={22} /> }} />
+      <Tab.Screen name="dashboard" component={DashboardScreen} options={{ title: "Overview", tabBarIcon: ({ color }) => <Icon name="grid-view" color={color} size={21} /> }} />
+      <Tab.Screen name="map" component={VehicleMapScreen} options={{ title: "Live map", tabBarIcon: ({ color }) => <Icon name="map" color={color} size={21} /> }} />
       <Tab.Screen
         name="console"
         component={AccidentsConsoleScreen}
-        options={{ title: "Console", tabBarIcon: ({ color }) => <Icon name="error" color={color} size={22} />, tabBarBadge: openAccidents > 0 ? openAccidents : undefined }}
+        options={{
+          title: "Incidents",
+          tabBarIcon: ({ color }) => <Icon name="warning" color={color} size={21} />,
+          tabBarBadge: openAccidents > 0 ? openAccidents : undefined,
+          tabBarBadgeStyle: { backgroundColor: "#DA1E28", color: "#FFFFFF", fontSize: 8 },
+        }}
       />
-      <Tab.Screen name="profile" component={AdminProfileScreen} options={{ title: "Profile", tabBarIcon: ({ color }) => <Icon name="person" color={color} size={22} /> }} />
+      <Tab.Screen name="profile" component={AdminProfileScreen} options={{ title: "Operations", tabBarIcon: ({ color }) => <Icon name="tune" color={color} size={21} /> }} />
     </Tab.Navigator>
   );
 }
