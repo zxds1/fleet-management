@@ -321,3 +321,4 @@ identical request/response shapes.
 (overview, shared kernel, auth, REST, ingest, workers, migrations, websocket, error model,
 observability) describe the contracts this implementation satisfies. The implementation brief is
 `docs/backend/IMPLEMENTATION-PROMPT.md`.
+# trigger Thu Oct  8 06:11:33 PM UTC 2026
