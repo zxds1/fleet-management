@@ -100,26 +100,46 @@ jobs:
           echo "EAS_TOKEN is configured."
 
       # EAS build
-      - name: EAS build (Android)
+      - name: EAS build (Android - production AABs)
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
         run: |
           npx eas-cli build \
             --platform android \
-            --profile preview \
+            --profile production-driver \
+            --non-interactive \
+            --clear-cache
+          npx eas-cli build \
+            --platform android \
+            --profile production-admin \
             --non-interactive \
             --clear-cache
 
       # EAS submit (optional, gated on secrets)
-      - name: EAS submit to Google Play
-        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' }}
+      - name: Write Google Play service account
+        if: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google-play-service-account.json
+          echo "Service account written to google-play-service-account.json"
+
+      - name: EAS submit to Google Play (driver)
+        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
         run: |
           npx eas-cli submit \
             --platform android \
-            --profile production \
-            --url "$ARTIFACT_URL" \
+            --profile production-driver \
+            --non-interactive
+
+      - name: EAS submit to Google Play (admin)
+        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          npx eas-cli submit \
+            --platform android \
+            --profile production-admin \
             --non-interactive
 
       # Create GitHub Release (draft, idempotent re-runs)
@@ -128,7 +148,7 @@ jobs:
         run: |
           NOTES="Release $TAG\n\n## Changes since last release\n"
           NOTES+="$(git log --oneline --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD)\n"
-          NOTES+="\n## EAS Build\n- Platform: Android\n- Profile: preview"
+          NOTES+="\n## EAS Build\n- Platform: Android\n- Profiles: production-driver, production-admin\n- Artifacts: AAB for Google Play Store\n- Keystore: helix-release (RSA-2048)"
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

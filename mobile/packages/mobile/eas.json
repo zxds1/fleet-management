@@ -39,9 +39,45 @@
         "APP_VARIANT": "admin",
         "REQUIRE_PINNING": "1"
       }
+    },
+    "production-driver": {
+      "distribution": "store",
+      "android": {
+        "buildType": "aab"
+      },
+      "env": {
+        "APP_VARIANT": "driver",
+        "REQUIRE_PINNING": "1"
+      }
+    },
+    "production-admin": {
+      "distribution": "store",
+      "android": {
+        "buildType": "aab"
+      },
+      "env": {
+        "APP_VARIANT": "admin",
+        "REQUIRE_PINNING": "1"
+      }
     }
   },
   "cli": {
     "version": ">= 12.0.0"
+  },
+  "submit": {
+    "production-driver": {
+      "android": {
+        "serviceAccountKeyPath": "google-play-service-account.json",
+        "track": "internal",
+        "changesNotSentForReview": true
+      }
+    },
+    "production-admin": {
+      "android": {
+        "serviceAccountKeyPath": "google-play-service-account.json",
+        "track": "internal",
+        "changesNotSentForReview": true
+      }
+    }
   }
 }
