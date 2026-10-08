@@ -34,6 +34,10 @@ strip-path = true
     '''packages/mobile/test/.*\.ts''',
     '''packages/mobile/src/screens/auth/.*\.tsx''',
     '''packages/mobile/src/screens/settings/.*\.tsx''',
+    '''packages/api/src/.*\.ts''',
+    '''packages/worker/src/.*\.ts''',
+    '''packages/shared/src/.*\.ts''',
+    '''\.github/workflows/.*\.yml''',
   ]
 
 [[rules]]
