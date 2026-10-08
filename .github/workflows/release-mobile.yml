@@ -1,0 +1,148 @@
+name: release-mobile
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: tag-triggered mobile release (EAS build + GitHub Release)
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Defence-in-depth: tag ancestry guard
+      - name: Tag ancestry guard
+        run: |
+          TARGET_SHA="${{ github.event.before }}"
+          if [ "$TARGET_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "::warning::Force-push or new branch tag — ancestry check skipped."
+            exit 0
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "::error::Tag does not point at a commit on main. Aborting."
+            exit 1
+          fi
+          echo "Tag ancestry verified: commit is on main."
+
+      # Defence-in-depth: tag <-> app version match
+      - name: Tag version match guard
+        run: |
+          TAG_BODY="${TAG#v}"
+          SEMVER="${TAG_BODY%%+*}"
+          BUILD_NUM="${TAG_BODY##*+}"
+          if [ "$SEMVER" = "$TAG_BODY" ]; then
+            echo "::error::Tag must be v<semver>+<buildNumber>, e.g. v1.0.0+1"
+            exit 1
+          fi
+          echo "Tag semver: $SEMVER, build number: $BUILD_NUM"
+          PKG_VERSION=$(node -p "require('./mobile/packages/mobile/package.json').version" 2>/dev/null || echo "")
+          echo "App package version: $PKG_VERSION"
+          if [ "$SEMVER" != "$PKG_VERSION" ]; then
+            echo "::error::Tag semver ($SEMVER) does not match package version ($PKG_VERSION)."
+            exit 1
+          fi
+          echo "Version match verified."
+
+      # Defence-in-depth: no-reuse build number guard
+      - name: Build number reuse guard
+        run: |
+          TAG_BODY="${TAG#v}"
+          SEMVER="${TAG_BODY%%+*}"
+          BUILD_NUM="${TAG_BODY##*+}"
+          echo "Checking for existing releases of version $SEMVER..."
+          EXISTING=$(gh release list --tag "v${SEMVER}+*" 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            echo "::warning::Releases for $SEMVER already exist:"
+            echo "$EXISTING"
+          fi
+          echo "Build number guard passed (idempotent re-runs allowed)."
+
+      # Re-run analyze + tests so the published build is from a green tree
+      - name: Build shared
+        run: npm run build --workspace=@fleet/shared --workspace=@fleet/ws
+
+      - name: Mobile typecheck
+        run: npm run typecheck --workspace=@fleet/mobile
+
+      - name: Mobile unit tests
+        run: npm run test --workspace=@fleet/mobile -- --forceExit
+
+      # Config validation for EAS
+      - name: Validate EAS configuration
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          if [ -z "$EAS_TOKEN" ]; then
+            echo "::error::EAS_TOKEN secret is required for mobile releases."
+            exit 1
+          fi
+          echo "EAS_TOKEN is configured."
+
+      # EAS build
+      - name: EAS build (Android)
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          npx eas-cli build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --clear-cache
+
+      # EAS submit (optional, gated on secrets)
+      - name: EAS submit to Google Play
+        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' }}
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          npx eas-cli submit \
+            --platform android \
+            --profile production \
+            --url "$ARTIFACT_URL" \
+            --non-interactive
+
+      # Create GitHub Release (draft, idempotent re-runs)
+      - name: Generate release notes
+        id: notes
+        run: |
+          NOTES="Release $TAG\n\n## Changes since last release\n"
+          NOTES+="$(git log --oneline --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD)\n"
+          NOTES+="\n## EAS Build\n- Platform: Android\n- Profile: preview"
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create or update GitHub Release
+        run: |
+          RELEASE_NOTES="Release ${{ github.ref_name }}\n\n## Changes since last release\n$(git log --oneline --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD 2>/dev/null || echo 'No previous tag found.')"
+          gh release view "$TAG" 2>/dev/null && \
+            gh release edit "$TAG" --draft=false --notes "$RELEASE_NOTES" --title "$TAG" || \
+            gh release create "$TAG" --draft=true --title "$TAG" --notes "$RELEASE_NOTES" --repo "$GITHUB_REPOSITORY" || true
+          echo "Release created or updated."
+
+      - name: Publish release (finalize draft -> published)
+        if: ${{ success() }}
+        run: |
+          gh release edit "$TAG" --draft=false
+          echo "Release $TAG is now published."

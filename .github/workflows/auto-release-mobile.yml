@@ -1,0 +1,79 @@
+name: auto-release-mobile
+
+on:
+  workflow_run:
+    workflows: [mobile]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: auto-release-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tag:
+    name: automated tagging (mobile)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Compute next build number
+        run: |
+          CURRENT_VERSION=$(node -p "require('./mobile/packages/mobile/package.json').version" 2>/dev/null || echo "0.0.0")
+          SEMVER="${CURRENT_VERSION%%+*}"
+          PKG_BUILD="${CURRENT_VERSION##*+}"
+          # If version has no +buildNumber, default to 1
+          if [ "$SEMVER" = "$CURRENT_VERSION" ]; then
+            PKG_BUILD=1
+          fi
+          # Find the highest build number already tagged for this semver
+          EXISTING_BUILD=0
+          for TAG in $(git tag -l "v${SEMVER}+*" | sort -V); do
+            TAG_BUILD="${TAG##*+}"
+            if [ "$TAG_BUILD" -gt "$EXISTING_BUILD" ] 2>/dev/null; then
+              EXISTING_BUILD="$TAG_BUILD"
+            fi
+          done
+          NEXT_BUILD=$((EXISTING_BUILD + 1))
+          if [ "$NEXT_BUILD" -lt "$PKG_BUILD" ]; then
+            NEXT_BUILD="$PKG_BUILD"
+          fi
+          NEW_TAG="v${SEMVER}+${NEXT_BUILD}"
+          echo "Current version: $CURRENT_VERSION"
+          echo "Next build number: $NEXT_BUILD"
+          echo "New tag: $NEW_TAG"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+      - name: Idempotency — skip if already tagged
+        run: |
+          if git tag -l "v*" | grep -q "^${NEW_TAG}$"; then
+            echo "Tag ${NEW_TAG} already exists — exiting cleanly."
+            echo "ALREADY_TAGGED=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag ${NEW_TAG} does not exist yet."
+            echo "ALREADY_TAGGED=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create git tag (if not already tagged)
+        if: steps.idempotency.outputs.ALREADY_TAGGED != 'true'
+        env:
+          RELEASE_TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TAG_TOKEN" ]; then
+            echo "::error::RELEASE_TAG_TOKEN secret is required for automated tagging."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Automated release: $NEW_TAG"
+          git push origin "$NEW_TAG"
+          echo "Tag $NEW_TAG pushed — release.yml will pick it up."

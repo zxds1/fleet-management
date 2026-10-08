@@ -2,15 +2,17 @@ name: mobile
 
 on:
   pull_request:
+    branches: [staging, main]
     paths:
-      - "packages/mobile/**"
-      - "packages/shared/**"
-      - "packages/ws/**"
-      - ".github/workflows/mobile.yml"
+      - 'mobile/**'
+      - 'packages/shared/**'
+      - '.github/workflows/mobile.yml'
   push:
     branches: [staging, main]
     paths:
-      - "packages/mobile/**"
+      - 'mobile/**'
+      - 'packages/shared/**'
+      - '.github/workflows/mobile.yml'
 
 concurrency:
   group: mobile-${{ github.ref }}
