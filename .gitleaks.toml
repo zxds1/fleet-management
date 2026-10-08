@@ -15,12 +15,21 @@ strip-path = true
     '''(?i)(password|secret|token|api[-_]?key)\s*[:=]\s*(test|placeholder|example|dummy|xxx+|change[-_]?me|local)\b''',
     '''postgres://[^:]+:pg_local_dev@''',
     '''redis://localhost:6379''',
+    '''textContentType\s*=\s*["\']password["\']''',
+    '''password:\s*["\']p["\']''',
+    '''access_token:\s*["\']a["\']''',
+    '''refresh_token:\s*["\']r["\']''',
   ]
   paths = [
     '''node_modules''',
     '''dist''',
     '''build''',
     '''\.git/''',
+    '''deploy/docker-compose\.yml''',
+    '''mobile/packages/mobile/src/i18n/.*\.ts''',
+    '''mobile/packages/mobile/test/.*\.ts''',
+    '''mobile/packages/mobile/src/screens/auth/.*\.tsx''',
+    '''mobile/packages/mobile/src/screens/settings/.*\.tsx''',
   ]
 
 [[rules]]
