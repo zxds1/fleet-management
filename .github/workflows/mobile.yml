@@ -40,7 +40,7 @@ jobs:
       - name: Install mobile app dependencies
         run: |
           cd mobile/packages/mobile
-          npm ci
+          npm install
 
       - name: Mobile typecheck (strict, noUncheckedIndexedAccess)
         run: |
