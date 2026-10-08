@@ -34,7 +34,7 @@ jobs:
     name: Trivy container scan
     runs-on: ubuntu-latest
     steps:
-      - uses:actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Build Dockerfile for scanning
         run: docker build -t fleet-scan -f deploy/Dockerfile .
