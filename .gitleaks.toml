@@ -30,6 +30,10 @@ strip-path = true
     '''mobile/packages/mobile/test/.*\.ts''',
     '''mobile/packages/mobile/src/screens/auth/.*\.tsx''',
     '''mobile/packages/mobile/src/screens/settings/.*\.tsx''',
+    '''packages/mobile/src/i18n/.*\.ts''',
+    '''packages/mobile/test/.*\.ts''',
+    '''packages/mobile/src/screens/auth/.*\.tsx''',
+    '''packages/mobile/src/screens/settings/.*\.tsx''',
   ]
 
 [[rules]]
