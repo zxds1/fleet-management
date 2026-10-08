@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "esnext", "module": "esnext", "moduleResolution": "bundler", "lib": ["esnext"],
+    "jsx": "react-native", "allowJs": true, "resolveJsonModule": true, "esModuleInterop": true,
+    "isolatedModules": true, "noEmit": true, "skipLibCheck": true,
+    "strict": true, "noUncheckedIndexedAccess": true, "noImplicitOverride": true,
+    "baseUrl": ".", "paths": { "@/*": ["src/*"], "@fleet/shared": ["../shared/src/index.ts"] }
+  },
+  "include": ["src", "test", "App.tsx", "index.ts", "app.config.ts"]
+}

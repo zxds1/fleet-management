@@ -1,0 +1,9 @@
+{
+  "name": "helix",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "typecheck": "npm run typecheck -w @fleet/shared && npm run typecheck -w @helix/mobile",
+    "test": "npm test -w @fleet/shared && npm test -w @helix/mobile"
+  }
+}

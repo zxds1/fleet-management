@@ -45,21 +45,33 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Build (tsc -b across workspace)
         run: npm run build
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Lint (tsc --noEmit per package)
         run: npm run lint
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Typecheck
         run: npm run typecheck
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Contract (openapi↔schema + db.ts↔schema)
         run: npm run contract
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Unit + contract tests
         run: npm run test
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
   integration:
     name: integration (throwaway PG + Redis)
@@ -103,20 +115,30 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Validate DDL + seed (db/validate pattern)
         run: npm run db:validate
         continue-on-error: true
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Contract — db.ts ↔ live schema
         run: npm run db:types:check
         continue-on-error: true
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Build
         run: npm run build
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Integration tests (throwaway PG)
         run: npm run test
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
   chaos:
     name: chaos / fault-injection
@@ -159,15 +181,23 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Build
         run: npm run build
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Run chaos / fault-injection tests (network-throttle + DB-latency + Redis-failure + external-5xx + 50-tracker load)
         run: npx jest --config packages/worker/jest.config.cjs --testPathPattern chaos
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
       - name: Run resilience regression tests
         run: npx jest --config packages/worker/jest.config.cjs --testPathPattern "resilience"
+        env:
+          WEBHOOK_SECRET: test-secret-for-ci
 
   signoff-gates:
     name: sign-off gates (release blockers)

@@ -35,7 +35,7 @@ jobs:
         run: npm ci
 
       - name: Rebuild shared (mobile + ws depend on @fleet/shared dist)
-        run: npm run build --workspace=@fleet/shared --workspace=@fleet/ws
+        run: npm run build --workspace=@fleet/db --workspace=@fleet/shared --workspace=@fleet/ws
 
       - name: Mobile typecheck (strict, noUncheckedIndexedAccess)
         run: npm run typecheck --workspace=@fleet/mobile

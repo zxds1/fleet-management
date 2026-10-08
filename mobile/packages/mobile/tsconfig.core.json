@@ -1,0 +1,2 @@
+{"compilerOptions":{"target":"esnext","module":"esnext","moduleResolution":"bundler","lib":["esnext","dom"],"noEmit":true,"skipLibCheck":true,"strict":true,"noUncheckedIndexedAccess":true,"noImplicitOverride":true,"types":[]},
+"include":["src/core/errors.ts","src/core/apiClient.ts","src/core/offlineQueue.ts","src/core/session.ts","src/core/realtime.ts","src/core/memoryQueueStore.ts","src/schemas/index.ts","src/i18n/en.ts","src/i18n/sw.ts"]}
