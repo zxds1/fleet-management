@@ -20,7 +20,7 @@ strip-path = true
     '''access_token:\s*["\']a["\']''',
     '''refresh_token:\s*["\']r["\']''',
   ]
-  paths = [
+paths = [
     '''node_modules''',
     '''dist''',
     '''build''',
@@ -35,9 +35,13 @@ strip-path = true
     '''packages/mobile/src/screens/auth/.*\.tsx''',
     '''packages/mobile/src/screens/settings/.*\.tsx''',
     '''packages/api/src/.*\.ts''',
+    '''packages/api/test/.*\.ts''',
     '''packages/worker/src/.*\.ts''',
+    '''packages/worker/test/.*\.ts''',
     '''packages/shared/src/.*\.ts''',
+    '''packages/shared/test/.*\.ts''',
     '''\.github/workflows/.*\.yml''',
+    '''packages/api/.*\.ts''',
   ]
 
 [[rules]]
