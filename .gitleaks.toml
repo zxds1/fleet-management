@@ -34,6 +34,12 @@ paths = [
     '''packages/mobile/test/.*\.ts''',
     '''packages/mobile/src/screens/auth/.*\.tsx''',
     '''packages/mobile/src/screens/settings/.*\.tsx''',
+    '''packages/mobile/src/repo/.*\.ts''',
+    '''packages/mobile/src/core/__tests__/.*\.ts''',
+    '''packages/mobile/src/core/i18n/.*\.json''',
+    '''packages/mobile/src/screens/admin/.*\.tsx''',
+    '''packages/mobile/app\.json''',
+    '''packages/mobile/src/core/__tests__/.*\.ts''',
     '''packages/api/src/.*\.ts''',
     '''packages/api/test/.*\.ts''',
     '''packages/worker/src/.*\.ts''',
@@ -42,6 +48,12 @@ paths = [
     '''packages/shared/test/.*\.ts''',
     '''\.github/workflows/.*\.yml''',
     '''packages/api/.*\.ts''',
+    '''kotlin-app/.*''',
+    '''docs/support/.*\.md''',
+    '''api/openapi\.yaml''',
+    '''db/validate\.(mjs|sh)''',
+    '''packages/ws/src/config/.*\.ts''',
+    '''packages/mobile/app\.json''',
   ]
 
 [[rules]]
