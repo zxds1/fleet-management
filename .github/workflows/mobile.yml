@@ -34,14 +34,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Rebuild shared (mobile + ws depend on @fleet/shared dist)
+      - name: Build backend packages (shared, db, ws, etc.)
         run: npm run build
 
+      - name: Install mobile app dependencies
+        run: |
+          cd mobile/packages/mobile
+          npm ci
+
       - name: Mobile typecheck (strict, noUncheckedIndexedAccess)
-        run: npm run typecheck --workspace=@fleet/mobile
+        run: |
+          cd mobile/packages/mobile
+          npm run typecheck
 
       - name: Mobile unit tests (security, offline queue, apiClient, session, socket, drivers, admin)
-        run: npm run test --workspace=@fleet/mobile -- --forceExit
+        run: |
+          cd mobile/packages/mobile
+          npm run test -- --forceExit
 
       - name: Secret scan (S-6 — gitleaks pre-commit/CI parity)
         uses: gitleaks/gitleaks-action@v2
@@ -50,5 +59,7 @@ jobs:
         continue-on-error: true
 
       - name: Supply-chain scan (S-5 — npm audit on the mobile workspace)
-        run: npm audit --workspace=@fleet/mobile --audit-level=high
+        run: |
+          cd mobile/packages/mobile
+          npm audit --audit-level=high
         continue-on-error: true
