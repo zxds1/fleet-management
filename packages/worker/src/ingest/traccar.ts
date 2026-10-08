@@ -4,8 +4,16 @@
 // polled by the back-fill (04 §4). Both paths yield this normalised shape.
 
 export interface TraccarPosition {
-  traccarPositionId: number;
-  traccarDeviceId: number;
+  /**
+   * Traccar's own position id, or NULL for a position that did not come from Traccar (a phone-GPS
+   * point). NULL rather than 0/NaN: telemetry.location_updates.traccar_position_id is bigint and
+   * rejects 'NaN', and location_updates_traccar_dedupe is a partial unique index that only applies
+   * WHERE traccar_position_id IS NOT NULL — so a phone point is stored, not de-duplicated, and never
+   * rejected by the column type.
+   */
+  traccarPositionId: number | null;
+  /** Traccar device id, or NULL for a phone point (which has no device). */
+  traccarDeviceId: number | null;
   vehicleId: string;
   recordedAt: Date;
   latitude: number;
@@ -20,17 +28,33 @@ export interface TraccarPosition {
   obdFaultCodes: string[] | null;
   satellites: number | null;
   hdop: number | null;
+  /**
+   * False only when the sender said so (`attributes.isValidFix: false`, i.e. a phone with no GPS fix).
+   * Stored in location_updates.is_valid_fix so the point is kept for the trail but never counts as
+   * driving. Absent means true — a Traccar fix is a fix.
+   */
+  isValidFix: boolean;
   attributes: Record<string, unknown>;
+}
+
+/**
+ * Traccar ids arrive as numbers, numeric strings or (for a phone point) null/absent. Anything that is
+ * not a finite number becomes NULL: `Number(null)` is 0 and `Number(undefined)` is NaN, and both are
+ * worse than an honest NULL — 0 would overwrite app.tracker_health.traccar_device_id and NaN is
+ * rejected outright by the bigint column.
+ */
+function toNullableId(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Parse one raw Traccar position object (as returned by REST / carried on the stream). */
 export function parseTraccarPosition(raw: Record<string, unknown>): TraccarPosition {
-  const deviceId = raw.deviceId ?? raw.traccarDeviceId;
-  const id = raw.id ?? raw.traccarPositionId;
   const attrs = (raw.attributes as Record<string, unknown>) ?? {};
   return {
-    traccarPositionId: Number(id),
-    traccarDeviceId: Number(deviceId),
+    traccarPositionId: toNullableId(raw.id ?? raw.traccarPositionId),
+    traccarDeviceId: toNullableId(raw.deviceId ?? raw.traccarDeviceId),
     vehicleId: String(raw.vehicleId ?? attrs.vehicleId ?? ""),
     recordedAt: raw.fixTime ? new Date(String(raw.fixTime)) : new Date(String(raw.serverTime ?? raw.deviceTime)),
     latitude: Number(raw.latitude),
@@ -45,6 +69,7 @@ export function parseTraccarPosition(raw: Record<string, unknown>): TraccarPosit
     obdFaultCodes: Array.isArray(attrs.faultCodes) ? (attrs.faultCodes as unknown[]).map(String) : null,
     satellites: raw.satellites != null ? Number(raw.satellites) : (attrs.satellites != null ? Number(attrs.satellites) : null),
     hdop: raw.hdop != null ? Number(raw.hdop) : (attrs.hdop != null ? Number(attrs.hdop) : null),
+    isValidFix: attrs.isValidFix !== false,
     attributes: attrs,
   };
 }

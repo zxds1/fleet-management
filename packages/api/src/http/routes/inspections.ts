@@ -128,9 +128,14 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     ),
   );
 
-  // ── Tenant-wide DVIR list (admin review inbox) ───────────────────────────────────────────────
+  // ── DVIR list (admin review inbox) ────────────────────────────────────────────────────────
   // Read-only, tenant-scoped via RLS; requires inspection:read like every other DVIR read. The
   // cursor envelope matches listMine so the mobile client can reuse the same parser.
+  //
+  // OWN-SCOPED, exactly like `/:id` below: a DRIVER holds inspection:read (to read templates and its
+  // own records) but NOT inspection:template_manage, so without this narrowing the route became the
+  // tenant-wide DVIR inbox for every driver — every other driver's inspections, defect counts, plates
+  // and signature names. `inspection:template_manage` is the scope-lift.
   router.get(
     "/",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
@@ -139,7 +144,8 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
       withClient(pool, async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
-        const result = await svc.inspectionQuery.listAll({ limit: query.limit, cursor: query.cursor });
+        const driverId = await ownScopeDriverId(req, svc, "inspection:template_manage");
+        const result = await svc.inspectionQuery.listAll({ limit: query.limit, cursor: query.cursor, driverId });
         if (!result.ok) {
           res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
           return;

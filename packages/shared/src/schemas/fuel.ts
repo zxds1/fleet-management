@@ -1,21 +1,10 @@
 // packages/shared/src/schemas/fuel.ts
 import { z } from "zod";
 
-export const RefuelSchema = z.object({
-  shift_id: z.string().uuid().nullable(),
-  vehicle_id: z.string().uuid(),
-  fuel_card_id: z.string().uuid().nullable().optional(),
-  fuel_card_last_four: z.string().regex(/^\d{4}$/),
-  litres: z.number().positive(),
-  total_cost: z.object({ amount: z.string(), currency: z.string().length(3).default("KES") }),
-  odometer_km: z.number().int().nonnegative(),
-  purchased_at: z.string().datetime(),
-  before_fuel_record_id: z.string().uuid(),
-  after_fuel_record_id: z.string().uuid(),
-  receipt_media_object_id: z.string().uuid(),
-  supplier_name: z.string().max(120).optional(),
-});
-export type RefuelInput = z.infer<typeof RefuelSchema>;
+// RETIRED: the B3 gauge-pair `RefuelSchema` (before_fuel_record_id / after_fuel_record_id) is gone. No
+// endpoint ever created an `app.fuel_records` row, so the ids could not be obtained, and the database
+// already backs the photo-first flow with the `DRIVER_PHOTO` entry source (migration 12).
+// `PhotoFirstRefuelSchema` below is the only driver fuel entry point. See docs/ASSUMPTIONS.md U-12.
 
 export const VerifyPurchaseSchema = z.object({
   action: z.enum(["VERIFY", "REJECT", "CLEAR_PAYMENT"]),
@@ -100,3 +89,25 @@ export const FuelPendingResponseSchema = z.object({
   purchases: z.array(FuelPendingRowSchema),
 });
 export type FuelPendingResponse = z.infer<typeof FuelPendingResponseSchema>;
+
+/** `GET /fuel/cards` — the optional filter for the refuel card picker. */
+export const FuelCardQuerySchema = z.object({
+  vehicle_id: z.string().uuid().optional(),
+});
+
+/**
+ * One card the driver may select. `last_four` and `notes` are deliberately absent: the refuel form
+ * asks the driver for the four digits, and a card note is not something a driver should read on a phone
+ * in a yard. A dedicated card belonging to another vehicle is never returned by the route.
+ */
+export const FuelCardOptionSchema = z.object({
+  id: z.string().uuid(),
+  label: z.string(),
+  provider: z.string(),
+  is_pooled: z.boolean(),
+  assigned_vehicle_id: z.string().uuid().nullable(),
+  status: z.string(),
+});
+export type FuelCardOption = z.infer<typeof FuelCardOptionSchema>;
+
+export const FuelCardsResponseSchema = z.object({ cards: z.array(FuelCardOptionSchema) });

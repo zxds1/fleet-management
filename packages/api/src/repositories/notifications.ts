@@ -5,7 +5,7 @@
 // principal can never see another user's inbox (06 §2.7).
 
 import { BaseRepository } from "@fleet/db";
-import type { DbClient, NotificationRow } from "@fleet/shared";
+import { notificationUnreadSql, type DbClient, type NotificationRow } from "@fleet/shared";
 
 /** Inbox read model for `GET /notifications` (C6.4). Aliases match the DTO field names exactly. */
 export interface NotificationInboxRow {
@@ -80,6 +80,26 @@ export class NotificationRepository extends BaseRepository<NotificationRow> {
       [id, userId],
     );
     return res.rows[0] ?? null;
+  }
+
+  /**
+   * Badge counts (S-08). The cursor page deliberately fetches `limit + 1` so `has_more` needs no COUNT,
+   * which left the client showing "50+" as a lower bound. Two cheap indexed counts close that.
+   *
+   * UNREAD comes from the shared predicate (`notificationUnreadSql`), which is the same one the
+   * gateway uses for its reconnect snapshot — so the badge and the inbox agree by construction
+   * rather than by two hand-written lists that happened to match. `app.notifications` is
+   * append-and-receipt, so there is no `deleted_at` predicate here (see the file header).
+   */
+  async countForUser(userId: string): Promise<{ total: number; unread: number }> {
+    const res = await this.client.query<{ total: string; unread: string }>(
+      `SELECT count(*)::text AS total,
+              count(*) FILTER (WHERE ${notificationUnreadSql()})::text AS unread
+         FROM app.notifications
+        WHERE recipient_user_id = $1::uuid`,
+      [userId],
+    );
+    return { total: Number(res.rows[0]?.total ?? 0), unread: Number(res.rows[0]?.unread ?? 0) };
   }
 
   /**

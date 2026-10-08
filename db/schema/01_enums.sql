@@ -317,6 +317,27 @@ CREATE TYPE app.statement_source AS ENUM (
     'NOT_PROVIDED'      -- B17 mayday path
 );
 
+-- Driver training (12_training.sql). Was MISSING: app.training_enrollments.status is declared
+-- `app.training_status NOT NULL DEFAULT 'NOT_STARTED'` but the type was never created, so 12_training.sql
+-- could not apply and the whole schema failed to load. The value set is the one the code has always
+-- used (TrainingStatus in packages/shared/src/types/db.ts).
+CREATE TYPE app.training_status AS ENUM (
+    'NOT_STARTED',
+    'IN_PROGRESS',
+    'COMPLETED',
+    'EXPIRED'
+);
+
+-- Malware scan verdict (15_media_scans.sql, S-2). Was MISSING for the same reason as training_status:
+-- app.media_scans.status is `app.media_scan_status NOT NULL` and the type was never created, so the
+-- schema failed to load. The three values are exactly the ones MediaScannerJob inserts; `presignGet()`
+-- refuses to mint a readable URL while status is not CLEAN (security.md S-2).
+CREATE TYPE app.media_scan_status AS ENUM (
+    'CLEAN',
+    'VIRUS',
+    'ERROR'
+);
+
 CREATE TYPE app.maintenance_trigger_type AS ENUM (
     'ODOMETER',
     'TIME',

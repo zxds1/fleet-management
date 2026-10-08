@@ -1,12 +1,19 @@
 // packages/api/src/http/routes/fuel.ts
 // Fuel + reconciliation routes (03 §2.3, 03 §4). State-changing routes carry Idempotency-Key
 // (C5.1) and run through executeWrite so audit + outbox commit with the mutation (D8). The fuel
-// anomaly scoring is asynchronous — `submitRefuel` only queues `fuel.ocr` (03 §4).
+// anomaly scoring is asynchronous — capture only queues `fuel.ocr` (03 §4).
+//
+// RETIRED: the B3 gauge-pair entry `POST /fuel/refuel` is gone. It required
+// `before_fuel_record_id` / `after_fuel_record_id`, but NO endpoint ever created an
+// `app.fuel_records` row, and its `requirePermission("fuel:enter")` named a permission absent from
+// `app.permissions` — so it answered 403 FORBIDDEN for every role. The driver fuel flow is
+// `POST /driver/fuel/purchase` (A1.4, photo-first), which the database already backs with the
+// `DRIVER_PHOTO` entry source (migration 12). See docs/ASSUMPTIONS.md U-12.
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { Forbidden, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
-import { FuelCorrectionSchema, PhotoFirstRefuelSchema, RefuelSchema, VerifyPurchaseSchema } from "@fleet/shared";
+import { FuelCardQuerySchema, FuelCorrectionSchema, PhotoFirstRefuelSchema, VerifyPurchaseSchema } from "@fleet/shared";
 import { authenticate, principalOf } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
@@ -54,30 +61,6 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
   const writer = (req: Request, res: Response, fn: Parameters<typeof executeWrite>[3]) =>
     executeWrite(req, res, { pool, idempotency: idem, releaseClaim }, fn);
 
-  // ── Submit a refuel (driver) ────────────────────────────────────────────────────────────
-  router.post(
-    "/refuel",
-    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
-    requirePermission(asPerm("fuel:enter")),
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as Principal;
-        const input = parseBody(RefuelSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const driver = await svc.drivers.findByUserId(principal.userId);
-        if (!driver) return new Forbidden() as never;
-        const result = await svc.fuel.submitRefuel(tx, driver.id, input, {
-          userId: principal.userId,
-          email: principal.email,
-          roles: principal.roles,
-        });
-        if (result.ok) return { status: 201, body: result.value, resourceId: result.value.fuelPurchaseId } as never;
-        return result.error as never;
-      }),
-    ),
-  );
-
   // ── Verify / reject / clear a purchase (Fleet Mgr / Finance) ──────────────────────────────
   router.post(
     "/purchases/:id/verify",
@@ -120,6 +103,36 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
         return result.error as never;
       }),
     ),
+  );
+
+  /**
+   * Cards a driver may select (U-05). Read-only, bounded at 100, guarded by `asset:read` — which DRIVER
+   * holds — rather than `fuel:card_manage`, because choosing which card to present is not card ADMIN
+   * (only `POST /fuel/cards` is). The four digits and any note are NOT returned.
+   *
+   * SCOPE: `vehicle_id` is honoured only for a caller holding `fuel:read` (Fleet Mgr / Finance), which
+   * is fleet-wide by design. Everyone else — a DRIVER on `asset:read` — has their vehicle derived from
+   * their OWN open shift, so the query parameter cannot be used to read another vehicle's dedicated
+   * card. A caller with no open shift sees the pooled cards only.
+   */
+  router.get(
+    "/cards",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("asset:read")),
+    asyncHandler(async (req, res) => {
+      const query = parseQuery(FuelCardQuerySchema, req);
+      const principal = principalOf(req);
+      await withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        let vehicleId = query.vehicle_id;
+        if (!principal.permissions.has(asPerm("fuel:read"))) {
+          const driver = await svc.drivers.getByUserId(principal.userId);
+          const assignment = driver ? await svc.assignments.getActiveForDriver(driver.id) : null;
+          vehicleId = assignment?.vehicle_id ?? undefined;
+        }
+        res.status(200).json({ cards: await svc.cards.listSelectable(vehicleId) });
+      });
+    }),
   );
 
   // ── Reconciliation inbox (read, cursor) ────────────────────────────────────────────────────
@@ -186,11 +199,11 @@ export function createReconciliationRouter(deps: FuelRouterDeps): Router {
 }
 
 /**
- * Driver photo-first fuel capture (A1.4), mounted at /driver/fuel.
+ * Driver fuel capture (A1.4), mounted at /driver/fuel. This is now the ONLY driver fuel entry point.
  *
- * Distinct from POST /fuel/refuel, which keeps the B3 gauge-pair contract under `fuel:enter`.
- * Here the driver submits photographs and an odometer reading only; OCR fills the rest
- * asynchronously and the driver may correct it before an Admin verifies.
+ * The driver submits photographs and an odometer reading only; OCR fills litres / amount / station /
+ * date asynchronously, and the driver may correct it with `POST /driver/fuel/correct` before an Admin
+ * verifies. There is no gauge-pair variant (see the file header).
  */
 export function createDriverFuelRouter(deps: FuelRouterDeps): Router {
   const router = Router();

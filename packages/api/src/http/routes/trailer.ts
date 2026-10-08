@@ -5,13 +5,14 @@
 
 import { Router, type Request, type Response } from "express";
 import { Forbidden, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
-import { TrailerSwapSchema } from "@fleet/shared";
+import { TrailerQuerySchema, TrailerSwapSchema } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
-import { parseBody } from "../validate";
+import { parseBody, parseQuery } from "../validate";
+import { withClient } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -62,6 +63,25 @@ export function createTrailerRouter(deps: TrailerRouterDeps): Router {
         return result.error as never;
       }),
     ),
+  );
+
+  /**
+   * Trailers a driver may hook (U-03). `GET /trailers` did not exist, so `TrailerSwapSchema.trailer_id`
+   * was an id the app could not obtain and the swap screen was create-only. Read-only and bounded (the
+   * query caps at 200), guarded by `trailer:swap` so only someone who may actually perform a swap can
+   * browse. It is NOT tenant-sensitive beyond RLS: every trailer in the tenant is a trailer you may hook.
+   */
+  router.get(
+    "/",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("trailer:swap")),
+    asyncHandler(async (req, res) => {
+      const query = parseQuery(TrailerQuerySchema, req);
+      await withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        res.status(200).json({ trailers: await svc.trailers.listAvailable(query.trailer_type) });
+      });
+    }),
   );
 
   return router;

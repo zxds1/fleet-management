@@ -354,9 +354,63 @@ export class VehicleRepository extends BaseRepository<VehicleRow> {
   }
 }
 
+/**
+ * Trailers a driver may hook (U-03). Bounded and ordered by plate rather than paginated: the fleet holds
+ * tens of trailers, not thousands. `status` / `is_operational` are returned because an out-of-service
+ * trailer must not be offered, and the reefer band is returned so the DVIR can be told what is in range.
+ */
+export interface TrailerOptionRow {
+  id: string;
+  license_plate: string;
+  trailer_type: string;
+  status: string;
+  is_operational: boolean;
+  current_vehicle_id: string | null;
+  reefer_target_temp_min_c: number | null;
+  reefer_target_temp_max_c: number | null;
+  is_external: boolean;
+}
+
 export class TrailerRepository extends BaseRepository<TrailerRow> {
   constructor(client: DbClient) {
     super(client, "app.trailers");
+  }
+
+  /**
+   * Hookable trailers: the canonical `app.v_dispatchable_trailers` predicate (not soft-deleted,
+   * AVAILABLE, operational, not merged away — 11_views.sql) PLUS the hook state.
+   *
+   * The hook conditions matter: `TrailerService.swap` rejects a trailer that already has an active
+   * assignment with 409 DUPLICATE (trailer_assignments_one_active_per_trailer), and `current_vehicle_id`
+   * is the denormalised hook this row carries. Advertising either would offer a choice the very next
+   * screen refuses. The view cannot express them (it projects neither column), hence app.trailers.
+   */
+  async listAvailable(trailerType?: string): Promise<TrailerOptionRow[]> {
+    const res = await this.client.query<TrailerOptionRow>(
+      `SELECT t.id::text              AS id,
+              t.license_plate,
+              t.trailer_type::text      AS trailer_type,
+              t.status::text            AS status,
+              t.is_operational,
+              t.current_vehicle_id::text AS current_vehicle_id,
+              t.reefer_target_temp_min_c::float8 AS reefer_target_temp_min_c,
+              t.reefer_target_temp_max_c::float8 AS reefer_target_temp_max_c,
+              t.is_external
+         FROM app.trailers t
+        WHERE t.deleted_at IS NULL
+          AND t.status = 'AVAILABLE'
+          AND t.is_operational = true
+          AND t.merged_into_trailer_id IS NULL
+          AND t.current_vehicle_id IS NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM app.trailer_assignments ta
+                 WHERE ta.trailer_id = t.id AND ta.unassigned_at IS NULL)
+          AND ($1::app.trailer_type IS NULL OR t.trailer_type = $1::app.trailer_type)
+        ORDER BY t.license_plate ASC
+        LIMIT 200`,
+      [trailerType ?? null],
+    );
+    return res.rows;
   }
 }
 

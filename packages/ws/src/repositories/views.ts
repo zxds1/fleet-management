@@ -2,11 +2,7 @@
 // Read-only projections the gateway recomputes server-side (07 §3). The gateway holds no system of
 // record; every payload is derived from PG here. Parameterised SQL only (06 §2).
 
-import type {
-  DbClient,
-  NotificationRow,
-  VehicleDisplayStateViewRow,
-} from "@fleet/shared";
+import { notificationUnreadSql, type DbClient, type NotificationRow, type VehicleDisplayStateViewRow } from "@fleet/shared";
 
 export class VehicleStateRepository {
   constructor(private readonly client: DbClient) {}
@@ -29,7 +25,7 @@ export class NotificationRepository {
       `SELECT *
          FROM app.notifications
         WHERE recipient_user_id = $1
-          AND status IN ('QUEUED', 'SENT', 'DELIVERED')
+          AND ${notificationUnreadSql()}
         ORDER BY queued_at DESC
         LIMIT $2`,
       [userId, limit],

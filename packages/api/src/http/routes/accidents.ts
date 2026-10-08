@@ -141,6 +141,9 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   );
 
   // ── Verify telemetry hash chain (read) ──────────────────────────────────────────────────
+  // OWN-SCOPED, exactly like `GET /:id` below: `fn_verify_accident_chain` takes only the report id,
+  // so without resolving the accident own-scoped first, a DRIVER holding accident:read could verify —
+  // and existence-probe — any accident id in the tenant. `accident:update` is the scope-lift.
   router.get(
     "/:id/telemetry/verify",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
@@ -148,6 +151,13 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
+        const driverId = await ownScopeDriverId(req, svc, "accident:update");
+        const owned = await svc.accidentQuery.getOne(req.params.id!, driverId);
+        if (!owned.ok) {
+          const status = owned.error instanceof NotFound ? 404 : 422;
+          res.status(status).json({ error_code: owned.error.error_code, status, title: owned.error.title });
+          return;
+        }
         const result = await svc.accidentQuery.verifyChain(req.params.id!);
         if (!result.ok) {
           res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });

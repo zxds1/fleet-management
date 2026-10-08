@@ -1,8 +1,14 @@
 // packages/api/test/fuel.service.test.ts
-// Unit tests for FuelService using fakes (no DB). Covers submitRefuel (queues async OCR) and the
-// verifyPurchase state machine (VERIFY / REJECT / CLEAR_PAYMENT gating).
+// Unit tests for FuelService using fakes (no DB). Covers the verifyPurchase state machine
+// (VERIFY / REJECT / CLEAR_PAYMENT gating).
+//
+// The gauge-pair entry (`FuelService.submitRefuel`, POST /fuel/refuel) was RETIRED: it required a
+// before/after app.fuel_records pair that no endpoint ever created, and its requirePermission named a
+// code absent from app.permissions, so it answered 403 for every role. `submitPhotoFirst`
+// (POST /driver/fuel/purchase) is the only driver fuel entry. Its test block was deleted with the
+// method rather than left as a permanently-skipped block that no longer compiles.
 
-import { ok, type Result, type Tx, type DbClient } from "@fleet/shared";
+import { ok, type Tx, type DbClient } from "@fleet/shared";
 import { Forbidden, NotFound } from "@fleet/shared";
 import { FuelService } from "../src/services/fuel";
 import type { FuelPurchaseRow } from "@fleet/shared";
@@ -24,32 +30,7 @@ function makeService(overrides: { getById?: FuelPurchaseRow | null; insertReturn
   return { svc: new FuelService(purchases, fuelRecords), inserted };
 }
 
-const refuelInput = {
-  shift_id: "shift-1",
-  vehicle_id: "veh-1",
-  fuel_card_id: "card-1",
-  fuel_card_last_four: "1234",
-  litres: 50,
-  total_cost: { amount: "5000", currency: "KES" },
-  odometer_km: 5000,
-  purchased_at: new Date().toISOString(),
-  before_fuel_record_id: "fr-before",
-  after_fuel_record_id: "fr-after",
-  receipt_media_object_id: "media-1",
-};
 const actor = { userId: "user-1", email: "a@b.co", roles: ["DRIVER"] };
-
-describe("FuelService.submitRefuel", () => {
-  it("creates a purchase and queues fuel.ocr", async () => {
-    const { svc, inserted } = makeService();
-    const outbox: unknown[] = [];
-    const tx2 = { ...tx, registerOutbox: (e: unknown) => void outbox.push(e) } as unknown as Tx;
-    const r: Result<{ fuelPurchaseId: string }> = await svc.submitRefuel(tx2, "driver-1", refuelInput, actor);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value.fuelPurchaseId).toBe(inserted.id);
-    expect(outbox).toHaveLength(1);
-  });
-});
 
 describe("FuelService.verifyPurchase", () => {
   it("returns NOT_FOUND for an unknown purchase", async () => {

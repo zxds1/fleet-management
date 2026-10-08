@@ -251,7 +251,6 @@ export const ERROR_CODE_BUCKET: Record<string, ErrorBucket> = Object.freeze({
   ODOMETER_DECREASED: "business",
   ODOMETER_DIVERGENCE: "business",
   HOS_REST_BLOCKED: "business",
-  MISSING_GAUGE_PAIR: "business",
   DVIR_FAIL_NEEDS_PHOTO: "business",
   DEFECTS_NOT_REVIEWED: "business",
   WORK_PLAN_REQUIRED: "business",

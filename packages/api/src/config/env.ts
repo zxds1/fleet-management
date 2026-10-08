@@ -76,7 +76,11 @@ const EnvSchema = z.object({
   // Base URL of the web/admin console, used to build the invitation accept link sent by email.
   FRONTEND_URL: z.string().default("http://localhost:3000"),
 
-  // Required privacy/data-processing consent version surfaced by GET /me/consent (C5.5). A user
+  // Traccar GPS tracking (A1.1). The API needs these only for the provisioning path (POST /devices);
+  // the webhook ingest is public and the back-fill poller lives in @fleet/worker with its own copy.
+  TRACCAR_BASE_URL: z.string().default("http://localhost:8082"),
+  TRACCAR_USERNAME: z.string().default("admin"),
+  TRACCAR_PASSWORD: z.string().default("admin"),
   // who has accepted any version lower than this must re-consent before sensitive work.
   CONSENT_REQUIRED_VERSION: z.string().default("2026.1"),
 

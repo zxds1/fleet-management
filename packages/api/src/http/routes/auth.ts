@@ -20,7 +20,7 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
-import { AcceptInviteSchema, ConsentSchema, LoginSchema, MfaEnrollSchema, SetPinSchema, SignupSchema } from "@fleet/shared";
+import { LoginSchema, MfaEnrollSchema, SetPinSchema, SignupSchema, AcceptInviteSchema, ConsentSchema } from "@fleet/shared";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 import type { IssuedSession } from "../../services/session";
@@ -39,6 +39,33 @@ const DeviceRegisterSchema = z.object({
   push_token: z.string().max(512).optional(),
 });
 const DeviceRevokeSchema = z.object({ device_id_hash: z.string().min(16) });
+
+// IP-level rate limiter for login: 20 failures per 5 minutes per IP.
+interface RateEntry { failures: number; firstFailure: number; blockedUntil: number; }
+const loginRateMap = new Map<string, RateEntry>();
+const RATE_WINDOW_MS = 5 * 60_000;
+const RATE_LIMIT = 20;
+const RATE_BLOCK_MS = 15 * 60_000;
+
+function checkLoginRate(ip: string): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  const entry = loginRateMap.get(ip);
+  if (!entry) return { allowed: true, retryAfterMs: 0 };
+  if (entry.blockedUntil > now) return { allowed: false, retryAfterMs: entry.blockedUntil - now };
+  if (now - entry.firstFailure > RATE_WINDOW_MS) { loginRateMap.delete(ip); return { allowed: true, retryAfterMs: 0 }; }
+  return { allowed: true, retryAfterMs: 0 };
+}
+
+function recordLoginFailure(ip: string): void {
+  const now = Date.now();
+  const entry = loginRateMap.get(ip);
+  if (!entry || now - entry.firstFailure > RATE_WINDOW_MS) {
+    loginRateMap.set(ip, { failures: 1, firstFailure: now, blockedUntil: 0 });
+    return;
+  }
+  entry.failures++;
+  if (entry.failures >= RATE_LIMIT) entry.blockedUntil = now + RATE_BLOCK_MS;
+}
 
 /** Casts a config-sourced permission code string to the generated union without widening errors. */
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -82,8 +109,14 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/login",
     idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
+    asyncHandler(async (req, res) => {
+      const clientIp = ip(req) ?? "unknown";
+      const rate = checkLoginRate(clientIp);
+      if (!rate.allowed) {
+        res.setHeader("Retry-After", String(Math.ceil(rate.retryAfterMs / 1000)));
+        return res.status(429).json({ status: 429, code: "RATE_LIMITED", message: `Too many login attempts. Try again in ${Math.ceil(rate.retryAfterMs / 60000)} minutes.` });
+      }
+      return writer(req, res, async (tx, ctx) => {
         const input = parseBody(LoginSchema, req);
         const svc = makeServices(tx.client, infra);
         const login = await svc.auth.login({
@@ -96,6 +129,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         });
 
         if (isErr(login)) {
+          recordLoginFailure(clientIp);
           tx.audit({
             action: "LOGIN_FAILED",
             entity_table: "app.users",
@@ -130,8 +164,8 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           http_method: req.method,
         });
         return ok({ status: 200, body: sessionBody(s), resourceId: s.sessionId });
-      }),
-    ),
+      });
+    }),
   );
 
   // ── MFA verify (challenge → tokens) ─────────────────────────────────────────────────────
@@ -267,7 +301,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/mfa/enroll",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
-    requirePermission(asPerm("MANAGE_OWN_MFA")),
+    requirePermission(asPerm("manage_own_mfa")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -359,7 +393,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.post(
     "/devices/revoke",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
-    requirePermission(asPerm("REVOKE_DEVICE")),
+    requirePermission(asPerm("revoke_device")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {

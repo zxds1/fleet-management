@@ -106,9 +106,46 @@ export class FuelPurchaseRepository extends BaseRepository<FuelPurchaseRow> {
   }
 }
 
+/**
+ * Cards a driver may select (U-05). `POST /fuel/cards` was the only fuel-card route and it is a CREATE
+ * behind `fuel:card_manage`, which DRIVER does not hold — so the app had nothing to put in a picker.
+ * `card_last_four` and `notes` are deliberately NOT returned: the picker shows a label and provider, and
+ * the driver still types the four digits they are asked for on the refuel form.
+ */
+export interface FuelCardOptionRow {
+  id: string;
+  label: string;
+  provider: string;
+  is_pooled: boolean;
+  assigned_vehicle_id: string | null;
+  status: string;
+}
+
 export class FuelCardRepository extends BaseRepository<FuelCardRow> {
   constructor(client: DbClient) {
     super(client, "app.fuel_cards");
+  }
+
+  /**
+   * Active cards, optionally narrowed to one vehicle (its dedicated card plus every pooled card).
+   * A dedicated card belonging to a DIFFERENT vehicle is never returned.
+   */
+  async listSelectable(vehicleId?: string | null): Promise<FuelCardOptionRow[]> {
+    const res = await this.client.query<FuelCardOptionRow>(
+      `SELECT id::text            AS id,
+              label,
+              provider,
+              is_pooled,
+              assigned_vehicle_id::text AS assigned_vehicle_id,
+              status
+         FROM app.fuel_cards
+        WHERE status = 'ACTIVE'
+          AND ($1::uuid IS NULL OR is_pooled = true OR assigned_vehicle_id = $1::uuid)
+        ORDER BY is_pooled DESC, label ASC
+        LIMIT 100`,
+      [vehicleId ?? null],
+    );
+    return res.rows;
   }
 }
 

@@ -249,13 +249,14 @@ export class InspectionQuery {
   }
 
   /** Tenant-wide DVIR submissions for the admin review inbox (requires inspection:read). */
-  async listAll(opts: { limit: number; cursor?: string }): Promise<Result<CursorPage<DvirSummaryRow>>> {
+  async listAll(opts: { limit: number; cursor?: string; driverId?: string }): Promise<Result<CursorPage<DvirSummaryRow>>> {
     const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
     const cursor = decodeCursor(opts.cursor);
     const rows = await this.inspections.listAll({
       limit: limit + 1,
       cursorSort: cursor?.sort,
       cursorId: cursor?.id,
+      driverId: opts.driverId,
     });
     return ok(buildPage(rows, limit, (row) => ({ sort: String(row.submitted_at ?? ""), id: row.inspection_id })));
   }

@@ -309,6 +309,7 @@ export class IngestConsumer {
           obdFaultCodes: pos.obdFaultCodes,
           satellites: pos.satellites,
           hdop: pos.hdop,
+          isValidFix: pos.isValidFix,
           traccarPositionId: pos.traccarPositionId,
           traccarDeviceId: pos.traccarDeviceId,
           attributes: pos.attributes,

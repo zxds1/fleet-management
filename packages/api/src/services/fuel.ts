@@ -1,5 +1,5 @@
 // packages/api/src/services/fuel.ts
-// Fuel domain (03 §2.3, 03 §4). `submitRefuel` creates the purchase with its mandatory gauge pair
+// Fuel domain (03 §2.3, 03 §4). The driver entry point is photo-first (A1.4)
 // and queues async OCR + anomaly scoring; `verifyPurchase` is the Fleet Manager / Finance review.
 // Every rule returns a Result with a frozen `error_code` (08 §1); DB constraints are the authority.
 
@@ -16,7 +16,6 @@ import {
 import type {
   FuelCorrectionInput,
   PhotoFirstRefuelInput,
-  RefuelInput,
   VerifyPurchaseInput,
 } from "@fleet/shared";
 import type { FuelCardRow, FuelPurchaseRow } from "@fleet/shared";
@@ -59,52 +58,6 @@ export class FuelService {
     private readonly purchases: FuelPurchaseRepository,
     private readonly fuelRecords: FuelRecordRepository,
   ) {}
-
-  async submitRefuel(tx: Tx, driverId: string, input: RefuelInput, actor: Actor): Promise<Result<RefuelOutcome>> {
-    // DB enforces the gauge pair (fuel_purchases_driver_entry_has_gauge_pair); pre-check for a clean code.
-    if (!input.before_fuel_record_id || !input.after_fuel_record_id) {
-      return err(violation("MISSING_GAUGE_PAIR", "Missing gauge pair", "A driver refuel requires before + after gauge records (B3)."));
-    }
-
-    const purchase = await this.purchases.insert({
-      shift_id: input.shift_id,
-      vehicle_id: input.vehicle_id,
-      driver_id: driverId,
-      entry_source: "DRIVER",
-      fuel_card_id: input.fuel_card_id ?? null,
-      fuel_card_last_four: input.fuel_card_last_four,
-      supplier_name: input.supplier_name ?? null,
-      litres: String(input.litres),
-      total_cost: input.total_cost.amount,
-      currency: input.total_cost.currency,
-      odometer_km: input.odometer_km,
-      purchased_at: input.purchased_at,
-      receipt_media_object_id: input.receipt_media_object_id,
-      before_fuel_record_id: input.before_fuel_record_id,
-      after_fuel_record_id: input.after_fuel_record_id,
-    });
-
-    tx.audit({
-      action: "CREATE",
-      entity_table: "app.fuel_purchases",
-      entity_id: purchase.id,
-      actor_user_id: actor.userId,
-      actor_email: actor.email,
-      actor_role_codes: actor.roles,
-      request_id: (tx as { requestId?: string }).requestId,
-      endpoint: "/fuel/refuel",
-      http_method: "POST",
-    });
-    // Anomaly scoring + OCR are asynchronous (03 §4); the worker reads this outbox event.
-    tx.registerOutbox({
-      event_type: "fuel.ocr",
-      aggregate_type: "fuel_purchase",
-      aggregate_id: purchase.id,
-      payload: { driverId, vehicleId: input.vehicle_id },
-    });
-
-    return ok({ fuelPurchaseId: purchase.id, openAnomalies: [] });
-  }
 
   /** POST /driver/fuel/purchase (A1.4). Queues OCR by leaving ocr_status='PENDING'. */
   async submitPhotoFirst(

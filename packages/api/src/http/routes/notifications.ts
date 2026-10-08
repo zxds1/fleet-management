@@ -63,11 +63,33 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
     ),
   );
 
+  /**
+   * Badge counts (S-08). Registered BEFORE `/:id/read` so the literal path wins the match. Same
+   * `notification:read` gate as the list, and scoped to the caller exactly as the list is.
+   */
+  router.get(
+    "/count",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("notification:read")),
+    asyncHandler(async (req, res) => {
+      const principal = (req as Request & { principal?: Principal }).principal as Principal;
+      await withClient(pool, async (client) => {
+        const svc = makeServices(client, infra);
+        const counts = await svc.notification.countForUser(principal.userId);
+        res.status(200).json(counts);
+      });
+    }),
+  );
+
   // ── Acknowledge one notification (contract: 204 No Content) ─────────────────────────────
+  // `notification:read`, NOT `notification:manage`: this route only ever flips the caller's OWN row
+  // (markRead is scoped by recipient_user_id), and `notification:manage` is the template/roster
+  // permission an Admin holds. Gating the ack on it left a driver able to see the badge but never
+  // able to clear it, so `unread` could never return to zero.
   router.post(
     "/:id/read",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
-    requirePermission(asPerm("notification:manage")),
+    requirePermission(asPerm("notification:read")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -94,10 +116,11 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   );
 
   // ── Acknowledge all notifications (contract: 204 No Content) ────────────────────────────
+  // `notification:read` for the same reason as `/:id/read`: own rows only.
   router.post(
     "/read-all",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
-    requirePermission(asPerm("notification:manage")),
+    requirePermission(asPerm("notification:read")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {

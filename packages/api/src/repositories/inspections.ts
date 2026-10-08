@@ -48,11 +48,31 @@ export interface DvirDetailItemRow {
   blocker: boolean;
 }
 
+/** One row of a checklist (B.10). Without these the DVIR screen cannot render anything. */
+export interface InspectionTemplateItemOption {
+  template_item_id: string;
+  /** Stable machine code (TIRES, REEFER_TEMP, ...). Used as the result key, never shown raw. */
+  code: string;
+  label_en: string;
+  label_sw: string;
+  /** BLOCKER fails ground the asset; WARNING is a recorded defect. */
+  severity: "BLOCKER" | "WARNING";
+  /** PASS_FAIL items need pass/fail/NA; NUMERIC items need a number (the reefer temperature, M6). */
+  input_type: "PASS_FAIL" | "NUMERIC";
+  unit: string | null;
+  min_value: number | null;
+  max_value: number | null;
+  is_required: boolean;
+  sequence: number;
+}
+
 /** A checklist the driver may start (B.10). */
 export interface InspectionTemplateOption {
   template_id: string;
   name: string;
   label: string;
+  subject: string;
+  items: InspectionTemplateItemOption[];
 }
 
 /**
@@ -123,27 +143,33 @@ export class InspectionRepository extends BaseRepository<InspectionRow> {
   }
 
   /**
-   * Single DVIR header. `review_note` and `odometer_km` have no column in this schema, so both are
-   * projected as NULL to keep the read model stable for the client contract.
-   * `driverId` narrows the lookup to that driver's own submission (C6.2).
-   */
-  /**
-   * Tenant-wide DVIR submissions for the admin review inbox. Keyset paginated on (performed_at, id).
+   * Tenant-wide DVIR submissions for the admin review inbox, keyset paginated on (performed_at, id).
    * RLS already fences every row to the caller's tenant; this is the unfiltered company view that an
    * ADMIN/FLEET_MANAGER with inspection:read may see.
+   *
+   * `driverId` narrows it to that driver's own submissions (the same own-scoping listByDriver and
+   * getDetailById apply), which is what the route passes for a caller WITHOUT inspection:template_manage.
+   * No `deleted_at` predicate: app.inspections is not soft-deleted — see the constructor.
    */
-  async listAll(opts: { limit: number; cursorSort?: string; cursorId?: string }): Promise<DvirSummaryRow[]> {
+  async listAll(opts: { limit: number; cursorSort?: string; cursorId?: string; driverId?: string }): Promise<DvirSummaryRow[]> {
     const params: unknown[] = [];
     let keyset = "";
     if (opts.cursorSort && opts.cursorId) {
       params.push(opts.cursorSort, opts.cursorId);
       keyset = `AND (i.performed_at, i.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
     }
+    // Same own-scoping as getDetailById: a driver without inspection:template_manage sees only their
+    // own rows. This is what keeps the tenant-wide list from becoming every driver's DVIR inbox.
+    let scope = "";
+    if (opts.driverId) {
+      params.push(opts.driverId);
+      scope = ` AND i.performed_by_driver_id = $${params.length}::uuid`;
+    }
     params.push(opts.limit);
     const res = await this.client.query<DvirSummaryRow>(
       `SELECT ${DVIR_DERIVED_SQL}
          FROM app.inspections i ${DVIR_JOINS_SQL}
-        WHERE i.deleted_at IS NULL ${keyset}
+        WHERE true ${scope} ${keyset}
         ORDER BY i.performed_at DESC, i.id DESC
         LIMIT $${params.length}`,
       params,
@@ -151,12 +177,17 @@ export class InspectionRepository extends BaseRepository<InspectionRow> {
     return res.rows;
   }
 
+  /**
+   * Single DVIR header. `review_note` and `odometer_km` have no column in this schema, so both are
+   * projected as NULL to keep the read model stable for the client contract.
+   * `driverId` narrows the lookup to that driver's own submission (C6.2).
+   */
   async getDetailById(inspectionId: string, driverId?: string): Promise<DvirDetailRow | null> {
     const params: unknown[] = [inspectionId];
     let scope = "";
     if (driverId) {
       params.push(driverId);
-      scope = ` AND i.driver_id = $${params.length}::uuid`;
+      scope = ` AND i.performed_by_driver_id = $${params.length}::uuid`;
     }
     const res = await this.client.query<DvirDetailRow>(
       `SELECT ${DVIR_DERIVED_SQL},
@@ -216,17 +247,52 @@ export class InspectionTemplateRepository extends BaseRepository<InspectionTempl
     super(client, "app.inspection_templates", { deletedAtColumn: null });
   }
 
-  /** Active, published checklists a driver may start (B.10). Not paginated — the list is small. */
+  /**
+   * Active, published checklists a driver may start (B.10). Not paginated — the list is small.
+   *
+   * The items come back with the template because a driver has no other way to learn the checklist:
+   * `InspectionTemplateItemRepository` has no read method, so before this the driver received
+   * `{ template_id, name, label }` and could not render a single line of the DVIR (E-09).
+   */
   async listActive(): Promise<InspectionTemplateOption[]> {
-    const res = await this.client.query<InspectionTemplateOption>(
+    const templates = await this.client.query<Omit<InspectionTemplateOption, "items">>(
       `SELECT t.id::text AS template_id,
               t.name     AS name,
-              t.name     AS label
+              t.name     AS label,
+              t.subject::text AS subject
          FROM app.inspection_templates t
         WHERE t.is_active = true AND t.published_at IS NOT NULL
         ORDER BY t.subject ASC, t.name ASC`,
     );
-    return res.rows;
+    if (templates.rows.length === 0) return [];
+
+    const ids = templates.rows.map((r) => r.template_id);
+    const items = await this.client.query<InspectionTemplateItemOption & { template_id: string }>(
+      `SELECT template_id::text AS template_id,
+              id::text            AS template_item_id,
+              code,
+              label_en,
+              label_sw,
+              severity::text      AS severity,
+              input_type::text    AS input_type,
+              unit,
+              min_value::float8   AS min_value,
+              max_value::float8   AS max_value,
+              is_required,
+              sequence
+         FROM app.inspection_template_items
+        WHERE template_id = ANY($1::uuid[])
+        ORDER BY template_id, sequence`,
+      [ids as string[]],
+    );
+    const byTemplate = new Map<string, InspectionTemplateItemOption[]>();
+    for (const row of items.rows) {
+      const { template_id, ...item } = row;
+      const list = byTemplate.get(template_id) ?? [];
+      list.push(item);
+      byTemplate.set(template_id, list);
+    }
+    return templates.rows.map((t) => ({ ...t, items: byTemplate.get(t.template_id) ?? [] }));
   }
 }
 

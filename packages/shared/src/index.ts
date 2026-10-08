@@ -31,6 +31,7 @@ export * from "./schemas/status";
 export { DriverConsentSchema, DriverConsent, DriverTrainingStatusSchema, DriverTrainingStatus } from "./schemas/driver";
 export * from "./schemas/workplan";
 export * from "./schemas/hardware";
+export * from "./notifications";
 export * from "./realtime";
 export * from "./telemetry";
 export * from "./tracing";

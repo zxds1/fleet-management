@@ -482,47 +482,6 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
   # ------------------------------------------------------------------ Fuel
-  /fuel/refuel:
-    post:
-      tags: [Fuel]
-      summary: Submit a refuel with mandatory before/after gauge photos (B3).
-      security:
-        - bearerAuth: []
-        - idempotencyKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [shift_id, vehicle_id, litres, total_cost, odometer_km, fuel_card_last_four, purchased_at, before_fuel_record_id, after_fuel_record_id, receipt_media_object_id]
-              properties:
-                shift_id: { type: string, format: uuid, nullable: true, description: null when Admin back-entry (A1.5). }
-                vehicle_id: { type: string, format: uuid }
-                fuel_card_id: { type: string, format: uuid, nullable: true }
-                fuel_card_last_four: { type: string, pattern: '^[0-9]{4}$' }
-                litres: { type: number, exclusiveMinimum: 0 }
-                total_cost: { $ref: '#/components/schemas/Money' }
-                odometer_km: { type: integer, minimum: 0 }
-                purchased_at: { type: string, format: date-time }
-                before_fuel_record_id: { type: string, format: uuid }
-                after_fuel_record_id: { type: string, format: uuid }
-                receipt_media_object_id: { type: string, format: uuid }
-                supplier_name: { type: string }
-      responses:
-        '201':
-          description: Purchase recorded (pending verification).
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  fuel_purchase_id: { type: string, format: uuid }
-                  open_anomalies: { type: array, items: { type: string } }
-        '422':
-          description: Missing mandatory gauge pair for a driver entry (B3) — database rejects.
-          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
-
   /fuel/purchases/{purchaseId}/verify:
     post:
       tags: [Fuel]

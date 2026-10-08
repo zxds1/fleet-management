@@ -28,6 +28,7 @@ import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
 import { withTenantClient, tenantContextOf } from "../../db/withClient";
+import { TraccarClient } from "../../infra/traccarClient";
 import type { Infra } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -197,6 +198,29 @@ export function createHardwareRouter(deps: HardwareRouterDeps): Router {
           endpoint: req.path,
           http_method: req.method,
         });
+
+        // Best-effort: register the device in Traccar's own database so the provisioning inbox
+        // can advance as soon as the tracker phones home. Failure here is logged but does NOT
+        // fail the pairing — the vehicle is already bound in our system and the SMS command
+        // still lets the installer configure the tracker manually.
+        if (!resend && infra.env.TRACCAR_BASE_URL) {
+          try {
+            const client = new TraccarClient(
+              infra.env.TRACCAR_BASE_URL,
+              infra.env.TRACCAR_USERNAME,
+              infra.env.TRACCAR_PASSWORD,
+            );
+            await client.createDevice({
+              name: input.trackerImei,
+              uniqueId: input.trackerImei,
+              phoneNumber: input.trackerSimNumber ?? undefined,
+              manufacturer: input.trackerBrand,
+            });
+          } catch (e) {
+            const logger = (req as { log?: { warn: (msg: string, err: unknown) => void } }).log;
+            logger?.warn?.("traccar provisioning failed", e);
+          }
+        }
 
         return {
           status: 200,

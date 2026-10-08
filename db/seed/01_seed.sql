@@ -94,7 +94,23 @@ INSERT INTO app.permissions (code, description, phase) VALUES
     ('maintenance:read',        'Read maintenance schedules',                           3),
     ('maintenance:manage',      'Define maintenance tasks and intervals',               3),
     ('maintenance:record',      'Record completed maintenance',                         3),
-    ('notification:manage',     'Manage templates and the on-call roster',              3)
+    ('notification:manage',     'Manage templates and the on-call roster',              3),
+    ('notification:read',       'Read own notifications',                                1),
+    -- The accident:* codes already exist above (lines 87-91). Re-inserting them here was a no-op:
+    -- the statement ends ON CONFLICT (code) DO NOTHING, so a duplicate row in the SAME insert is
+    -- silently discarded and the original row's phase/description always wins. Do not add a second
+    -- row for a code that is already listed; amend the existing one instead.
+    ('anomaly:read',            'Read a single anomaly in detail',                       2),
+    ('onboarding:read',         'Read own onboarding record',                            1),
+    ('onboarding:submit',       'Submit own onboarding record',                          1),
+    ('onboarding:review',       'Review driver onboarding',                              2),
+    ('training:read',           'Read training lessons',                                 2),
+    ('training:complete',       'Complete own training lessons',                         1),
+    ('training:manage',         'Create and assign training lessons',                    3),
+    ('training:review',         'Review completed training',                             3),
+    ('vehicle:report',          'Report a vehicle defect',                               1),
+    ('privacy:request_own',     'Request own data export or deletion',                   1),
+    ('privacy:view_requests_tenant', 'View tenant data-subject requests',               3)
 ON CONFLICT (code) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -103,9 +119,10 @@ ON CONFLICT (code) DO NOTHING;
 INSERT INTO app.role_permissions (role_code, permission_code)
 SELECT 'DRIVER', p FROM unnest(ARRAY[
     'shift:clock_in','shift:clock_out','shift:read_own',
-    'inspection:submit','trailer:swap',
+    'inspection:submit','inspection:read','trailer:swap',
     'fuel:record_gauge','fuel:submit_purchase',
-    'expense:submit','accident:report','hos:read','asset:read','assignment:read',
+    'expense:submit','accident:report','accident:read','hos:read','asset:read','assignment:read',
+    'notification:read','onboarding:read','onboarding:submit',
     'manage_own_mfa','revoke_device'
 ]) AS p
 ON CONFLICT DO NOTHING;

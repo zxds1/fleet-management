@@ -33,8 +33,10 @@ export interface InsertLocationRow {
   obdFaultCodes: string[] | null;
   satellites: number | null;
   hdop: number | null;
-  traccarPositionId: number;
-  traccarDeviceId: number;
+  traccarPositionId: number | null;
+  traccarDeviceId: number | null;
+  /** Bound into location_updates.is_valid_fix; see TraccarPosition.isValidFix. */
+  isValidFix: boolean;
   attributes: Record<string, unknown>;
   retentionReason: string;
   /** Owning tenant of the vehicle (14_tenancy.sql). telemetry.location_updates is tenant-scoped. */
@@ -101,7 +103,7 @@ export class TelemetryRepository {
        ) VALUES (
          $1,$2,$3,
          ST_SetSRID(ST_MakePoint($4,$5),4326)::geography,
-         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,true,$18,$19,$20,$21,$22
+         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
        )`,
       [
         row.vehicleId,
@@ -121,6 +123,7 @@ export class TelemetryRepository {
         row.obdFaultCodes,
         row.satellites,
         row.hdop,
+        row.isValidFix,
         row.traccarPositionId,
         row.traccarDeviceId,
         row.attributes,
@@ -139,7 +142,7 @@ export class TelemetryRepository {
     return res.rows[0]?.id ?? null;
   }
 
-  async upsertTrackerHealth(traccarDeviceId: number, snap: TrackerHealthSnapshot): Promise<void> {
+  async upsertTrackerHealth(traccarDeviceId: number | null, snap: TrackerHealthSnapshot): Promise<void> {
     await this.client.query(
       `INSERT INTO app.tracker_health (
          vehicle_id, traccar_device_id, last_position_at, last_heartbeat_at,

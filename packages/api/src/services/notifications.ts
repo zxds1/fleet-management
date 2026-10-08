@@ -29,6 +29,14 @@ export class NotificationService {
   }
 
   /**
+   * Badge counts for the caller (S-08), scoped to their own rows exactly as the list is. Not a
+   * `Result` because there is no domain rule to fail: an absent recipient is simply zero.
+   */
+  async countForUser(userId: string): Promise<{ total: number; unread: number }> {
+    return this.notifications.countForUser(userId);
+  }
+
+  /**
    * Acknowledges a notification by flipping it to DELIVERED. Scoped to the recipient, so a
    * notification belonging to someone else is indistinguishable from one that does not exist
    * (404) — this deliberately avoids leaking the existence of another user's notification.

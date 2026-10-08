@@ -75,7 +75,12 @@ CREATE TABLE app.roles (
 );
 
 CREATE TABLE app.permissions (
-    code            text PRIMARY KEY CHECK (code ~ '^[a-z_]+:[a-z_]+$'),
+    -- Normally `resource:action`. The `:action` half is OPTIONAL because two self-service permissions
+    -- have no resource to name — the resource is always the caller: `manage_own_mfa` (enrol/disable your
+    -- own MFA) and `revoke_device` (revoke your own registered device). The original required-colon form
+    -- rejected both, so db/seed/01_seed.sql could not load at all. Keep the lowercase+underscore
+    -- discipline for the whole code either way.
+    code            text PRIMARY KEY CHECK (code ~ '^[a-z_]+(:[a-z_]+)?$'),
     description     text NOT NULL,
     phase           smallint NOT NULL DEFAULT 1 CHECK (phase BETWEEN 1 AND 3)
 );
