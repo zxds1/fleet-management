@@ -54,6 +54,9 @@ paths = [
     '''db/validate\.(mjs|sh)''',
     '''packages/ws/src/config/.*\.ts''',
     '''packages/mobile/app\.json''',
+    '''packages/mobile/src/App\.tsx''',
+    '''packages/mobile/src/core/session\.ts''',
+    '''scripts/generate-db-types\.mjs''',
   ]
 
 [[rules]]
