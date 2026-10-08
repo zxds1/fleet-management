@@ -5,6 +5,7 @@ on:
     branches: [staging, main]
   push:
     branches: [staging, main]
+  workflow_dispatch:
 
 concurrency:
   group: security-${{ github.ref }}
