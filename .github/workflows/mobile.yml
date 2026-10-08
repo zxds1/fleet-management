@@ -50,7 +50,7 @@ jobs:
       - name: Mobile unit tests (security, offline queue, apiClient, session, socket, drivers, admin)
         run: |
           cd mobile/packages/mobile
-          npm run test -- --forceExit
+          npm run test
 
       - name: Secret scan (S-6 — gitleaks pre-commit/CI parity)
         uses: gitleaks/gitleaks-action@v2
