@@ -28,7 +28,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       # Defence-in-depth: tag ancestry guard
       - name: Tag ancestry guard
@@ -85,7 +85,7 @@ jobs:
       - name: Install mobile app dependencies
         run: |
           cd mobile/packages/mobile
-          npm ci
+          npm install
 
       - name: Mobile typecheck
         run: |
