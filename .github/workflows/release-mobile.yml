@@ -98,20 +98,20 @@ jobs:
           npm run test
 
       # Config validation for EAS
-      - name: Validate EAS configuration
+      - name: Validate EXPO configuration
         env:
-          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          if [ -z "$EAS_TOKEN" ]; then
-            echo "::error::EAS_TOKEN secret is required for mobile releases."
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN secret is required for mobile releases."
             exit 1
           fi
-          echo "EAS_TOKEN is configured."
+          echo "EXPO_TOKEN is configured."
 
       # EAS build
       - name: EAS build (Android - preview APKs for testing)
         env:
-          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           cd mobile/packages/mobile
           npx eas-cli build \
