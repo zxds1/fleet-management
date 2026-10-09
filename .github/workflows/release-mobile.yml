@@ -78,15 +78,19 @@ jobs:
           fi
           echo "Build number guard passed (idempotent re-runs allowed)."
 
-      # Re-run analyze + tests so the published build is from a green tree
-      - name: Build shared
-        run: npm run build --workspace=@fleet/shared --workspace=@fleet/ws
+      # Build all backend packages in dependency order
+      - name: Build backend packages
+        run: npm run build
 
       - name: Mobile typecheck
-        run: npm run typecheck --workspace=@fleet/mobile
+        run: |
+          cd mobile/packages/mobile
+          npm run typecheck
 
       - name: Mobile unit tests
-        run: npm run test --workspace=@fleet/mobile -- --forceExit
+        run: |
+          cd mobile/packages/mobile
+          npm run test
 
       # Config validation for EAS
       - name: Validate EAS configuration
@@ -104,6 +108,7 @@ jobs:
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
         run: |
+          cd mobile/packages/mobile
           npx eas-cli build \
             --platform android \
             --profile preview-driver \
