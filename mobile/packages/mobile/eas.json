@@ -40,6 +40,26 @@
         "REQUIRE_PINNING": "1"
       }
     },
+    "preview-driver": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "driver",
+        "REQUIRE_PINNING": "1"
+      }
+    },
+    "preview-admin": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "admin",
+        "REQUIRE_PINNING": "1"
+      }
+    },
     "production-driver": {
       "distribution": "store",
       "android": {

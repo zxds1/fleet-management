@@ -100,47 +100,41 @@ jobs:
           echo "EAS_TOKEN is configured."
 
       # EAS build
-      - name: EAS build (Android - production AABs)
+      - name: EAS build (Android - preview APKs for testing)
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
         run: |
           npx eas-cli build \
             --platform android \
-            --profile production-driver \
+            --profile preview-driver \
             --non-interactive \
             --clear-cache
           npx eas-cli build \
             --platform android \
-            --profile production-admin \
+            --profile preview-admin \
             --non-interactive \
             --clear-cache
 
-      # EAS submit (optional, gated on secrets)
-      - name: Write Google Play service account
-        if: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > google-play-service-account.json
-          echo "Service account written to google-play-service-account.json"
+      # EAS submit (DISABLED - Play Store submission turned off for now)
+      # - name: EAS submit to Google Play (driver)
+      #   if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
+      #   env:
+      #     EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+      #   run: |
+      #     npx eas-cli submit \
+      #       --platform android \
+      #       --profile production-driver \
+      #       --non-interactive
 
-      - name: EAS submit to Google Play (driver)
-        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
-        env:
-          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
-        run: |
-          npx eas-cli submit \
-            --platform android \
-            --profile production-driver \
-            --non-interactive
-
-      - name: EAS submit to Google Play (admin)
-        if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
-        env:
-          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
-        run: |
-          npx eas-cli submit \
-            --platform android \
-            --profile production-admin \
-            --non-interactive
+      # - name: EAS submit to Google Play (admin)
+      #   if: ${{ secrets.EAS_TOKEN != '' && secrets.PLAY_KEYSTORE_BASE64 != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' }}
+      #   env:
+      #     EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+      #   run: |
+      #     npx eas-cli submit \
+      #       --platform android \
+      #       --profile production-admin \
+      #       --non-interactive
 
       # Create GitHub Release (draft, idempotent re-runs)
       - name: Generate release notes
@@ -148,7 +142,7 @@ jobs:
         run: |
           NOTES="Release $TAG\n\n## Changes since last release\n"
           NOTES+="$(git log --oneline --pretty=format:'- %s' $(git describe --tags --abbrev=0)..HEAD)\n"
-          NOTES+="\n## EAS Build\n- Platform: Android\n- Profiles: production-driver, production-admin\n- Artifacts: AAB for Google Play Store\n- Keystore: helix-release (RSA-2048)"
+          NOTES+="\n## EAS Build\n- Platform: Android\n- Profiles: preview-driver, preview-admin\n- Artifacts: APK for device testing\n- Keystore: helix-release (RSA-2048)\n- Play Store submission: DISABLED"
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
