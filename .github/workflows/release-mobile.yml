@@ -82,6 +82,11 @@ jobs:
       - name: Build backend packages
         run: npm run build
 
+      - name: Install mobile app dependencies
+        run: |
+          cd mobile/packages/mobile
+          npm ci
+
       - name: Mobile typecheck
         run: |
           cd mobile/packages/mobile
