@@ -63,7 +63,7 @@
     "production-driver": {
       "distribution": "store",
       "android": {
-        "buildType": "aab"
+        "buildType": "app-bundle"
       },
       "env": {
         "APP_VARIANT": "driver",
@@ -73,7 +73,7 @@
     "production-admin": {
       "distribution": "store",
       "android": {
-        "buildType": "aab"
+        "buildType": "app-bundle"
       },
       "env": {
         "APP_VARIANT": "admin",
