@@ -63,14 +63,11 @@ gradle/wrapper/gradle-wrapper.properties
 AGENTS.md
 gradlew
 gradlew.bat
-app/
+# The Next.js admin console at the repository root. Scoped to the root so it
+# cannot hide a source directory that happens to be called app (flutter/lib/app).
+/app/
 settings.gradle.kts
 gradle.properties
-
-# Flutter Android Gradle files (source, not build artifacts)
-!flutter/android/app/
-!flutter/android/app/build.gradle.kts
-!flutter/android/settings.gradle.kts
 
 # Kotlin app gradle wrapper (managed per-app)
 kotlin-app/gradle/gradle-daemon-jvm.properties
