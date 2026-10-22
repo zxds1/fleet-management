@@ -78,8 +78,8 @@
         <!--
              The map is drawn by flutter_map over raster tiles: the Google Maps
              SDK is not on the device, so there is no API key here and none is
-             needed. The tile source is a build input —
-             --dart-define=MAP_TILE_URL=...
+             needed. The tile source is a build input, set with the
+             MAP_TILE_URL define.
         -->
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
