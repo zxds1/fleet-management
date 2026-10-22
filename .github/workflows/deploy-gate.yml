@@ -1,0 +1,145 @@
+name: Deploy Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-gate:
+    name: Build image, start full backend stack, run Newman API tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pg_local_dev
+          POSTGRES_DB: fleet
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5444:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      traccar:
+        image: traccar/traccar:latest
+        env:
+          DATABASE_DRIVER: org.postgresql.Driver
+          DATABASE_URL: jdbc:postgresql://localhost:5444/traccar
+          DATABASE_USER: postgres
+          DATABASE_PASSWORD: pg_local_dev
+          FORWARD_REDIS_ENABLED: "true"
+          FORWARD_REDIS_URI: redis://localhost:6379/0
+          FORWARD_REDIS_CHANNEL: traccar:positions
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8082 >/dev/null 2>&1 || exit 1"
+          --health-interval 15s
+          --health-timeout 5s
+          --health-retries 20
+        ports:
+          - 8082:8082
+    steps:
+      - name: Checkout (full history for turbo)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc -b across workspace)
+        run: npm run build
+
+      - name: Build backend Docker image (prod target) — verifies container compiles
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: prod
+          load: true
+          tags: fleet-api:local
+
+      - name: Create Traccar database in Postgres
+        run: |
+          psql -h localhost -p 5444 -U postgres -d postgres -c "CREATE DATABASE traccar" 2>/dev/null || true
+
+      - name: Apply schema to throwaway Postgres
+        continue-on-error: true
+        run: npm run db:validate
+        env:
+          POSTGIS: shim
+          PGURI: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+
+      - name: Start the API backend
+        env:
+          DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+          REDIS_URL: redis://localhost:6379/0
+          TRACCAR_BASE_URL: http://localhost:8082
+          PORT: 4000
+          NODE_ENV: development
+          SECURITY_ENFORCE: off
+          JWT_SECRET: ci-test-secret-do-not-use-in-prod
+          MFA_ENCRYPTION_KEY: Y2ktZHVtbXktbWZhLWtleS0zMi1ieXRlLXMhIVhYWFg=
+          WEBHOOK_SECRET: ci-test-webhook-secret-do-not-use-in-prod
+          TRACCAR_USERNAME: admin
+          TRACCAR_PASSWORD: admin
+        run: |
+          ls -la packages/api/dist/server.js
+          node packages/api/dist/server.js > /tmp/api.log 2>&1 &
+          API_PID=$!
+          echo $! > /tmp/api.pid
+          sleep 5
+          if ! kill -0 $API_PID 2>/dev/null; then
+            echo "API process died! Log:"
+            cat /tmp/api.log
+            exit 1
+          fi
+          echo "Waiting for API to become healthy..."
+          timeout 90 bash -c 'until curl -sf http://localhost:4000/healthz >/dev/null 2>&1; do sleep 2; done'
+          echo "API is healthy — running Newman tests."
+
+      - name: Install Newman (Postman CLI)
+        run: npm install -g newman@6
+
+      - name: Run Newman against all APIs (security headers + fail-secure auth + HMAC webhook)
+        run: |
+          newman run deploy/postman/fleet-api.postman_collection.json \
+            --reporters cli,json \
+            --reporter-json-export newman-results.json
+
+      - name: Stop the API backend
+        if: always()
+        run: |
+          kill $(cat /tmp/api.pid) 2>/dev/null || true
+          cat /tmp/api.log 2>/dev/null || true
+
+      - name: Upload Newman results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-results
+          path: newman-results.json
+          if-no-files-found: warn

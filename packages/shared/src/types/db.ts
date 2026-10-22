@@ -921,6 +921,8 @@ export interface FuelPurchaseRow {
   odometer_km: number;
   purchased_at: string;
   receipt_media_object_id: string;
+  pump_photo_media_object_id: string | null;
+  odometer_photo_media_object_id: string | null;
   before_fuel_record_id: string | null;
   after_fuel_record_id: string | null;
   ocr_status: OcrStatus;

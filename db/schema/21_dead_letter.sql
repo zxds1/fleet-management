@@ -1,4 +1,4 @@
--- db/schema/21_dead_letter.sql
+-- packages/db/schema/16_dead_letter.sql
 -- Dead-letter stores for poison isolation + delayed observability (audit item #4).
 --  * app.ingest_dead_letter : per-entry poison positions from the Redis Stream ingest
 --    consumer. One row per failed entry so a single bad payload never redelivers the

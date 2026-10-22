@@ -1,0 +1,477 @@
+{
+  "info": {
+    "name": "Fleet API Security + Smoke Tests",
+    "description": "Deploys-gate Postman collection. Verifies security headers are present on every response, health endpoints are live, and all protected routes fail-secure (401) when Clerk is not configured.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health /healthz",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/healthz"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('Content-Type is JSON', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health /readyz",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/readyz"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 or 503', function () { pm.expect(pm.response.code).to.be.oneOf([200, 503]); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health /health/deep",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/health/deep"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 or 503', function () { pm.expect(pm.response.code).to.be.oneOf([200, 503]); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Metrics /metrics",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/metrics"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: GET /api/v1/me/consent (no auth -> 401)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/api/v1/me/consent"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 401 (fail-secure, Clerk not configured)', function () { pm.expect(pm.response.code).to.equal(401); });",
+              "pm.test('Content-Type is problem+json', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: GET /api/v1/vehicles (no auth -> 401)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/api/v1/vehicles"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 401 (fail-secure, Clerk not configured)', function () { pm.expect(pm.response.code).to.equal(401); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: POST /api/v1/auth/login (no body -> 400/401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://localhost:4000/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 or 401 (fail-secure)', function () { pm.expect(pm.response.code).to.be.oneOf([400, 401]); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: POST /api/v1/accidents/mayday (no auth -> 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://localhost:4000/api/v1/accidents/mayday",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 401 (fail-secure, Clerk not configured)', function () { pm.expect(pm.response.code).to.equal(401); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: POST /api/v1/admin/hardware/pair (no auth -> 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://localhost:4000/api/v1/admin/hardware/pair",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 401 (fail-secure, Clerk not configured)', function () { pm.expect(pm.response.code).to.equal(401); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: POST /api/v1/telemetry/webhook (valid body, no HMAC -> 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://localhost:4000/api/v1/telemetry/webhook",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"deviceId\": \"dev-123\", \"lat\": 40.7128, \"lon\": -74.006, \"timestamp\": \"2026-10-17T03:00:00Z\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 401 (HMAC required)', function () { pm.expect(pm.response.code).to.equal(401); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Protected: POST /api/v1/telemetry/webhook (valid HMAC -> 202)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "http://localhost:4000/api/v1/telemetry/webhook",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"deviceId\": \"dev-123\", \"lat\": 40.7128, \"lon\": -74.006, \"timestamp\": \"2026-10-17T03:00:00Z\"}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "var secret = 'ci-test-webhook-secret-do-not-use-in-prod';",
+              "var body = request.body.raw;",
+              "var hmac = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "var timestamp = Math.floor(Date.now() / 1000);",
+              "pm.request.headers.add({",
+              "  key: 'x-signature',",
+              "  value: 'sha256=' + hmac",
+              "});",
+              "pm.request.headers.add({",
+              "  key: 'x-timestamp',",
+              "  value: timestamp.toString()",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 202 (valid HMAC accepted)', function () { pm.expect(pm.response.code).to.equal(202); });",
+              "pm.test('Content-Type is JSON', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "CORS does not reflect arbitrary origin",
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "https://evil.example.com"
+          },
+          {
+            "key": "Access-Control-Request-Method",
+            "value": "GET"
+          }
+        ],
+        "url": "http://localhost:4000/healthz"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('CORS does not reflect arbitrary origin', function () { var acao = pm.response.headers.get('Access-Control-Allow-Origin'); pm.expect(acao).to.not.equal('https://evil.example.com'); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "404 for unknown route",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "http://localhost:4000/api/v1/does-not-exist"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 404', function () { pm.expect(pm.response.code).to.equal(404); });",
+              "pm.test('Content-Type is problem+json', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'); });",
+              "pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.equal('nosniff');",
+              "pm.expect(pm.response.headers.get('X-Frame-Options')).to.equal('DENY');",
+              "pm.expect(pm.response.headers.get('Referrer-Policy')).to.equal('no-referrer');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('max-age=63072000');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('includeSubDomains');",
+              "pm.expect(pm.response.headers.get('Strict-Transport-Security')).to.include('preload');",
+              "pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+              "pm.expect(pm.response.headers.get('X-Powered-By')).to.be.undefined;",
+              "pm.expect(pm.response.headers.get('X-DNS-Prefetch-Control')).to.equal('off');",
+              "pm.expect(pm.response.headers.get('X-Download-Options')).to.equal('noopen');",
+              "pm.expect(pm.response.headers.get('X-Permitted-Cross-Domain-Policies')).to.equal('none');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    }
+  ]
+}
