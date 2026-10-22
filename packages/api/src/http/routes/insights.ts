@@ -12,7 +12,7 @@ import { err, ok, type IdempotencyService, type PermissionCode, type PoolLike, t
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { withClient } from "../../db/withClient";
@@ -76,7 +76,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `report:read` sees the whole fleet; a DRIVER (asset:read) is narrowed to their own rows (B.16).
   router.get(
     "/anomalies",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("report:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -90,7 +90,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
           ...(driverId ? { driverId } : {}),
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -102,7 +102,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `document:read` sees every asset; a DRIVER (asset:read) sees only their own documents (B.19).
   router.get(
     "/documents/expiring",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -116,7 +116,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
           ...(driverId ? { driverId } : {}),
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -128,15 +128,14 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // MUST stay declared after `/documents/expiring`, otherwise `:id` would swallow "expiring".
   router.get(
     "/documents/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.document.getDocument(req.params.id!);
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -150,7 +149,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // note and its audit entry commit together (D8).
   router.post(
     "/documents/:id/renewal-note",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("document:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -185,15 +184,14 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // Declared after `/anomalies` list so `:id` does not shadow the feed.
   router.get(
     "/anomalies/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("anomaly:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.anomaly.getAnomaly(req.params.id!);
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -205,7 +203,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
   // `report:read` sees the whole map; a DRIVER (asset:read) sees only their own vehicle (B.10).
   router.get(
     "/dashboard/vehicle-states",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("report:read"), asPerm("asset:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -213,7 +211,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
         const driverId = await ownScopeDriverId(req, svc, "report:read");
         const result = await svc.dashboard.vehicleStates(driverId ? { driverId } : {});
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);

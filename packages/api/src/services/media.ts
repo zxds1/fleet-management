@@ -47,9 +47,9 @@ const RETENTION_DEFAULT_DAYS: Record<string, number> = {
 };
 
 export interface MediaUploadOutcome {
-  mediaObjectId: string;
-  uploadUrl: string;
-  expiresInSeconds: number;
+  media_object_id: string;
+  upload_url: string;
+  expires_in_seconds: number;
   method: "PUT";
 }
 
@@ -99,6 +99,11 @@ export class MediaService {
       http_method: "POST",
     });
 
-    return ok({ mediaObjectId: object.id, uploadUrl: presigned.url, expiresInSeconds: presigned.expiresInSeconds, method: "PUT" });
+    return ok({
+      media_object_id: object.id,
+      upload_url: presigned.url,
+      expires_in_seconds: presigned.expiresInSeconds,
+      method: "PUT",
+    });
   }
 }

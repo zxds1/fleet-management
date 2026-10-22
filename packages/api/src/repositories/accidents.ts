@@ -189,6 +189,32 @@ export class AccidentReportRepository extends BaseRepository<AccidentReportRow> 
   }
 
   /**
+   * Every report in the tenant, keyset paginated on (reported_at, id). The tenant filter is
+   * explicit (defence in depth on top of RLS) so the list can never cross a tenant boundary.
+   */
+  async listByTenant(
+    tenantId: string,
+    opts: { limit: number; cursorSort?: string; cursorId?: string },
+  ): Promise<AccidentSummaryRow[]> {
+    const params: unknown[] = [tenantId];
+    let keyset = "";
+    if (opts.cursorSort && opts.cursorId) {
+      params.push(opts.cursorSort, opts.cursorId);
+      keyset = `AND (r.reported_at, r.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    }
+    params.push(opts.limit);
+    const res = await this.client.query<AccidentSummaryRow>(
+      `SELECT ${ACCIDENT_DERIVED_SQL}
+         FROM app.accident_reports r ${OPEN_TIMER_JOIN_SQL}
+        WHERE r.tenant_id = $1::uuid ${keyset}
+        ORDER BY r.reported_at DESC, r.id DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+    return res.rows;
+  }
+
+  /**
    * Single report detail joined with the vehicle plate and escalation countdown (B.15).
    * `driverId` narrows the lookup to that driver's own report, so an unprivileged caller can
    * never read another driver's accident by guessing an id (C6.2).

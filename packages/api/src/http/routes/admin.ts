@@ -18,7 +18,7 @@ import {
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
@@ -85,7 +85,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Driver roster (read, cursor) ──────────────────────────────────────────────────────────
   router.get(
     "/drivers",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -99,7 +99,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
           limit: query.limit,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({
@@ -114,7 +114,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Driver detail (read): roster shape + RBAC union + devices ─────────────────────────────
   router.get(
     "/drivers/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -137,7 +137,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Create / invite a driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -178,7 +178,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Approve a pending driver ───────────────────────────────────────────────────────────────
   router.post(
     "/drivers/:id/approve",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -211,7 +211,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // `:id`. The target is always the resolved principal, so this cannot read another user.
   router.get(
     "/admin/users/me",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -237,7 +237,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Update the caller's own profile ────────────────────────────────────────────────────────
   router.put(
     "/admin/users/me",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -283,7 +283,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Suspend a user (also drops live sessions) ──────────────────────────────────────────────
   router.post(
     "/admin/users/:id/suspend",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -314,7 +314,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Reinstate a suspended user ─────────────────────────────────────────────────────────────
   router.post(
     "/admin/users/:id/reinstate",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -345,7 +345,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Revoke a device (forces re-auth) ───────────────────────────────────────────────────────
   router.post(
     "/devices/:deviceId/revoke",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("device:revoke")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -373,7 +373,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Force global sign-out for a user ────────────────────────────────────────────────────────
   router.post(
     "/sessions/revoke",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -403,7 +403,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Photo-first fuel review queue (2.7, A1.4) ─────────────────────────────────────────────
   router.get(
     "/admin/fuel/pending",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:read")),
     asyncHandler((req, res) => {
       const principal = (req as { principal?: Principal }).principal as Principal;
@@ -412,7 +412,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.fuelQuery.pendingReview({ limit: query.limit, tenantId: principal.tenantId });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -424,7 +424,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // PUT mirror of POST /fuel/purchases/{id}/verify, carrying the photo-first adjustments.
   router.put(
     "/admin/fuel/verify/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:verify")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -455,7 +455,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: list users in the caller's tenant (14_tenancy.sql) ──────────────────────────
   router.get(
     "/admin/users",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -464,7 +464,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.tenancy.listUsers({ tenantId: principal.tenantId, roleCode: query.role_code, status: query.status, limit: 100 });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -475,7 +475,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: list pending invitations (14_tenancy.sql) ──────────────────────────────────
   router.get(
     "/admin/invitations",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -483,7 +483,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.tenancy.listPendingInvitations(principal.tenantId);
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({ data: result.value });
@@ -494,7 +494,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: invite a user into the caller's tenant (14_tenancy.sql) ────────────────────
   router.post(
     "/admin/users/invite",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -521,7 +521,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: revoke a role from a user in the caller's tenant (14_tenancy.sql) ──────────
   router.post(
     "/admin/users/:userId/roles/revoke",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -544,7 +544,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // ── Tenancy: assign a manager to vehicles/drivers (14_tenancy.sql) ─────────────────────
   router.post(
     "/admin/users/:userId/assign",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -572,7 +572,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // service, since the mobile role gating is presentational only).
   router.get(
     "/admin/managers",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:read")),
     asyncHandler((req, res) => {
       const principal = req.principal as Principal;
@@ -584,7 +584,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
           callerRoles: principal.roles,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({ managers: result.value });
@@ -599,7 +599,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   // and svc.tenancy.assign rejects a target outside the caller's tenant, which is the IDOR guard.
   router.post(
     "/admin/managers/:userId/assign",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("user:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

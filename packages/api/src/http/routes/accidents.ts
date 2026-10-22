@@ -3,23 +3,36 @@
 // through executeWrite so audit + outbox (+ escalation timer) commit with the mutation (D8). The
 // mayday path is the B17 escape hatch — GPS + reason only, immediate escalation, no photos. Reads
 // use a pooled client. Driver id is resolved from the Principal via drivers.user_id.
+//
+// Read scope follows the same model as the other read routes (ownScope.ts): a caller holding only
+// `accident:read` sees their own reports, while `accident:update` is the fleet-wide marker used by
+// `GET /accidents/{id}`. `GET /accidents/me?own_scope=false` and `GET /accidents` both serve the
+// tenant-wide list to such a caller.
 
 import { Router, type Request, type Response } from "express";
+import { z } from "zod";
 import { Forbidden, NotFound, err, ok, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
 import { AccidentCreateSchema, AccidentMediaSchema, MaydaySchema } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withClient, withTenantClient, tenantContextOf } from "../../db/withClient";
 import { ownScopeDriverId } from "../ownScope";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
+
+/** The fleet-wide accident permission — the same marker `GET /accidents/{id}` uses. */
+const FLEET_WIDE_ACCIDENT_PERMISSION = "accident:update";
+
+const AccidentListQuerySchema = CursorQuerySchema.extend({
+  own_scope: z.enum(["true", "false"]).optional(),
+});
 
 export interface AccidentRouterDeps {
   pool: PoolLike;
@@ -37,7 +50,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Mayday (B17 escape hatch) ──────────────────────────────────────────────────────────
   router.post(
     "/mayday",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -69,7 +82,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Create a report (evidence follows) ─────────────────────────────────────────────────
   router.post(
     "/",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -94,10 +107,37 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
     ),
   );
 
+  // ── Tenant-wide accident list (fleet-wide permission only) ─────────────────────────────
+  router.get(
+    "/",
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
+    requirePermission(asPerm("accident:read")),
+    asyncHandler(async (req, res) => {
+      const principal = (req as { principal: Principal }).principal;
+      if (!principal.permissions.has(asPerm(FLEET_WIDE_ACCIDENT_PERMISSION))) {
+        problemResponse(res, new Forbidden("Requires accident:update"), req.requestId);
+        return;
+      }
+      await withTenantClient(pool, tenantContextOf(principal), async (client) => {
+        const query = parseQuery(AccidentListQuerySchema, req);
+        const svc = makeServices(client, infra);
+        const result = await svc.accidentQuery.listTenant(principal.tenantId, {
+          limit: query.limit,
+          cursor: query.cursor,
+        });
+        if (!result.ok) {
+          problemResponse(res, result.error, req.requestId);
+          return;
+        }
+        res.status(200).json(result.value);
+      });
+    }),
+  );
+
   // ── Attach media (append-only) ─────────────────────────────────────────────────────────
   router.post(
     "/:id/media",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:report")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -110,34 +150,67 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         });
-        if (result.ok) return ok({ status: 204, body: {} });
+        // A 204 has no body, and the client parses this response as a map — so the attached media
+        // ids are returned in a well-formed document.
+        if (result.ok) {
+          return ok({
+            status: 201,
+            body: {
+              accident_media_id: result.value.accident_media_id,
+              media_object_id: result.value.media_object_id,
+              slot: result.value.slot,
+            },
+            resourceId: result.value.accident_media_id,
+          });
+        }
         return err(result.error);
       }),
     ),
   );
 
   // ── Own reports (read, cursor) ──────────────────────────────────────────────────────────
+  // `own_scope=false` asks for the tenant-wide list, which only a caller holding the fleet-wide
+  // accident permission may see. The tenant always comes from the verified Principal.
   router.get(
     "/me",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
-        const query = parseQuery(CursorQuerySchema, req);
+    asyncHandler(async (req, res) => {
+      const principal = (req as { principal: Principal }).principal;
+      const query = parseQuery(AccidentListQuerySchema, req);
+      if (query.own_scope === "false") {
+        if (!principal.permissions.has(asPerm(FLEET_WIDE_ACCIDENT_PERMISSION))) {
+          problemResponse(res, new Forbidden("Requires accident:update"), req.requestId);
+          return;
+        }
+        await withTenantClient(pool, tenantContextOf(principal), async (client) => {
+          const svc = makeServices(client, infra);
+          const result = await svc.accidentQuery.listTenant(principal.tenantId, {
+            limit: query.limit,
+            cursor: query.cursor,
+          });
+          if (!result.ok) {
+            problemResponse(res, result.error, req.requestId);
+            return;
+          }
+          res.status(200).json(result.value);
+        });
+      }
+      await withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
-        const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
+        const driver = await svc.drivers.findByUserId(principal.userId);
         if (!driver) {
-          res.status(403).json({ error_code: "FORBIDDEN", status: 403, title: "Forbidden" });
+          problemResponse(res, new Forbidden(), req.requestId);
           return;
         }
         const result = await svc.accidentQuery.listMine(driver.id, { limit: query.limit, cursor: query.cursor });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Verify telemetry hash chain (read) ──────────────────────────────────────────────────
@@ -146,21 +219,20 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // and existence-probe — any accident id in the tenant. `accident:update` is the scope-lift.
   router.get(
     "/:id/telemetry/verify",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
-        const driverId = await ownScopeDriverId(req, svc, "accident:update");
+        const driverId = await ownScopeDriverId(req, svc, FLEET_WIDE_ACCIDENT_PERMISSION);
         const owned = await svc.accidentQuery.getOne(req.params.id!, driverId);
         if (!owned.ok) {
-          const status = owned.error instanceof NotFound ? 404 : 422;
-          res.status(status).json({ error_code: owned.error.error_code, status, title: owned.error.title });
+          problemResponse(res, owned.error, req.requestId);
           return;
         }
         const result = await svc.accidentQuery.verifyChain(req.params.id!);
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -171,7 +243,7 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // ── Acknowledge (cancels escalation) ─────────────────────────────────────────────────────
   router.post(
     "/:id/acknowledge",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:acknowledge")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -198,16 +270,15 @@ export function createAccidentRouter(deps: AccidentRouterDeps): Router {
   // report; anything else 404s rather than leaking another driver's incident.
   router.get(
     "/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("accident:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
         const svc = makeServices(client, infra);
-        const driverId = await ownScopeDriverId(req, svc, "accident:update");
+        const driverId = await ownScopeDriverId(req, svc, FLEET_WIDE_ACCIDENT_PERMISSION);
         const result = await svc.accidentQuery.getOne(req.params.id!, driverId);
         if (!result.ok) {
-          const status = result.error instanceof NotFound ? 404 : 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);

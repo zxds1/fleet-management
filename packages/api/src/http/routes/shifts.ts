@@ -14,8 +14,10 @@ import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const InboxQuerySchema = CursorQuerySchema.extend({
@@ -46,7 +48,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Clock-in ───────────────────────────────────────────────────────────────────────────
   router.post(
     "/clock-in",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:clock_in")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -92,7 +94,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Clock-out ───────────────────────────────────────────────────────────────────────────
   router.post(
     "/clock-out",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:clock_out")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -130,10 +132,11 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Active shift (read) ──────────────────────────────────────────────────────────────────
   router.get(
     "/me/active",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_own")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
         if (!driver) {
@@ -154,17 +157,18 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
               }
             : null,
         );
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Verification inbox (read, cursor) ─────────────────────────────────────────────────────
   router.get(
     "/verification-inbox",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(InboxQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.shiftQuery.verificationInbox({
@@ -180,17 +184,18 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Own shift history (read, cursor) ──────────────────────────────────────────────────────
   router.get(
     "/me",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_own")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
@@ -204,17 +209,18 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Verification detail for one shift (read) ───────────────────────────────────────────────
   router.get(
     "/:id/verification",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.shiftQuery.getVerification(req.params.id!);
         if (!result.ok) {
@@ -223,17 +229,18 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Work plan (read, admin/dispatcher) ──────────────────────────────────────────────────────
   router.get(
     "/:id/work-plan",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:read_all")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.shift.getWorkPlan(req.params.id!);
         if (!result) {
@@ -246,14 +253,14 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
           photos: result.photos.map((p) => ({ media_object_id: p.media_object_id, sequence: p.sequence })),
           debrief_notes: result.debrief_notes,
         });
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Verify / flag ────────────────────────────────────────────────────────────────────────
   router.post(
     "/:id/verify",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:verify")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -290,7 +297,7 @@ export function createShiftRouter(deps: ShiftRouterDeps): Router {
   // ── Force-close (admin override) ──────────────────────────────────────────────────────────
   router.post(
     "/:id/force-close",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("shift:force_close")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

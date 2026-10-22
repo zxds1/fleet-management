@@ -1,26 +1,31 @@
 # =============================================================================
-# docker-compose.yml  —  One-command backend stack (local + prod-style)
-#
-#   docker compose up -d          # start postgres + redis + traccar + api + worker
-#   docker compose down -v        # stop and wipe volumes
-#
-# Production runs on AWS EKS via deploy/k8s/* (decision A1.10); this compose file is the
-# local one-command equivalent that mirrors the production container layout.
-#
-# Override any value via a `deploy/.env` file (compose loads it automatically).
+# docker-compose.yml  —  Local development only
+# Production runs on AWS EKS via deploy/k8s/* (decision A1.10).
 # =============================================================================
 
 services:
   postgres:
     image: postgis/postgis:16-3.4
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pg_local_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-fleet}
+      # Credentials/port match the backend's own defaults (packages/api/src/config/env.ts and
+      # db/validate.sh: postgres / pg_local_dev / 5444) so a host-run API and `npm run
+      # db:validate:bash` need no env at all. Only ever local credentials.
+      #
+      # POSTGRES_USER/POSTGRES_PASSWORD are applied by `initdb` ONLY. A `pgdata` volume created
+      # before this change still has the old `fleet` role, and pg_isready does not authenticate, so
+      # the healthcheck stays green while every connection fails. After changing them:
+      #   docker compose down -v && docker compose up -d postgres redis
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pg_local_dev
+      POSTGRES_DB: fleet
     ports:
-      - "${POSTGRES_PORT:-5444}:5432"
+      - "5444:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # The Postgres entrypoint only runs *.sh / *.sql / *.sql.gz files sitting DIRECTLY in
+      # /docker-entrypoint-initdb.d — a bind-mounted directory there is skipped ("ignoring …"), which
+      # is why the database used to come up empty. init-db.sh is the one entrypoint-visible file and
+      # applies schema/ then seed/ in order. Paths resolve against THIS file's directory (deploy/).
       - ./init-db.sh:/docker-entrypoint-initdb.d/00-init-db.sh:ro
       - ../db/schema:/docker-entrypoint-initdb.d/schema:ro
       - ../db/seed:/docker-entrypoint-initdb.d/seed:ro
@@ -29,15 +34,16 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    # C5.4: Postgres needs shared memory; dind/CI runners default to small /dev/shm.
-    shm_size: '256m'
+    # NOTE: do not override CMD — the postgis image preloads its extensions via its own
+    # entrypoint. Forcing `shared_preload_libraries=postgis` here makes Postgres fail to
+    # start (could not access file "postgis"). PITR (wal_level=replica) is a prod concern.
 
   redis:
     image: redis:7-alpine
     # C5.10: AOF enabled so the telemetry buffer survives a restart.
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -49,15 +55,16 @@ services:
   traccar:
     image: traccar/traccar:latest
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     environment:
       # N2.1/N2.2: Traccar uses its OWN database on the same Postgres instance.
       DATABASE_DRIVER: org.postgresql.Driver
       DATABASE_URL: jdbc:postgresql://postgres:5432/traccar
-      DATABASE_USER: ${POSTGRES_USER:-postgres}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-pg_local_dev}
-      # N2.3: durable forward to a Redis Stream.
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: pg_local_dev
+      # N2.3: durable forward to a Redis Stream, not fire-and-forget HTTP.
+      # The exact forwarding transport is verified at integration time against the
+      # pinned Traccar version; if unavailable we use HTTP + the back-fill poller.
       FORWARD_REDIS_ENABLED: "true"
       FORWARD_REDIS_URI: redis://redis:6379/0
       FORWARD_REDIS_CHANNEL: traccar:positions
@@ -76,7 +83,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-      target: prod
+      target: dev
+    command: ["npm", "run", "dev:api"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,79 +93,44 @@ services:
       traccar:
         condition: service_healthy
     environment:
-      PORT: ${API_PORT:-4000}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-pg_local_dev}@postgres:5432/fleet
+      # The published port is 4000 and the mobile app defaults to
+      # http://localhost:4000/api/v1, but the API's own default is PORT=8080. Without this the
+      # container listened on 8080 and the published 4000 port refused every connection.
+      PORT: "4000"
+      DATABASE_URL: postgresql://postgres:pg_local_dev@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
-      JWT_SECRET: ${JWT_SECRET:-}
-      JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
-      JWT_KID: ${JWT_KID:-k1}
-      JWT_KID_PREVIOUS: ${JWT_KID_PREVIOUS:-k0}
-      JWT_ISSUER: ${JWT_ISSUER:-fleet-api}
-      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
-      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
-      SECURITY_ENFORCE: ${SECURITY_ENFORCE:-always}
-      TRUST_PROXY: ${TRUST_PROXY:-true}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
-      NODE_ENV: ${NODE_ENV:-production}
-      SERVICE_NAME: fleet-api
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Clerk (managed auth) — optional until configured; auth routes fail-secure (401) until set.
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
-      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      CLERK_JWT_KEY: ${CLERK_JWT_KEY:-}
-      CLERK_ISSUER: ${CLERK_ISSUER:-}
-      CLERK_FRONTEND_URL: ${CLERK_FRONTEND_URL:-}
-      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-}
-      CLERK_JWT_AUDIENCE: ${CLERK_JWT_AUDIENCE:-}
-      CLERK_CLOCK_SKEW_IN_MS: ${CLERK_CLOCK_SKEW_IN_MS:-}
-      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
-      # Traccar provisioning credentials.
-      TRACCAR_USERNAME: ${TRACCAR_USERNAME:-admin}
-      TRACCAR_PASSWORD: ${TRACCAR_PASSWORD:-admin}
-      # Media / S3 (degrade to local/dev when credentials absent).
-      AWS_REGION: ${AWS_REGION:-af-south-1}
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-fleet-media-local}
-      S3_ACCIDENT_BUCKET: ${S3_ACCIDENT_BUCKET:-fleet-accident-evidence-local}
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      # Email / SMS (optional; degrade to console/no-op).
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      EMAIL_FROM: ${EMAIL_FROM:-fleet@fleet.internal}
-      AFRICAS_TALKING_API_KEY: ${AFRICAS_TALKING_API_KEY:-}
-      AFRICAS_TALKING_USERNAME: ${AFRICAS_TALKING_USERNAME:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      CONSENT_REQUIRED_VERSION: ${CONSENT_REQUIRED_VERSION:-2026.1}
+      JWT_SECRET: dev-only-not-secret
+      S3_BUCKET: fleet-dev
+      FCM_CREDENTIALS_PATH: /secrets/fcm.json
+      GOOGLE_VISION_KEY_PATH: /secrets/vision.json
+      AFRICAS_TALKING_API_KEY: dev
+      NODE_ENV: development
     ports:
-      - "${API_PORT:-4000}:4000"
+      - "4000:4000"
+    develop:
+      watch:
+        # Relative to this file (deploy/), so `..` is the repo root. `../..` pointed one level
+        # above the repo.
+        - action: sync
+          path: ..
+          target: /app
 
   worker:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-      target: prod
+      target: dev
+    command: ["npm", "run", "dev:worker"]
     depends_on:
       - postgres
       - redis
       - api
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-pg_local_dev}@postgres:5432/fleet
+      DATABASE_URL: postgresql://postgres:pg_local_dev@postgres:5432/fleet
       REDIS_URL: redis://redis:6379/0
       TRACCAR_BASE_URL: http://traccar:8082
-      NODE_ENV: ${NODE_ENV:-production}
-      SERVICE_NAME: fleet-worker
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      TRACCAR_USERNAME: ${TRACCAR_USERNAME:-admin}
-      TRACCAR_PASSWORD: ${TRACCAR_PASSWORD:-admin}
-      AWS_REGION: ${AWS_REGION:-af-south-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      AFRICAS_TALKING_API_KEY: ${AFRICAS_TALKING_API_KEY:-}
+      NODE_ENV: development
 
 volumes:
   pgdata:

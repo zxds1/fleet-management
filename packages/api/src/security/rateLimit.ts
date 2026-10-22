@@ -71,9 +71,6 @@ export function createRateLimiter(redis: RedisClient | null, enabled: boolean): 
           })
           .catch((e) => {
             logger.warn("rate limit error", { message: (e as Error).message });
-            // Fail-closed when security enforcement is on: never let a request through if we
-            // cannot account for it. In non-enforced modes degrade open so local/dev keeps working.
-            if (enabled) return next(new Error("Rate limiter unavailable — request rejected"));
             next(); // fail open on backend error
           });
       };

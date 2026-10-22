@@ -7,32 +7,38 @@ import type { FuelGaugeLevel } from "../types/db";
 export const FuelGaugeLevelSchema = z.enum(["EMPTY", "QUARTER", "HALF", "THREE_QUARTER", "FULL"]);
 const _fuelGaugeLevels = FuelGaugeLevelSchema.options satisfies readonly FuelGaugeLevel[];
 
-export const ClockInSchema = z.object({
-  assignment_id: z.string().uuid(),
-  start_odometer_km: z.number().int().nonnegative(),
-  start_fuel_gauge: FuelGaugeLevelSchema,
-  start_media_object_id: z.string().uuid(),
-  phone_gps_fallback_enabled: z.boolean().default(false),
-  consent_version: z.string().min(1),
-  planned_notes: z.string().max(2000).optional(),
-  work_plan_media_object_ids: z.array(z.string().uuid()).max(5).optional(),
-});
+export const ClockInSchema = z
+  .object({
+    assignment_id: z.string().uuid(),
+    start_odometer_km: z.number().int().nonnegative(),
+    start_fuel_gauge: FuelGaugeLevelSchema,
+    start_media_object_id: z.string().uuid(),
+    phone_gps_fallback_enabled: z.boolean().default(false),
+    consent_version: z.string().min(1),
+    planned_notes: z.string().max(2000).optional(),
+    work_plan_media_object_ids: z.array(z.string().uuid()).max(5).optional(),
+  })
+  .strict();
 export type ClockInInput = z.infer<typeof ClockInSchema>;
 
-export const ClockOutSchema = z.object({
-  shift_id: z.string().uuid(),
-  end_odometer_km: z.number().int().nonnegative(),
-  end_fuel_gauge: FuelGaugeLevelSchema,
-  end_media_object_id: z.string().uuid(),
-  debrief_notes: z.string().max(2000).optional(),
-});
+export const ClockOutSchema = z
+  .object({
+    shift_id: z.string().uuid(),
+    end_odometer_km: z.number().int().nonnegative(),
+    end_fuel_gauge: FuelGaugeLevelSchema,
+    end_media_object_id: z.string().uuid(),
+    debrief_notes: z.string().max(2000).optional(),
+  })
+  .strict();
 export type ClockOutInput = z.infer<typeof ClockOutSchema>;
 
-export const VerifyShiftSchema = z.object({
-  action: z.enum(["VERIFY", "FLAG"]),
-  flag_reason: z.string().min(1).max(500).optional(),
-  corrected_end_odometer_km: z.number().int().nonnegative().optional(),
-});
+export const VerifyShiftSchema = z
+  .object({
+    action: z.enum(["VERIFY", "FLAG"]),
+    flag_reason: z.string().min(1).max(500).optional(),
+    corrected_end_odometer_km: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 export type VerifyShiftInput = z.infer<typeof VerifyShiftSchema>
 
 // Cursor pagination envelope shared by every list endpoint (D7).

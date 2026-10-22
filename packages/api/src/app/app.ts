@@ -28,7 +28,6 @@ import { createSettingsRouter } from "../http/routes/settings";
 import { createNotificationRouter } from "../http/routes/notifications";
 import { createPrivacyRouter } from "../http/routes/privacy";
 import { createMeRouter } from "../http/routes/me";
-import { createClerkWebhookRouter } from "../http/routes/clerkWebhook";
 import { createTelemetryRouter } from "../http/routes/telemetry";
 import { createHardwareRouter } from "../http/routes/hardware";
 import { readiness, deepHealth } from "./health";
@@ -48,12 +47,8 @@ export function createApp(container: Container): Express {
   const app = express();
   const base = container.env.API_BASE_PATH;
 
-  app.use(helmet({ hidePoweredBy: true }));
+  app.use(helmet());
   app.use(requestContext());
-
-  // Clerk webhooks need the raw body for Svix signature verification. Mount raw-body
-  // parsing for /clerk/webhook BEFORE safeJson() so the body isn't consumed by JSON parsing.
-  app.use(`${base}/clerk/webhook`, express.raw({ type: "application/json" }));
 
   // Edge / abuse protection (security.md S-3). Enforcement is gated by SECURITY_ENFORCE so tests/dev
   // are never throttled; it activates in production (or "always"). The webhook HMAC is opt-in via
@@ -95,6 +90,31 @@ export function createApp(container: Container): Express {
   // Prometheus metrics endpoint (09 §1). Mounted outside auth/rate-limit so
   // Prometheus/Grafana Cloud scrapes succeed. Excluded from SLOs (slo.md §2).
   app.get("/metrics", startMetrics());
+
+  // Dedicated rate-limit scopes (security Layer 4). The password-reset flow gets its own bucket
+  // instead of the generic auth one, and the financial surface (fuel adjudication, statement
+  // import, reporting) gets its own instead of the global one. Mounted BEFORE the routers they
+  // guard so the tighter bucket is evaluated first.
+  app.use(
+    `${base}/auth/password-reset`,
+    rateLimiter.middleware({ scope: "password_reset", max: container.env.RATE_LIMIT_PASSWORD_RESET_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/fuel/purchases`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/admin/fuel/verify`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/reconciliation/statements`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/reports`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
 
   app.use(`${base}/auth`, rateLimiter.middleware({ scope: "auth", max: container.env.RATE_LIMIT_AUTH_PER_MINUTE }));
   app.use(`${base}/auth`, createAuthRouter({
@@ -262,14 +282,6 @@ export function createApp(container: Container): Express {
     pool: container.pool,
     idempotency: container.idempotency,
     releaseClaim: container.releaseClaim,
-    infra: container.infra,
-  }));
-
-  // Clerk webhook (user.created / user.updated) — syncs clerk_user_id → internal user_id.
-  // Raw body required for Svix signature verification; mounted before json() middleware
-  // on this path by the router's express.raw() handler.
-  app.use(`${base}/clerk/webhook`, createClerkWebhookRouter({
-    pool: container.pool,
     infra: container.infra,
   }));
 

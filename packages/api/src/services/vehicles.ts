@@ -17,6 +17,7 @@ import {
   type VehicleRecord,
   type VehicleRow,
 } from "@fleet/shared";
+import { buildPage, MAX_PAGE_LIMIT, type CursorPage } from "../http/pagination";
 import type { AssignmentRepository, VehicleRepository } from "../repositories/shifts";
 import type { DriverRepository } from "../repositories/identity";
 import type { ManagerAssignmentRepository } from "../repositories/tenancy";
@@ -28,6 +29,27 @@ import type { ManagerAssignmentRepository } from "../repositories/tenancy";
  * falls back to this value and the admin corrects it during onboarding.
  */
 export const DEFAULT_FUEL_TANK_CAPACITY_LITRES = 1;
+
+/**
+ * The vehicle status vocabulary accepted on the wire. `app.asset_status` spells the maintenance
+ * state `UNDER_MAINTENANCE`, while the client (and the older OpenAPI drafts) say `MAINTENANCE` —
+ * both are accepted here and normalised to the stored value, so a status change is never rejected
+ * by the database enum and never silently dropped.
+ */
+export const VEHICLE_STATUS_VALUES = [
+  "AVAILABLE",
+  "IN_USE",
+  "UNDER_MAINTENANCE",
+  "MAINTENANCE",
+  "QUARANTINED",
+  "RETIRED",
+  "EXTERNAL",
+] as const;
+
+/** Maps a wire status onto the `app.asset_status` value that is stored. */
+export function toStoredVehicleStatus(status: string): string {
+  return status === "MAINTENANCE" ? "UNDER_MAINTENANCE" : status;
+}
 
 /** PG unique-violation. Raised by `vehicles_tenant_plate_unique` on a duplicate plate. */
 const UNIQUE_VIOLATION = "23505";
@@ -66,6 +88,8 @@ export interface VehicleListInput {
   tenantId: string;
   limit: number;
   cursor?: { sort: string; id: string } | null;
+  /** Optional status filter; `MAINTENANCE` is normalised to the stored `UNDER_MAINTENANCE`. */
+  status?: string | null;
 }
 
 export class VehicleService {
@@ -76,14 +100,21 @@ export class VehicleService {
     private readonly managerAssignments: ManagerAssignmentRepository,
   ) {}
 
-  /** `GET /vehicles`. Fetches `limit + 1` rows so the caller can build the cursor envelope (D7). */
-  async list(input: VehicleListInput): Promise<Result<VehicleRow[]>> {
+  /**
+   * `GET /vehicles`. Fetches `limit + 1` rows so the caller can build the cursor envelope (D7).
+   *
+   * The cursor MUST key on the same column the repository orders by (`created_at DESC, id DESC`),
+   * otherwise the next page comparison is evaluated against an unrelated timestamp.
+   */
+  async list(input: VehicleListInput): Promise<Result<CursorPage<VehicleRow>>> {
+    const limit = Math.min(Math.max(input.limit, 1), MAX_PAGE_LIMIT);
     const rows = await this.vehicles.listByTenant({
       tenantId: input.tenantId,
-      limit: input.limit + 1,
+      limit: limit + 1,
       cursor: input.cursor ?? null,
+      status: input.status ? toStoredVehicleStatus(input.status) : null,
     });
-    return ok(rows);
+    return ok(buildPage(rows, limit, (row) => ({ sort: String(row.created_at ?? ""), id: row.id })));
   }
 
   /** `GET /vehicles/{vehicleId}`. A vehicle in another tenant is a 404, never a 403. */
@@ -163,7 +194,10 @@ export class VehicleService {
     notes?: string | null | undefined;
     nonOperationalReason?: string | null | undefined;
   }): Promise<Result<VehicleRecord>> {
-    const row = await this.vehicles.updateForTenant(input);
+    const row = await this.vehicles.updateForTenant({
+      ...input,
+      ...(input.status ? { status: toStoredVehicleStatus(input.status) } : {}),
+    });
     if (!row) return err(new NotFound("Vehicle not found"));
     return ok(toVehicleRecord(row));
   }

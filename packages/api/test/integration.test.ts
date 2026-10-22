@@ -303,9 +303,9 @@ integrationDescribe("backend integration (:5444)", () => {
   });
 
   it("flags an odometer rollback after a decreasing refuel", async () => {
-    // A1.4 v2 is photo-first with the receipt + pump-photo pair: both are uploaded before the
-    // purchase row, so the API takes media object ids rather than litres/amount.
-    // receipt_media_object_id is UNIQUE, so each refuel needs its own receipt + pump photo.
+    // A1.4 is photo-first: the receipt and odometer photos are uploaded before the purchase row,
+    // so the API takes media object ids rather than litres/amount. receipt_media_object_id is
+    // UNIQUE (media_objects_tenant_fk + one-receipt-per-purchase), so each refuel needs its own.
     const c0 = await container.pool.connect();
     const mkMedia = async (key: string) => {
       const r = await c0.query<{ id: string }>(
@@ -336,7 +336,7 @@ integrationDescribe("backend integration (:5444)", () => {
     // Two refuels for the same vehicle; the second reports a lower odometer than the first.
     const postRefuel = async (odometerKm: number) => {
       const receiptId = await mkMedia(`intg-receipt-${crypto.randomUUID()}`);
-      const pumpPhotoId = await mkMedia(`intg-pump-${crypto.randomUUID()}`);
+      const odometerPhotoId = await mkMedia(`intg-odometer-${crypto.randomUUID()}`);
       const res = await fetch(`${base}/api/v1/driver/fuel/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(), Authorization: `Bearer ${driverToken}` },
@@ -345,8 +345,7 @@ integrationDescribe("backend integration (:5444)", () => {
           vehicle_id: vehicleId,
           odometer_reading: odometerKm,
           receipt_media_object_id: receiptId,
-          pump_photo_media_object_id: pumpPhotoId,
-          odometer_photo_media_object_id: null,
+          odometer_photo_media_object_id: odometerPhotoId,
           purchased_at: new Date().toISOString(),
         }),
       });

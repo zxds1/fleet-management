@@ -40,7 +40,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // ── The caller's inbox (cursor) ──────────────────────────────────────────────────────────
   router.get(
     "/",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -69,7 +69,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
    */
   router.get(
     "/count",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:read")),
     asyncHandler(async (req, res) => {
       const principal = (req as Request & { principal?: Principal }).principal as Principal;
@@ -88,7 +88,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // able to clear it, so `unread` could never return to zero.
   router.post(
     "/:id/read",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:read")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -119,7 +119,7 @@ export function createNotificationRouter(deps: NotificationRouterDeps): Router {
   // `notification:read` for the same reason as `/:id/read`: own rows only.
   router.post(
     "/read-all",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("notification:read")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

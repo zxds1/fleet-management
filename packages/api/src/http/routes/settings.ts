@@ -47,7 +47,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   // ── Read the trigger allow-list ──────────────────────────────────────────────────────────
   router.get(
     "/triggers",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("config:read")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {
@@ -68,7 +68,7 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
   // ── Update one trigger value ─────────────────────────────────────────────────────────────
   router.put(
     "/triggers",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("config:manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>

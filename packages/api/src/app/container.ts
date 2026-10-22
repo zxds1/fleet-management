@@ -3,7 +3,7 @@
 // box, idempotency service) and exposes the per-domain router dependencies. Repositories + services
 // are request-scoped (see compose.ts) so each write shares one transaction.
 
-import { createPool, type Cache, type FleetPool, PgConfigClient, PgIdempotencyService, initPiiCrypto } from "@fleet/db";
+import { createPool, type Cache, type FleetPool, PgConfigClient, PgIdempotencyService } from "@fleet/db";
 import type { ConfigClient, IdempotencyService, DbClient } from "@fleet/shared";
 import { env as loadEnv, type Env } from "../config/env";
 import { createRedis, type RedisBundle } from "../config/redis";
@@ -11,7 +11,6 @@ import { TokenService } from "../security/tokens";
 import { SecretBox } from "../security/crypto";
 import { EnvMediaPresigner } from "../media/presigner";
 import { ConsoleEmailService, ResendEmailService } from "../services/email";
-import { getSecretsClient } from "@fleet/shared";
 import type { Infra } from "./compose";
 
 export interface Container {
@@ -33,11 +32,6 @@ export function buildContainer(environment: Env = loadEnv()): Container {
     max: environment.DATABASE_POOL_MAX,
     statementTimeoutMs: environment.DATABASE_STATEMENT_TIMEOUT_MS,
   });
-
-  // Wire up enterprise-grade PII encryption: resolve keys from the secrets store
-  // (Vault or env) at call time. Fail-closed if PII_ENCRYPTION_KEY_v1 is missing.
-  initPiiCrypto(getSecretsClient());
-
   const redis: RedisBundle = createRedis(environment);
   const config: ConfigClient = new PgConfigClient(pool, redis.cache as Cache | undefined);
   const idempotency: IdempotencyService = new PgIdempotencyService(pool);

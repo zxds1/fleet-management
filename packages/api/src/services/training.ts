@@ -6,7 +6,7 @@
 // id comes from the resolved principal, never from the request body.
 
 import { type Result, type Tx, ok, err, NotFound } from "@fleet/shared";
-import type { TrainingCourseRow, TrainingEnrollmentRow } from "@fleet/shared";
+import type { TrainingEnrollmentRow } from "@fleet/shared";
 import { MAX_PAGE_LIMIT, decodeCursor, buildPage, type CursorPage } from "../http/pagination";
 import type {
   TrainingEnrollmentRepository,
@@ -89,66 +89,6 @@ export class TrainingService {
       ...(cursor ? { cursorSort: cursor.sort, cursorId: cursor.id } : {}),
     });
     return ok(buildPage(rows, limit, (row) => ({ sort: String(row.created_at ?? ""), id: row.id })));
-  }
-
-  /** Cursor page of courses, ordered by code. Used by admins to pick the course a lesson belongs to. */
-  async listCourses(opts: { limit: number; cursor?: string | null }): Promise<Result<CursorPage<TrainingCourseRow>>> {
-    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
-    const cursor = decodeCursor(opts.cursor ?? undefined);
-    const res = await this.lessons.dbClient.query<TrainingCourseRow>(
-      `SELECT id, code, title, description, is_mandatory, created_at, updated_at, deleted_at
-         FROM app.training_courses
-        WHERE deleted_at IS NULL ${cursor ? `AND (code, id) > ($1::text, $2::uuid)` : ""}
-        ORDER BY code ASC, id ASC
-        LIMIT $${cursor ? 3 : 1}`,
-      cursor ? [cursor.sort, cursor.id, limit] : [limit],
-    );
-    return ok(buildPage(res.rows, limit, (row) => ({ sort: row.code, id: row.id })));
-  }
-
-  /**
-   * Admin creates a lesson inside an existing course. `content_url` is the uploaded training
-   * material (presigned S3 URL); the driver marks it complete via `POST /training/lessons/:id/complete`.
-   */
-  async createLesson(
-    tx: Tx,
-    input: {
-      courseId: string;
-      code: string;
-      title: string;
-      description: string | null;
-      contentUrl: string | null;
-      durationMinutes: number | null;
-      orderIndex: number;
-    },
-  ): Promise<Result<TrainingLessonListRow>> {
-    const course = await this.lessons.dbClient.query<{ code: string; title: string }>(
-      `SELECT code, title FROM app.training_courses WHERE id = $1::uuid AND deleted_at IS NULL LIMIT 1`,
-      [input.courseId],
-    );
-    if (course.rows.length === 0) return err(new NotFound("Training course not found"));
-    const row = await this.lessons.insert({
-      course_id: input.courseId,
-      code: input.code,
-      title: input.title,
-      description: input.description,
-      content_url: input.contentUrl,
-      duration_minutes: input.durationMinutes,
-      order_index: input.orderIndex,
-    });
-    return ok({
-      id: row.id,
-      course_id: row.course_id,
-      course_code: course.rows[0]!.code,
-      course_title: course.rows[0]!.title,
-      is_mandatory: false,
-      code: row.code,
-      title: row.title,
-      description: row.description,
-      content_url: row.content_url,
-      duration_minutes: row.duration_minutes,
-      order_index: row.order_index,
-    } as TrainingLessonListRow);
   }
 
   /**

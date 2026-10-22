@@ -132,13 +132,44 @@ describe("POST /api/v1/telemetry/webhook", () => {
   });
 });
   describe("HMAC authentication (WEBHOOK_SECRET, F4)", () => {
-    it("accepts a request with a valid x-signature over the raw body", async () => {
+    it("accepts a request with a valid x-signature over timestamp + '.' + body", async () => {
       const secret = "test-secret";
       const { createHmac } = await import("node:crypto");
       const { client, calls } = xaddSpy();
       const container = makeClient({
         env: { ...env(), WEBHOOK_SECRET: secret } as never,
         redis: { client, cache: { get: async () => null, set: async () => undefined, del: async () => undefined }, sessions: {} as never, close: async () => undefined },
+        pool: fakePool([{ vehicle_id: "veh-9" }]),
+      } as Partial<Container>);
+      const app = createApp(container);
+      const server = app.listen(0);
+      const port = (server.address() as { port: number }).port;
+      const body = JSON.stringify({ deviceId: "123", lat: -1.2, lon: 36.8, timestamp: "2026-08-06T10:00:00Z" });
+      const ts = String(Date.now());
+      const sig =
+        "sha256=" +
+        createHmac("sha256", secret)
+          .update(Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), Buffer.from(body)]))
+          .digest("hex");
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-signature": sig, "x-timestamp": ts },
+          body,
+        });
+        expect(res.status).toBe(202);
+        expect(calls).toHaveLength(1);
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    });
+
+    it("rejects a body-only signature (the timestamp must be inside the signed material)", async () => {
+      const secret = "test-secret";
+      const { createHmac } = await import("node:crypto");
+      const container = makeClient({
+        env: { ...env(), WEBHOOK_SECRET: secret } as never,
+        redis: { client: null, cache: { get: async () => null, set: async () => undefined, del: async () => undefined }, sessions: {} as never, close: async () => undefined },
         pool: fakePool([{ vehicle_id: "veh-9" }]),
       } as Partial<Container>);
       const app = createApp(container);
@@ -153,8 +184,7 @@ describe("POST /api/v1/telemetry/webhook", () => {
           headers: { "content-type": "application/json", "x-signature": sig, "x-timestamp": ts },
           body,
         });
-        expect(res.status).toBe(202);
-        expect(calls).toHaveLength(1);
+        expect(res.status).toBe(401);
       } finally {
         await new Promise<void>((r) => server.close(() => r()));
       }

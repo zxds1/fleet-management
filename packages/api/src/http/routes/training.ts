@@ -18,9 +18,11 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler, PROBLEM_CONTENT_TYPE } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import { CursorQuerySchema } from "../pagination";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -29,16 +31,6 @@ const ua = (req: Request) => req.header("user-agent") ?? undefined;
 
 const LessonCompleteSchema = z.object({
   quiz_score: z.number().int().min(0).max(100).optional(),
-});
-
-const CreateLessonSchema = z.object({
-  course_id: z.string().uuid(),
-  code: z.string().min(1).max(40),
-  title: z.string().min(1).max(200),
-  description: z.string().max(1000).optional().nullable(),
-  content_url: z.string().url().optional().nullable(),
-  duration_minutes: z.number().int().min(1).max(480).optional().nullable(),
-  order_index: z.number().int().min(0).max(10000).optional(),
 });
 
 export interface TrainingRouterDeps {
@@ -57,10 +49,11 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // ── Lesson catalogue (cursor) ────────────────────────────────────────────────────────────
   router.get(
     "/lessons",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.training.listLessons({ limit: query.limit, cursor: query.cursor ?? null });
@@ -72,17 +65,20 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Manager roster ───────────────────────────────────────────────────────────────────────
+  // Registered before `/lessons/:id` is irrelevant here (different prefix), but kept above the
+  // parameterised lesson route for readability.
   router.get(
     "/roster",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:review")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.training.roster({ limit: query.limit, cursor: query.cursor ?? null });
@@ -94,74 +90,14 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
-  );
-
-  // ── Course catalogue (cursor) — admin picks the course a lesson belongs to ───────────────
-  router.get(
-    "/courses",
-    authenticate({ env: infra.env }),
-    requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
-        const query = parseQuery(CursorQuerySchema, req);
-        const svc = makeServices(client, infra);
-        const result = await svc.training.listCourses({ limit: query.limit, cursor: query.cursor ?? null });
-        if (!result.ok) {
-          res
-            .status(result.error.httpStatus)
-            .type(PROBLEM_CONTENT_TYPE)
-            .json({ ...result.error.toProblem(), instance: req.requestId });
-          return;
-        }
-        res.status(200).json(result.value);
-      }),
-    ),
-  );
-
-  // ── Create a lesson (admin uploads training content + rules) ────────────────────────────
-  router.post(
-    "/lessons",
-    authenticate({ env: infra.env }),
-    requirePermission(asPerm("training:manage")),
-    idempotency({ idempotency: idem }),
-    asyncHandler((req, res) =>
-      writer(req, res, async (tx, ctx) => {
-        const principal = ctx.principal as Principal;
-        const input = parseBody(CreateLessonSchema, req);
-        const svc = makeServices(tx.client, infra);
-        const result = await svc.training.createLesson(tx, {
-          courseId: input.course_id,
-          code: input.code,
-          title: input.title,
-          description: input.description ?? null,
-          contentUrl: input.content_url ?? null,
-          durationMinutes: input.duration_minutes ?? null,
-          orderIndex: input.order_index ?? 0,
-        });
-        if (!result.ok) return err(result.error);
-        tx.audit({
-          action: "CREATE",
-          entity_table: "app.training_lessons",
-          entity_id: result.value.id,
-          actor_user_id: principal.userId,
-          new_value: { course_id: input.course_id, code: input.code, title: input.title },
-          request_id: req.requestId,
-          ip_address: ip(req),
-          user_agent: ua(req),
-          endpoint: req.path,
-          http_method: req.method,
-        });
-        return ok({ status: 201, body: result.value, resourceId: result.value.id });
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Complete a lesson (current driver) ───────────────────────────────────────────────────
   router.post(
     "/lessons/:id/complete",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:complete")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -195,10 +131,11 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
   // MUST stay after `/lessons` and `/lessons/:id/complete`.
   router.get(
     "/lessons/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.training.getLesson(req.params.id!);
         if (!result.ok) {
@@ -209,8 +146,8 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;

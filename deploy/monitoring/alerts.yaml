@@ -34,44 +34,83 @@ Resources:
   # ──────────────────────────────────────────────────────────────────────────
   # API error rate — SLO A-01: ≤ 0.1 % 5xx (99.9 % success)
   # 36x burn-rate for 2 h → page; 6x for 2 h → warning.
+  #
+  # The numerator and the denominator are DIFFERENT metrics: fleet_errors_total
+  # counts errors, fleet_http_requests_total counts requests. Dividing a request
+  # count by itself always yields 1, and the Average of a counter is
+  # meaningless - counters are summed over the period.
   # ──────────────────────────────────────────────────────────────────────────
   ApiErrorRateAlarm:
-    Type: AWS::CloudWatch::Alarm
+    Type: AWS::CloudWatch::MetricMathAlarm
     Properties:
       AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate"
       AlarmDescription: "API 5xx error rate exceeded 0.1 % (SLO A-01)"
-      Namespace: !Ref MetricsNamespace
-      MetricName: fleet_http_requests_total
-      Statistic: Average
-      Period: 300
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlertSnsTopic
+      OKActions:
+        - !Ref AlertSnsTopic
       EvaluationPeriods: 6
       Threshold: 0.1
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      ActionsEnabled: true
-      AlarmActions:
-        - !Ref AlertSnsTopic
-      OKActions:
-        - !Ref AlertSnsTopic
+      Metrics:
+        - Id: errors
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: fleet_errors_total
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: fleet_http_requests_total
+            Period: 300
+            Stat: Sum
+        - Id: e1
+          Expression: "IF(requests = 0, 0, 100 * errors / requests)"
+          Label: "API error rate (%)"
+          ReturnData: true
 
   ApiErrorRateWarning:
-    Type: AWS::CloudWatch::Alarm
+    Type: AWS::CloudWatch::MetricMathAlarm
     Properties:
       AlarmName: !Sub "${MetricsNamespace}-api-5xx-rate-warning"
-      AlarmDescription: "API 5xx error rate elevated — SLO A-01 slow burn"
-      Namespace: !Ref MetricsNamespace
-      MetricName: fleet_http_requests_total
-      Statistic: Average
-      Period: 300
+      AlarmDescription: "API error rate elevated, SLO A-01 slow burn"
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref WarningSnsTopic
+      OKActions:
+        - !Ref WarningSnsTopic
       EvaluationPeriods: 6
       Threshold: 0.05
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      ActionsEnabled: true
-      AlarmActions:
-        - !Ref WarningSnsTopic
-      OKActions:
-        - !Ref WarningSnsTopic
+      Metrics:
+        - Id: errors
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: fleet_errors_total
+            Period: 300
+            Stat: Sum
+        - Id: requests
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: fleet_http_requests_total
+            Period: 300
+            Stat: Sum
+        - Id: e1
+          Expression: "IF(requests = 0, 0, 100 * errors / requests)"
+          Label: "API error rate (%)"
+          ReturnData: true
 
   # ──────────────────────────────────────────────────────────────────────────
   # API P95 latency — SLO L-01 (reads ≤200 ms), L-02 (writes ≤600 ms)
@@ -83,10 +122,14 @@ Resources:
       AlarmDescription: "API P95 read latency exceeded 200 ms (SLO L-01)"
       Namespace: !Ref MetricsNamespace
       MetricName: fleet_http_request_duration_seconds
-      Statistic: Average
+      # P95 needs the extended statistic; the Average of a latency histogram is
+      # the mean of the bucket upper bounds, not a latency percentile. The
+      # metric is in SECONDS, so the thresholds are 0.2 s / 0.6 s (200 ms /
+      # 600 ms), not 200 / 600.
+      ExtendedStatistic: p95
       Period: 60
       EvaluationPeriods: 2
-      Threshold: 200
+      Threshold: 0.2
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
@@ -99,10 +142,12 @@ Resources:
       AlarmDescription: "API P95 write latency exceeded 600 ms (SLO L-02)"
       Namespace: !Ref MetricsNamespace
       MetricName: fleet_http_request_duration_seconds
-      Statistic: Average
+      # P95 needs the extended statistic; see ApiReadLatencyAlarm. Seconds, not
+      # milliseconds: 600 ms = 0.6 s.
+      ExtendedStatistic: p95
       Period: 60
       EvaluationPeriods: 2
-      Threshold: 600
+      Threshold: 0.6
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
@@ -163,22 +208,40 @@ Resources:
   # Worker job error rate — SLO A-04: ≥ 99 % jobs succeed
   # ──────────────────────────────────────────────────────────────────────────
   WorkerJobErrorRateAlarm:
-    Type: AWS::CloudWatch::Alarm
+    Type: AWS::CloudWatch::MetricMathAlarm
     Properties:
       AlarmName: !Sub "${MetricsNamespace}-worker-job-error-rate"
       AlarmDescription: "Worker job error rate exceeded 1 % (SLO A-04)"
-      Namespace: !Ref MetricsNamespace
-      MetricName: fleet_worker_jobs_total
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 4
-      Threshold: 1
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: breaching
+      ActionsEnabled: true
       AlarmActions:
         - !Ref AlertSnsTopic
       OKActions:
         - !Ref AlertSnsTopic
+      EvaluationPeriods: 4
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Metrics:
+        # The Average of a counter is not a rate: it is the per-period job count,
+        # so "Average > 1" fired on every period in which the worker was simply
+        # doing its job. The failure share needs the `result` label, so the
+        # numerator is a search over fleet_worker_jobs_total{result="FAILED"}.
+        - Id: failed
+          ReturnData: false
+          Expression: !Sub "SEARCH('{${MetricsNamespace},fleet_worker_jobs_total} MetricName=\"fleet_worker_jobs_total\" AND result=\"FAILED\"', 'Sum', 300)"
+          Label: failed jobs
+        - Id: total
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: !Ref MetricsNamespace
+              MetricName: fleet_worker_jobs_total
+            Period: 300
+            Stat: Sum
+        - Id: e1
+          Expression: "IF(total = 0, 0, 100 * failed / total)"
+          Label: "failed job share (%)"
+          ReturnData: true
 
   # ──────────────────────────────────────────────────────────────────────────
   # Metric-velocity / silent-failure detection (#5 audit item).
@@ -186,11 +249,12 @@ Resources:
   # A HALTED ingest pipeline is invisible to error-rate alarms (errors stay flat while
   # throughput drops to zero). These alarms make a stalled/quiet pipeline page.
   #
-   # (a) fleet_telemetry_ingest_total throughput rate — fires when processed positions/min drop below floor.
-   # (b) fleet_telemetry_ingest_total / fleet_errors_total ratio — fires when throughput collapses while errors are flat.
-  #     Implemented with CloudWatch MetricMath: ratio = processed / max(errors,1). When processed
-  #     collapses but errors stay >0 this ratio craters; when both are zero (full stall) the rate
-   #     alarm (a) catches it via TreatMissingData: breaching.
+   #    (a) fleet_telemetry_ingest_total throughput rate — fires when processed positions/min drop below floor.
+   #    (b) fleet_telemetry_ingest_total / fleet_errors_total ratio — fires when throughput collapses while errors are flat.
+   #     Implemented with CloudWatch MetricMath: ratio = processed / max(errors,1). When processed
+   #     collapses but errors stay >0 this ratio craters; when both are zero the ratio is pinned to
+   #     100 (no breach) and the rate alarm (a) catches the full stall instead, because the counter
+   #     still exists with a sum of 0.
   # ──────────────────────────────────────────────────────────────────────────
   IngestProcessedRateAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -204,25 +268,9 @@ Resources:
       EvaluationPeriods: 3
       Threshold: 1
       ComparisonOperator: LessThanThreshold
-      TreatMissingData: breaching
-      AlarmActions:
-        - !Ref AlertSnsTopic
-      OKActions:
-        - !Ref AlertSnsTopic
-
-  IngestThroughputErrorRatioAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "${MetricsNamespace}-ingest-velocity-ratio"
-      AlarmDescription: "Ingest velocity collapse vs flat errors (silent failure): processed/errors ratio dropped"
-      Namespace: !Ref MetricsNamespace
-      MetricName: ingest_velocity_ratio
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 0.5
-      ComparisonOperator: LessThanThreshold
-      TreatMissingData: breaching
+      # A quiet night (no vehicles moving) produces a real 0, not missing data.
+      # Treating missing data as breaching paged on-call every night.
+      TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlertSnsTopic
       OKActions:
@@ -241,7 +289,7 @@ Resources:
       EvaluationPeriods: 2
       Threshold: 0.5
       ComparisonOperator: LessThanThreshold
-      TreatMissingData: breaching
+      TreatMissingData: notBreaching
       Metrics:
         - Id: processed
           MetricStat:
@@ -258,7 +306,10 @@ Resources:
             Period: 300
             Stat: Sum
         - Id: ratio
-          Expression: "processed / GREATEST(errs, 1)"
+          # processed = 0 and errs = 0 is a quiet night, not a failure: the rate
+          # alarm below catches the full stall (the counter still exists, its sum
+          # is 0). processed = 0 with errors > 0 IS a failure.
+          Expression: "IF(processed = 0, IF(errs = 0, 100, 0), processed / GREATEST(errs, 1))"
           Label: "ingest processed per error (floor 1)"
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -308,7 +359,9 @@ Resources:
       AlarmDescription: "Worker P95 job latency exceeded 60 s (SLO L-04)"
       Namespace: !Ref MetricsNamespace
       MetricName: fleet_worker_job_duration_seconds
-      Statistic: Average
+      # P95 needs the extended statistic; the metric is in seconds and the
+      # threshold is 60 s.
+      ExtendedStatistic: p95
       Period: 300
       EvaluationPeriods: 4
       Threshold: 60
@@ -393,8 +446,8 @@ Resources:
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 3
-      # 85 % of the 256 MiB default: 0.85 * 268435456 = 228170437
-      Threshold: 228170437
+      # 85 % of the 20 GiB Redis volume: 0.85 * 21474836480 = 18253611008
+      Threshold: 18253611008
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:

@@ -1,18 +1,25 @@
 // packages/api/src/middleware/authenticate.ts
-// Verifies Clerk-issued JWTs (RS256 via JWKS) and attaches the Principal (02 §1, 03 §1 step 2).
-// Clerk is the system's managed auth provider: sign-in, sign-up, MFA, password reset, and session
-// management all live in Clerk. The API verifies Clerk JWTs and maps clerk_user_id → internal
-// app.users.id via the `clerk_user_id` column. Session revocation is handled by Clerk — a revoked
-// Clerk session fails JWT verification on the next request, so there is no separate Redis session
-// check (fail-secure: if Clerk is unreachable, all requests fail 401).
+// Verifies the HS256 access token and attaches the Principal (02 §1, 03 §1 step 2).
+// The token is stateless: roles + the precomputed permission union travel in the claims (02 §5).
+// When Redis is healthy the session id is additionally checked against `user:{id}:sessions`, so a
+// logout / device revoke / session eviction takes effect immediately (02 §6). A Redis outage
+// degrades to the stateless check (R-109) rather than failing the request.
 
 import type { NextFunction, Request, Response } from "express";
 import { Unauthenticated } from "@fleet/shared";
-import { verifyClerkToken, principalFromClerkClaims, type ClerkClaims } from "../security/clerk";
-import type { Env } from "../config/env";
+import type { SessionStore } from "../config/redis";
+import { principalFromClaims, type TokenService } from "../security/tokens";
 
 export interface AuthenticateDeps {
-  env: Env;
+  tokens: TokenService;
+  sessions: SessionStore;
+  touchSession?: (userId: string, sessionId: string) => Promise<void>;
+  /**
+   * When true, a Redis outage does NOT degrade to the stateless check — the request is denied
+   * instead of silently accepting a possibly-revoked token (Security Layer 2, fail-secure-closed).
+   * Set from `SECURITY_ENFORCE === "always"`.
+   */
+  strictSessionCheck?: boolean;
 }
 
 export function authenticate(deps: AuthenticateDeps) {
@@ -24,22 +31,30 @@ export function authenticate(deps: AuthenticateDeps) {
         throw new Unauthenticated("Missing bearer token");
       }
 
-      const claims = await verifyClerkToken(deps.env, token);
-      const principal = principalFromClerkClaims(claims as ClerkClaims);
+      const claims = deps.tokens.verifyAccessToken(token);
+      const principal = principalFromClaims(claims);
+
+      if (principal.sessionId) {
+        if (!deps.sessions.available) {
+          if (deps.strictSessionCheck) {
+            throw new Unauthenticated("Session store unavailable");
+          }
+        } else {
+          const live = await deps.sessions.has(principal.userId, principal.sessionId);
+          if (!live) throw new Unauthenticated("Session revoked");
+        }
+      }
 
       // Idle timeout (A1.6): refresh the session's last_seen_at on every successful auth.
       // Fire-and-forget so auth latency is unaffected by a slow DB round-trip.
-      if (principal.sessionId) {
-        void deps.env.CLERK_SECRET_KEY; // placeholder — Clerk handles session TTL natively
+      if (principal.sessionId && deps.touchSession) {
+        void deps.touchSession(principal.userId, principal.sessionId);
       }
 
       req.principal = principal;
       next();
     } catch (e) {
-      // Fail-secure: any failure during Clerk JWT verification (misconfigured JWKS, unreachable
-      // JWKS, invalid signature, expired token) rejects the request with 401 — never 500, never
-      // pass-through. When Clerk is not yet configured every authenticated route fails closed.
-      next(e instanceof Unauthenticated ? e : new Unauthenticated("Authentication failed"));
+      next(e);
     }
   };
 }

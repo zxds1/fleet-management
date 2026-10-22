@@ -1,118 +1,219 @@
 // packages/api/test/security.test.ts
-// Security gate: verifies that security headers are applied to every response (before auth) and
-// that authentication is fail-secure when Clerk is not configured. These assertions run in CI as
-// part of the deploy gate so no deploy can ship a backend that drops headers or accepts unsigned
-// requests.
+// Verifies the backend security controls (security.md S-1/S-3): rate limiting + IP blocking on the
+// telemetry ingress, webhook HMAC, safe JSON parsing (prototype pollution + depth), and security
+// headers. Enforcement is forced on via SECURITY_ENFORCE=always so the controls are exercised even
+// though the default is production-only.
 
-import { describe, it, expect } from "@jest/globals";
-import express from "express";
-import request from "supertest";
-import helmet from "helmet";
-import { securityHeaders } from "../src/security/headers";
-import { corsMiddleware } from "../src/security/cors";
-import { authenticate } from "../src/middleware/authenticate";
-import { problemHandler } from "../src/http/problem";
-import jwt from "jsonwebtoken";
+import { createApp } from "../src/app/app";
+import { env } from "../src/config/env";
+import type { Container } from "../src/app/container";
+import { createHmac } from "node:crypto";
 
-describe("security headers (applied before any request is accepted)", () => {
-  const app = express();
-  app.use(helmet({ hidePoweredBy: true }));
-  app.use(securityHeaders());
-  app.use(corsMiddleware(""));
-  app.get("/", (_req, res) => res.json({ ok: true }));
+function makeClient(overrides: Partial<Container> = {}): Container {
+  const base = {
+    env: env(),
+    pool: {
+      connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }), release: () => undefined }),
+      close: async () => undefined,
+    } as never,
+    redis: {
+      client: null,
+      cache: { get: async () => null, set: async () => undefined, del: async () => undefined },
+      sessions: {} as never,
+      close: async () => undefined,
+    },
+    config: { numeric: async () => 0, string: async () => null, boolean: async () => false } as never,
+    idempotency: {} as never,
+    tokens: {} as never,
+    secretBox: {} as never,
+    infra: {} as never,
+    releaseClaim: async () => undefined,
+    close: async () => undefined,
+  };
+  return { ...base, ...overrides } as unknown as Container;
+}
 
-  it("sets Strict-Transport-Security", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["strict-transport-security"]).toContain("max-age=63072000");
-    expect(res.headers["strict-transport-security"]).toContain("includeSubDomains");
-    expect(res.headers["strict-transport-security"]).toContain("preload");
+function withEnv(extra: Record<string, unknown>): any {
+  return { ...env(), ...extra };
+}
+
+async function listen(app: ReturnType<typeof createApp>) {
+  const server = app.listen(0);
+  const port = (server.address() as { port: number }).port;
+  return {
+    port,
+    close: () =>
+      new Promise<void>((r) => {
+        const s = server as unknown as { closeAllConnections?: () => void };
+        if (typeof s.closeAllConnections === "function") s.closeAllConnections();
+        server.close(() => r());
+      }),
+  };
+}
+
+const JSON_HEADERS = { "content-type": "application/json" };
+
+describe("rate limiting + IP blocking", () => {
+  it("rate limits the telemetry webhook after the per-minute cap", async () => {
+    const secret = "test-secret";
+    const container = makeClient({
+      env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret, RATE_LIMIT_TELEMETRY_PER_MINUTE: 3 }),
+    });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const results: number[] = [];
+      // Send more than the cap so the limiter is guaranteed to engage even if a
+      // prior test left the shared in-memory window partially consumed. Requests are
+      // HMAC-signed so they clear webhook auth and reach the body validator (400) or limiter (429).
+      for (let i = 0; i < 8; i++) {
+        const body = JSON.stringify({ lat: 1 });
+        const ts = String(Date.now());
+        // The signed material is timestamp + "." + body, so a captured triple
+        // cannot be replayed with a fresh timestamp.
+        const sig =
+          "sha256=" +
+          createHmac("sha256", secret)
+            .update(Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), Buffer.from(body)]))
+            .digest("hex");
+        const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+          method: "POST",
+          headers: { ...JSON_HEADERS, "x-signature": sig, "x-timestamp": ts },
+          body,
+        });
+        results.push(res.status);
+      }
+      // The limiter must only engage after the per-minute cap (3) is exceeded, so
+      // the first rate-limited (429) response cannot appear before the 4th request.
+      const first429 = results.indexOf(429);
+      expect(first429).toBeGreaterThanOrEqual(3);
+      // And it must actually engage.
+      expect(results.filter((r) => r === 429).length).toBeGreaterThanOrEqual(2);
+      // Every non-rate-limited response is a validation (400) rejection, never a pass-through.
+      const nonLimited = results.filter((r) => r !== 429);
+      expect(nonLimited).toEqual(nonLimited.map(() => 400));
+    } finally {
+      await close();
+    }
   });
 
-  it("sets X-Content-Type-Options nosniff", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["x-content-type-options"]).toBe("nosniff");
-  });
-
-  it("sets X-Frame-Options DENY", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["x-frame-options"]).toBe("DENY");
-  });
-
-  it("sets Referrer-Policy no-referrer", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["referrer-policy"]).toBe("no-referrer");
-  });
-
-  it("sets strict CSP default-src none", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
-  });
-
-  it("removes X-Powered-By header", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["x-powered-by"]).toBeUndefined();
-  });
-
-  it("sets additional hardening headers", async () => {
-    const res = await request(app).get("/");
-    expect(res.headers["x-dns-prefetch-control"]).toBe("off");
-    expect(res.headers["x-download-options"]).toBe("noopen");
-    expect(res.headers["x-permitted-cross-domain-policies"]).toBe("none");
+  it("auto-blocks an IP after repeated abuse (401s)", async () => {
+    const container = makeClient({
+      env: withEnv({ SECURITY_ENFORCE: "always", IP_BLOCK_THRESHOLD: 2 }),
+    });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const get = () =>
+        fetch(`http://127.0.0.1:${port}/api/v1/shifts/me/active`, { headers: JSON_HEADERS });
+      expect((await get()).status).toBe(401);
+      expect((await get()).status).toBe(401);
+      expect((await get()).status).toBe(403); // blocked
+    } finally {
+      await close();
+    }
   });
 });
 
-describe("authentication enforcement (fail-secure without Clerk configured)", () => {
-  // Clerk env is intentionally absent: CLERK_FRONTEND_URL / CLERK_JWKS_URL are unset, so JWKS
-  // resolution throws and every authenticated request is rejected 401 (fail-secure).
-  const env = {
-    CLERK_SECRET_KEY: undefined,
-    CLERK_PUBLISHABLE_KEY: undefined,
-    CLERK_JWKS_URL: undefined,
-    CLERK_JWT_KEY: undefined,
-    CLERK_ISSUER: undefined,
-    CLERK_FRONTEND_URL: undefined,
-    CLERK_AUTHORIZED_PARTIES: undefined,
-    CLERK_JWT_AUDIENCE: undefined,
-    CLERK_CLOCK_SKEW_IN_MS: undefined,
-    CLERK_WEBHOOK_SECRET: undefined,
-  } as unknown as Parameters<typeof authenticate>[0]["env"];
+describe("telemetry webhook HMAC (S-1)", () => {
+  const secret = "s3cr3t";
+  const body = JSON.stringify({ deviceId: "1", lat: 1, lon: 2, timestamp: "2026-08-06T10:00:00Z" });
 
-  const app = express();
-  app.use(express.json());
-  app.use(authenticate({ env }));
-  app.get("/protected", (_req, res) => res.json({ ok: true }));
-  app.use(problemHandler());
+  async function post(port: number, headers: Record<string, string>) {
+    return fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+      method: "POST",
+      headers: { ...JSON_HEADERS, ...headers },
+      body,
+    });
+  }
 
-  it("rejects requests without a bearer token", async () => {
-    const res = await request(app).get("/protected");
-    expect(res.status).toBe(401);
+  it("accepts a valid signature (auth passes; downstream 503 since redis is null in test)", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const ts = Date.now().toString();
+      const sig =
+        "sha256=" +
+        createHmac("sha256", secret)
+          .update(Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), Buffer.from(body)]))
+          .digest("hex");
+      const res = await post(port, { "x-signature": sig, "x-timestamp": ts });
+      expect(res.status).not.toBe(401);
+    } finally {
+      await close();
+    }
   });
 
-  it("rejects requests with a malformed bearer token", async () => {
-    const res = await request(app)
-      .get("/protected")
-      .set("Authorization", "Bearer not-a-real-token");
-    expect(res.status).toBe(401);
+  it("rejects an invalid signature", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const res = await post(port, { "x-signature": "sha256=deadbeef", "x-timestamp": Date.now().toString() });
+      expect(res.status).toBe(401);
+    } finally {
+      await close();
+    }
   });
 
-  it("rejects requests with an unsigned/HS256 token on Clerk RS256-only verification", async () => {
-    const hs256Token = jwt.sign({ sub: "user_123" }, "secret", { algorithm: "HS256" });
-    const res = await request(app)
-      .get("/protected")
-      .set("Authorization", `Bearer ${hs256Token}`);
-    expect(res.status).toBe(401);
+  it("rejects when signature/timestamp are missing", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const res = await post(port, {});
+      expect(res.status).toBe(401);
+    } finally {
+      await close();
+    }
   });
 });
 
-describe("JWT algorithm enforcement", () => {
-  it("HS256-signed tokens do not verify under RS256-only (Clerk) verification", () => {
-    const hs256 = jwt.sign({ sub: "user_123" }, "secret", { algorithm: "HS256" });
-    expect(() => jwt.verify(hs256, "secret", { algorithms: ["RS256"] })).toThrow();
+describe("safe JSON body parsing", () => {
+  it("rejects prototype-pollution payloads", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ "__proto__": { x: 1 }, deviceId: "1" }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await close();
+    }
   });
 
-  it("self-issued tokens verify under HS256 only", () => {
-    const token = jwt.sign({ sub: "user_123" }, "secret", { algorithm: "HS256", issuer: "fleet-api" });
-    const decoded = jwt.verify(token, "secret", { algorithms: ["HS256"], issuer: "fleet-api" });
-    expect(decoded).toBeDefined();
+  it("rejects over-deep payloads", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      let deep: unknown = { a: 1 };
+      for (let i = 0; i < 20; i++) deep = { nested: deep };
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify(deep),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("security headers", () => {
+  it("sets hardening headers on responses", async () => {
+    const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "off" }) });
+    const { port, close } = await listen(createApp(container));
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ lat: 1 }),
+      });
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    } finally {
+      await close();
+    }
   });
 });

@@ -5,12 +5,18 @@
 // into the shared kernel used by mobile/admin. The signing key + issuer match the api (A3.7).
 
 import jwt, { type JwtPayload } from "jsonwebtoken";
-import { Unauthenticated, type PermissionCode, type Principal, type RoleCode } from "@fleet/shared";
+import { Unauthenticated, BOOTSTRAP_TENANT_ID, type PermissionCode, type Principal, type RoleCode } from "@fleet/shared";
 import type { Env } from "../config/env";
 
 export interface AccessTokenClaims extends JwtPayload {
   sub: string;
   email: string;
+  /**
+   * Owning tenant (14_tenancy.sql). Signed into the token so the tenant can never be spoofed by a
+   * request field. A token minted before tenancy shipped carries none, and then the caller belongs
+   * to the bootstrap tenant — exactly where its rows were back-filled.
+   */
+  tid?: string;
   roles: RoleCode[];
   permissions: PermissionCode[];
   sid: string;
@@ -56,7 +62,9 @@ export function principalFromClaims(claims: AccessTokenClaims): Principal {
     permissions: new Set<PermissionCode>(claims.permissions ?? []),
     sessionId: claims.sid,
     locale: claims.locale ?? "en",
-    tenantId: claims.tid ?? "",
+    // Same fallback as the API verifier: a pre-tenancy token belongs to the bootstrap tenant.
+    // An empty tenant id would name a scope that matches nothing.
+    tenantId: claims.tid ?? BOOTSTRAP_TENANT_ID,
     ...(claims.dev ? { deviceIdHash: claims.dev } : {}),
   };
 }

@@ -86,7 +86,7 @@ export function createTelemetryRouter(deps: TelemetryRouterDeps): Router {
    */
   router.post(
     "/points",
-    authenticate({ env: deps.infra.env }),
+    authenticate({ tokens: deps.infra.tokens, sessions: deps.infra.store, strictSessionCheck: deps.infra?.env?.SECURITY_ENFORCE === "always" }),
     asyncHandler(async (req, res) => {
       // parseBody, not a hand-rolled safeParse: it is what every other route uses, and its
       // field_errors convention (uppercased zod code, "(body)" fallback) is the one clients match on.

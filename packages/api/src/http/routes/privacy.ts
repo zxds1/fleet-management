@@ -57,7 +57,7 @@ export function createPrivacyRouter(deps: PrivacyRouterDeps): Router {
   // Driver submits an export request → 202 Accepted + outbox event.
   router.post(
     "/export-request",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, touchSession: infra.touchSession }),
     requirePermission(asPerm("privacy:request_own")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -99,7 +99,7 @@ export function createPrivacyRouter(deps: PrivacyRouterDeps): Router {
   // Driver requests account deletion → 202 Accepted + outbox event.
   router.post(
     "/deletion-request",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, touchSession: infra.touchSession }),
     requirePermission(asPerm("privacy:request_own")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -141,7 +141,7 @@ export function createPrivacyRouter(deps: PrivacyRouterDeps): Router {
   // List the caller's own export requests (and deletion requests).
   router.get(
     "/export-request",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, touchSession: infra.touchSession }),
     requirePermission(asPerm("privacy:request_own")),
     asyncHandler((req, res) =>
       withTenantClient(pool, tenantContextOf(req.principal!), async (client) => {
@@ -170,7 +170,7 @@ export function createPrivacyRouter(deps: PrivacyRouterDeps): Router {
   // with tenant context bound to the principal.
   router.get(
     "/export-request/:id/download",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, touchSession: infra.touchSession }),
     requirePermission(asPerm("privacy:request_own")),
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
@@ -194,7 +194,7 @@ export function createPrivacyRouter(deps: PrivacyRouterDeps): Router {
   // Admins and managers can view all DSAR requests for their tenant.
   router.get(
     "/requests",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, touchSession: infra.touchSession }),
     requirePermission(asPerm("privacy:view_requests_tenant")),
     asyncHandler((req, res) =>
       withTenantClient(pool, tenantContextOf(req.principal!), async (client) => {

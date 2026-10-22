@@ -421,7 +421,8 @@ describe("POST /vehicles", () => {
     const otherList = await svc.list({ tenantId: TENANT_B, limit: 50 });
     expect(otherList.ok).toBe(true);
     if (!otherList.ok) return;
-    expect(otherList.value).toEqual([]);
+    // GET /vehicles is a cursor page, like every other list route.
+    expect(otherList.value.data).toEqual([]);
   });
 
   it("normalises the plate and rejects a duplicate within the tenant with 409", async () => {

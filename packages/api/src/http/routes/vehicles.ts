@@ -9,11 +9,12 @@ import { err, ok, type IdempotencyService, type PermissionCode, type PoolLike, t
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import { CursorQuerySchema, decodeCursor, type Cursor } from "../pagination";
+import { VEHICLE_STATUS_VALUES } from "../../services/vehicles";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -21,6 +22,10 @@ const asPerm = (code: string): PermissionCode => code as PermissionCode;
 const ip = (req: Request) => req.ip ?? undefined;
 const ua = (req: Request) => req.header("user-agent") ?? undefined;
 const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
+
+const VehicleListQuerySchema = CursorQuerySchema.extend({
+  status: z.enum(VEHICLE_STATUS_VALUES).optional(),
+});
 
 const VehicleCreateSchema = z.object({
   license_plate: z.string().min(1).max(20),
@@ -37,7 +42,7 @@ const VehicleUpdateSchema = z.object({
   make: z.string().max(80).optional(),
   model: z.string().max(80).optional(),
   year: z.number().int().min(1900).max(2100).optional(),
-  status: z.enum(["AVAILABLE", "IN_USE", "MAINTENANCE", "QUARANTINED", "RETIRED", "EXTERNAL"]).optional(),
+  status: z.enum(VEHICLE_STATUS_VALUES).optional(),
   is_operational: z.boolean().optional(),
   notes: z.string().max(2000).optional(),
 });
@@ -63,17 +68,22 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Vehicle list (cursor) ─────────────────────────────────────────────────────────────
   router.get(
     "/vehicles",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);
       return withTenantClient(pool, tenantContextOf(principal), async (client) => {
-        const query = parseQuery(CursorQuerySchema, req);
+        const query = parseQuery(VehicleListQuerySchema, req);
         const svc = makeServices(client, infra);
         const cursor: Cursor | null = query.cursor ? decodeCursor(query.cursor) : null;
-        const result = await svc.vehicle.list({ tenantId: principal.tenantId, limit: query.limit, cursor });
+        const result = await svc.vehicle.list({
+          tenantId: principal.tenantId,
+          limit: query.limit,
+          cursor,
+          status: query.status ?? null,
+        });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -84,7 +94,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Single vehicle ───────────────────────────────────────────────────────────────────
   router.get(
     "/vehicles/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);
@@ -92,8 +102,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.vehicle.get(principal.tenantId, req.params.id!);
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -104,7 +113,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Create ──────────────────────────────────────────────────────────────────────────
   router.post(
     "/vehicles",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:create")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -143,7 +152,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Update ──────────────────────────────────────────────────────────────────────────
   router.patch(
     "/vehicles/:id",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:update")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -180,7 +189,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
   // ── Assign drivers / linked vehicles (REPLACE semantics) ──────────────────────────────
   router.post(
     "/vehicles/:id/assign",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:update")),
     asyncHandler((req, res) => {
       const principal = asPrincipal(req);
@@ -195,8 +204,7 @@ export function createVehicleRouter(deps: VehicleRouterDeps): Router {
           actorUserId: principal.userId,
         });
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);

@@ -170,8 +170,9 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroupArn
-       # WAF WebACL attachment (see deploy/k8s/manifests.yaml for the Ingress
-       # annotation that references the WAF WebACL ARN).
+       # WAF WebACL attachment: the WebACL is associated with the ALB itself
+       # (see WebAclAssociation below), because TLS terminates at the ALB and
+       # there is no Ingress resource in deploy/k8s/manifests.yaml.
        # On CloudFront, attach at the distribution level instead.
 
   # ──────────────────────────────────────────────────────────────────────────

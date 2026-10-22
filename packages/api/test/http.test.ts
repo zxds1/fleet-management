@@ -29,6 +29,9 @@ function makeRes() {
     type() {
       return this;
     },
+    getHeader() {
+      return undefined;
+    },
     setHeader() {
       return this;
     },

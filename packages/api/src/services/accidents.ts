@@ -111,6 +111,9 @@ export class AccidentService {
   ): Promise<Result<AccidentOutcome>> {
     const wasOffShift = input.shift_id == null;
     const hasPosition = input.position != null;
+    // The counterparty plate arrives as `third_party_plate` or `other_vehicle_plate`; both name
+    // the one `app.accident_reports.third_party_plate` column.
+    const thirdPartyPlate = input.third_party_plate ?? input.other_vehicle_plate ?? null;
     const report = await this.reports.insertReport({
       driverId,
       shiftId: input.shift_id ?? null,
@@ -128,7 +131,7 @@ export class AccidentService {
       witnessPhone: input.witness_phone ?? null,
       thirdPartyName: input.third_party_name ?? null,
       thirdPartyPhone: input.third_party_phone ?? null,
-      thirdPartyPlate: input.third_party_plate ?? null,
+      thirdPartyPlate,
       thirdPartyInsurer: input.third_party_insurer ?? null,
       policeObNumber: input.police_ob_number ?? null,
       insuranceClaimNumber: input.insurance_claim_number ?? null,
@@ -168,7 +171,7 @@ export class AccidentService {
     reportId: string,
     input: AccidentMediaInput,
     actor: Actor,
-  ): Promise<Result<{ attached: true }>> {
+  ): Promise<Result<{ accident_media_id: string; media_object_id: string; slot: string }>> {
     const report = await this.reports.getById(reportId);
     if (!report) return err(new NotFound("Accident report not found"));
 
@@ -179,7 +182,7 @@ export class AccidentService {
       }
     }
 
-    await this.media.insert({
+    const media = await this.media.insert({
       report_id: reportId,
       slot: input.slot,
       media_object_id: input.media_object_id,
@@ -197,7 +200,11 @@ export class AccidentService {
       endpoint: `/accidents/${reportId}/media`,
       http_method: "POST",
     });
-    return ok({ attached: true });
+    return ok({
+      accident_media_id: media.id,
+      media_object_id: input.media_object_id,
+      slot: input.slot,
+    });
   }
 
   /** Acknowledge: records the actor + cancels the escalation timer (C6.3). */
@@ -299,6 +306,25 @@ export class AccidentQuery {
     // Cursor MUST be built from the same column the repo keysets/orders on (`r.reported_at`),
     // otherwise the next page comparison is evaluated against an unrelated timestamp and rows are
     // skipped or repeated. `reported_at` is NOT NULL; the fallback is belt-and-braces only.
+    return ok(buildPage(rows, limit, (row) => ({ sort: String(row.reported_at ?? row.occurred_at ?? ""), id: row.accident_id })));
+  }
+
+  /**
+   * Cursor page over EVERY report in the tenant. The caller must hold the fleet-wide accident
+   * permission — the route enforces it before reaching this method; the tenant is always the one
+   * carried by the verified Principal, never a request field.
+   */
+  async listTenant(
+    tenantId: string,
+    opts: { limit: number; cursor?: string },
+  ): Promise<Result<CursorPage<AccidentSummaryRow>>> {
+    const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
+    const cursor = decodeCursor(opts.cursor);
+    const rows = await this.reportRepo.listByTenant(tenantId, {
+      limit: limit + 1,
+      cursorSort: cursor?.sort,
+      cursorId: cursor?.id,
+    });
     return ok(buildPage(rows, limit, (row) => ({ sort: String(row.reported_at ?? row.occurred_at ?? ""), id: row.accident_id })));
   }
 

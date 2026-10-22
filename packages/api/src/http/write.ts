@@ -22,6 +22,7 @@ import {
 } from "@fleet/shared";
 import { transaction } from "@fleet/db";
 import { sha256Hex } from "../security/crypto";
+import { withRetryAfter } from "./problem";
 
 export interface WriteDeps {
   pool: PoolLike;
@@ -111,7 +112,7 @@ export async function executeWrite<T>(
         const result = await fn(tx, ctx);
 
         if (isErr(result)) {
-          const problem = { ...result.error.toProblem(), instance: req.requestId };
+          const problem = withRetryAfter({ ...result.error.toProblem(), instance: req.requestId }, res);
           if (claim) {
             await deps.idempotency.complete(
               {

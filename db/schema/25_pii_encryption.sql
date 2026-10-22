@@ -50,15 +50,14 @@ CREATE INDEX IF NOT EXISTS users_encryption_key_version_idx
     ON app.users (encryption_key_version);
 
 -- -----------------------------------------------------------------------------
--- app.drivers: add encrypted PII columns (SSN, emergency contact)
+-- app.drivers: no PII columns are added here.
+--
+-- A driver's national ID and emergency contact live on app.driver_onboarding,
+-- which stores them as ciphertext only (ssn_encrypted) — there is no plaintext
+-- column to migrate. app.drivers holds only the operational attributes
+-- (licence number, status), and the contact details are reached through the
+-- onboarding row.
 -- -----------------------------------------------------------------------------
-ALTER TABLE app.drivers
-    ADD COLUMN IF NOT EXISTS ssn_encrypted bytea,
-    ADD COLUMN IF NOT EXISTS emergency_contact_encrypted bytea,
-    ADD COLUMN IF NOT EXISTS encryption_key_version smallint NOT NULL DEFAULT 1;
-
-CREATE INDEX IF NOT EXISTS drivers_encryption_key_version_idx
-    ON app.drivers (encryption_key_version);
 
 -- -----------------------------------------------------------------------------
 -- Migrate existing plaintext PII into encrypted columns (one-time backfill).
@@ -71,18 +70,9 @@ SET email_encrypted = pgp_sym_encrypt(email::text, current_setting('app.pii_encr
     encryption_key_version = 1
 WHERE email_encrypted IS NULL AND phone_encrypted IS NULL;
 
-UPDATE app.drivers
-SET ssn_encrypted = pgp_sym_encrypt(ssn::text, current_setting('app.pii_encryption_key_v1', false)),
-    emergency_contact_encrypted = pgp_sym_encrypt(emergency_contact_phone::text, current_setting('app.pii_encryption_key_v1', false)),
-    encryption_key_version = 1
-WHERE ssn_encrypted IS NULL AND emergency_contact_encrypted IS NULL;
-
 COMMENT ON COLUMN app.users.email_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.users.email. Key version tracked by encryption_key_version.';
 COMMENT ON COLUMN app.users.phone_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.users.phone. Key version tracked by encryption_key_version.';
 COMMENT ON COLUMN app.users.ssn_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.users.ssn. Key version tracked by encryption_key_version.';
 COMMENT ON COLUMN app.users.emergency_contact_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.users.emergency_contact. Key version tracked by encryption_key_version.';
 COMMENT ON COLUMN app.users.encryption_key_version IS 'Which PII symmetric key version encrypted the _encrypted columns. Used for key rotation and crypto-shredding.';
 
-COMMENT ON COLUMN app.drivers.ssn_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.drivers.ssn. Key version tracked by encryption_key_version.';
-COMMENT ON COLUMN app.drivers.emergency_contact_encrypted IS 'AES-256 (OpenPGP CFB) encryption of app.drivers.emergency_contact_phone. Key version tracked by encryption_key_version.';
-COMMENT ON COLUMN app.drivers.encryption_key_version IS 'Which PII symmetric key version encrypted the _encrypted columns. Used for key rotation and crypto-shredding.';

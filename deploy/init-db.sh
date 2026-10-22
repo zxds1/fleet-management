@@ -9,7 +9,7 @@
 # on a missing relation. This script is the one entrypoint-visible file; it loops the real files in
 # the documented order.
 #
-# Ordering: db/schema is lexicographic by design (zero-padded 00..16, so 12_fuel… precedes
+# Ordering: db/schema is lexicographic by design (zero-padded 00..22, so 12_fuel… precedes
 # 12_training and 13_device… precedes 13_onboarding), then db/seed. `set -euo pipefail` means the
 # first failing statement aborts and the entrypoint fails the container rather than leaving a
 # half-built schema behind.

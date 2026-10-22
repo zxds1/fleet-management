@@ -17,11 +17,11 @@ import { FuelCardQuerySchema, FuelCorrectionSchema, PhotoFirstRefuelSchema, Veri
 import { authenticate, principalOf } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withClient, withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -64,7 +64,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
   // ── Verify / reject / clear a purchase (Fleet Mgr / Finance) ──────────────────────────────
   router.post(
     "/purchases/:id/verify",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:verify")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -86,7 +86,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
   // ── Create a fuel card (C2.1/C2.2) ───────────────────────────────────────────────────────
   router.post(
     "/cards",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:card_manage")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -117,7 +117,7 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
    */
   router.get(
     "/cards",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read")),
     asyncHandler(async (req, res) => {
       const query = parseQuery(FuelCardQuerySchema, req);
@@ -138,10 +138,13 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
   // ── Reconciliation inbox (read, cursor) ────────────────────────────────────────────────────
   router.get(
     "/reconciliation-inbox",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler(async (req, res) => {
+      const principal = principalOf(req);
+      // Tenant-bound: the inbox reads tenant-scoped rows, and FORCE RLS needs the tenant GUC
+      // bound to return them at all.
+      await withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(InboxQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.fuelQuery.reconciliationInbox({
@@ -151,12 +154,12 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
           cursor: query.cursor,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;
@@ -170,7 +173,7 @@ export function createReconciliationRouter(deps: FuelRouterDeps): Router {
 
   router.post(
     "/statements",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:reconcile")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -214,7 +217,7 @@ export function createDriverFuelRouter(deps: FuelRouterDeps): Router {
   // ── Submit receipt + odometer photographs ─────────────────────────────────────────────────
   router.post(
     "/purchase",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:submit_purchase")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -238,7 +241,7 @@ export function createDriverFuelRouter(deps: FuelRouterDeps): Router {
   // ── Correct what OCR read ──────────────────────────────────────────────────────────────────
   router.post(
     "/correct",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:submit_purchase")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -264,7 +267,7 @@ export function createDriverFuelRouter(deps: FuelRouterDeps): Router {
   // The driver's review screen polls this until `ocr_status` is terminal, then renders the fields.
   router.get(
     "/purchase/:id/ocr",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:submit_purchase")),
     asyncHandler((req, res) =>
       withClient(pool, async (client) => {

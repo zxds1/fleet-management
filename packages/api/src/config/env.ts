@@ -32,22 +32,6 @@ const EnvSchema = z.object({
   MFA_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300), // 5 min (02 §2)
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
-  // ── Clerk (managed auth) ──
-  // Clerk handles sign-in, sign-up, MFA, password reset, and session management.
-  // The API verifies Clerk JWTs (RS256 via JWKS) and maps clerk_user_id → internal user_id.
-  CLERK_SECRET_KEY: z.string().optional(),
-  CLERK_PUBLISHABLE_KEY: z.string().optional(),
-  CLERK_JWKS_URL: z.string().optional(),
-  CLERK_JWT_KEY: z.string().optional(), // PEM public key for networkless JWT verification
-  CLERK_ISSUER: z.string().optional(),
-  CLERK_FRONTEND_URL: z.string().optional(),
-  CLERK_SIGNIN_URL: z.string().optional(),
-  CLERK_SIGNUP_URL: z.string().optional(),
-  CLERK_WEBHOOK_SECRET: z.string().optional(), // for Clerk user.created/user.updated webhook
-  CLERK_AUTHORIZED_PARTIES: z.string().optional(), // comma-separated frontend origins
-  CLERK_JWT_AUDIENCE: z.string().optional(), // expected aud claim
-  CLERK_CLOCK_SKEW_IN_MS: z.string().optional(), // default 5000ms
-
   // A1.6 — session idle timeout. A session inactive for this long is evicted; the access token
   // is treated as idle when (now - iat) exceeds the window. Default 8 h.
   SESSION_IDLE_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(480),

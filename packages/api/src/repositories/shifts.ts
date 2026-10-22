@@ -230,15 +230,17 @@ export class VehicleRepository extends BaseRepository<VehicleRow> {
     tenantId: string;
     limit: number;
     cursor?: { sort: string; id: string } | null;
+    status?: string | null;
   }): Promise<VehicleRow[]> {
     const cursor = input.cursor ?? null;
     const res = await this.client.query<VehicleRow>(
       `SELECT * FROM app.vehicles
         WHERE tenant_id = $1 AND deleted_at IS NULL
+          AND ($5::app.asset_status IS NULL OR status = $5::app.asset_status)
           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
         ORDER BY created_at DESC, id DESC
         LIMIT $4`,
-      [input.tenantId, cursor?.sort ?? null, cursor?.id ?? null, input.limit],
+      [input.tenantId, cursor?.sort ?? null, cursor?.id ?? null, input.limit, input.status ?? null],
     );
     return res.rows;
   }

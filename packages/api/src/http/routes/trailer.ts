@@ -34,7 +34,7 @@ export function createTrailerRouter(deps: TrailerRouterDeps): Router {
   // ── Hook / drop a trailer (1.3) ──────────────────────────────────────────────────────────
   router.post(
     "/swap",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("trailer:swap")),
     idempotency({ idempotency: idem }),
     asyncHandler((req, res) =>
@@ -73,7 +73,7 @@ export function createTrailerRouter(deps: TrailerRouterDeps): Router {
    */
   router.get(
     "/",
-    authenticate({ env: infra.env }),
+    authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("trailer:swap")),
     asyncHandler(async (req, res) => {
       const query = parseQuery(TrailerQuerySchema, req);

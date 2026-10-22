@@ -79,6 +79,10 @@ components:
           type: string
           description: Stable machine-readable code (see Error Codes).
           example: CLOCKOUT_PENDING
+        retry_after_seconds:
+          type: integer
+          description: Seconds to wait before retrying. Mirrors the `Retry-After` response header.
+          example: 30
         field_errors:
           type: array
           items:
@@ -127,12 +131,106 @@ components:
 
     MediaUploadResponse:
       type: object
+      description: >-
+        The presigned upload ticket. Every member is snake_case, like every other endpoint.
       required: [media_object_id, upload_url, expires_in_seconds]
       properties:
         media_object_id: { type: string, format: uuid }
         upload_url: { type: string, format: uri }
         expires_in_seconds: { type: integer, example: 60 }
         method: { type: string, example: PUT }
+
+    FuelPurchaseRow:
+      type: object
+      description: >-
+        The canonical fuel purchase row. EVERY fuel read surface returns exactly these member
+        names — `GET /fuel/reconciliation-inbox`, `GET /admin/fuel/pending` and the review/detail
+        screens. `total_cost` and `litres` are the canonical money/volume names: for a purchase
+        that has not been verified yet they carry the captured (OCR / driver) figures, and once an
+        Admin verifies they carry the settled figures.
+      required: [fuel_purchase_id]
+      properties:
+        fuel_purchase_id: { type: string, format: uuid }
+        purchased_at: { type: string, format: date-time, nullable: true }
+        receipt_date: { type: string, format: date-time, nullable: true }
+        station_name: { type: string, nullable: true }
+        vehicle_id: { type: string, format: uuid, nullable: true }
+        vehicle_plate: { type: string, nullable: true }
+        driver_id: { type: string, format: uuid, nullable: true }
+        driver_name: { type: string, nullable: true }
+        total_cost: { type: number, description: Canonical total cost of the purchase. }
+        litres: { type: number, description: Canonical volume of the purchase. }
+        currency: { type: string, nullable: true }
+        unit_price: { type: number, nullable: true }
+        odometer_km: { type: number, nullable: true }
+        ocr_status: { type: string, nullable: true }
+        ocr_method: { type: string, nullable: true }
+        ocr_confidence: { type: number, description: 0-1 OCR confidence. }
+        ocr_raw_data: { type: object, nullable: true }
+        driver_corrected: { type: boolean, nullable: true }
+        gauge_before_percent: { type: number, nullable: true }
+        gauge_after_percent: { type: number, nullable: true }
+        badge: { type: string, enum: [AUTO, REVIEW, FLAGGED], nullable: true }
+        distance_since_last_refuel: { type: number, nullable: true }
+        cost_per_km: { type: number, nullable: true }
+        admin_verified: { type: boolean, nullable: true }
+        rejected_at: { type: string, format: date-time, nullable: true }
+        cleared_for_payment_at: { type: string, format: date-time, nullable: true }
+        open_anomalies: { type: integer, nullable: true }
+        worst_open_severity: { type: string, nullable: true }
+        receipt_media_object_id: { type: string, format: uuid, nullable: true }
+        pump_photo_media_object_id: { type: string, format: uuid, nullable: true }
+        odometer_photo_media_object_id: { type: string, format: uuid, nullable: true }
+
+    FuelPurchasePage:
+      type: object
+      required: [data, next_cursor, has_more]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/FuelPurchaseRow' } }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+
+    FuelPendingResponse:
+      type: object
+      required: [purchases]
+      properties:
+        purchases: { type: array, items: { $ref: '#/components/schemas/FuelPurchaseRow' } }
+
+    VehicleRecord:
+      type: object
+      description: One row of `GET /vehicles` (app.vehicles). The server may return more columns.
+      required: [id, license_plate]
+      properties:
+        id: { type: string, format: uuid }
+        license_plate: { type: string }
+        vehicle_class: { type: string, nullable: true }
+        status:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, IN_USE, UNDER_MAINTENANCE, QUARANTINED, EXTERNAL, RETIRED]
+          description: >-
+            The stored `app.asset_status` value. `MAINTENANCE` is accepted on write and mapped to
+            `UNDER_MAINTENANCE`; reads always return the stored value.
+        is_operational: { type: boolean, nullable: true }
+        non_operational_reason: { type: string, nullable: true }
+        make: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        ownership_type: { type: string, nullable: true }
+        current_odometer_km: { type: number, nullable: true }
+        current_odometer_at: { type: string, format: date-time, nullable: true }
+        engine_hours: { type: number, nullable: true }
+        fuel_tank_capacity_litres: { type: number, nullable: true }
+        current_driver_id: { type: string, format: uuid, nullable: true }
+        notes: { type: string, nullable: true }
+
+    VehiclePage:
+      type: object
+      required: [data, next_cursor, has_more]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/VehicleRecord' } }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
 
     DriverSummary:
       type: object
@@ -512,17 +610,35 @@ paths:
   /fuel/reconciliation-inbox:
     get:
       tags: [Fuel]
-      summary: Paged fuel reconciliation inbox (2.7).
+      summary: Paged fuel reconciliation inbox (2.7). Returns the canonical fuel purchase row.
       parameters:
         - $ref: '#/components/parameters/cursor'
         - $ref: '#/components/parameters/limit'
-        - name: unverified_only
+        - name: verified
           in: query
-          schema: { type: boolean, default: true }
+          schema: { type: string, enum: ['true', 'false'] }
+          description: '`true` = only verified purchases, `false` = only the ones still awaiting review.'
+        - name: vehicle_id
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Page (see app.v_fuel_reconciliation_inbox).
-          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+          description: Page of fuel purchases (canonical FuelPurchaseRow).
+          content: { application/json: { schema: { $ref: '#/components/schemas/FuelPurchasePage' } } }
+
+  /admin/fuel/pending:
+    get:
+      tags: [Fuel]
+      summary: >-
+        Photo-first review queue. Returns the canonical fuel purchase row — the same member
+        names as `GET /fuel/reconciliation-inbox`.
+      parameters:
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: The unverified purchases awaiting review.
+          content: { application/json: { schema: { $ref: '#/components/schemas/FuelPendingResponse' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ------------------------------------------------------------------ Accidents
   /accidents/mayday:
@@ -556,6 +672,19 @@ paths:
                   escalated_at: { type: string, format: date-time }
 
   /accidents:
+    get:
+      tags: [Accidents]
+      summary: >-
+        Every accident report in the tenant. Requires the fleet-wide accident permission
+        (`accident:update`); a caller without it gets 403.
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Cursor page of accident summaries.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Accidents]
       summary: Create an accident report (3.1). Evidence may follow via PATCH.
@@ -579,12 +708,40 @@ paths:
                 witness_name: { type: string }
                 witness_phone: { type: string }
                 third_party_plate: { type: string }
+                other_vehicle_plate:
+                  type: string
+                  description: >-
+                    Alias of `third_party_plate` — the client sends the counterparty plate under
+                    this name. Both are stored in the one `app.accident_reports.third_party_plate`
+                    column. Unknown members are REJECTED (400), never silently dropped; a
+                    client-supplied `severity` is rejected because the severity is derived
+                    server-side (there is no severity column).
       responses:
         '201':
           description: Accident created.
           content:
             application/json:
               schema: { type: object, properties: { accident_id: { type: string, format: uuid } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /accidents/me:
+    get:
+      tags: [Accidents]
+      summary: >-
+        The caller's own accident reports. `own_scope=false` asks for the tenant-wide list and
+        requires the fleet-wide accident permission (`accident:update`); a caller without it
+        gets 403.
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: own_scope
+          in: query
+          schema: { type: string, enum: ['true', 'false'], default: 'true' }
+      responses:
+        '200':
+          description: Cursor page of accident summaries.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CursorPage' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /accidents/{accidentId}/media:
     post:
@@ -611,7 +768,19 @@ paths:
                   enum: [FRONT_DAMAGE, REAR_DAMAGE, SIDE_DAMAGE, OTHER_VEHICLE_PLATE, WITNESS, ADDITIONAL, POLICE_ABSTRACT, INSURANCE_DOCUMENT]
                 media_object_id: { type: string, format: uuid }
       responses:
-        '204': { description: Attached. }
+        '201':
+          description: Media attached. The body carries the ids so a client never has to parse an empty 204.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accident_media_id, media_object_id, slot]
+                properties:
+                  accident_media_id: { type: string, format: uuid }
+                  media_object_id: { type: string, format: uuid }
+                  slot:
+                    type: string
+                    enum: [FRONT_DAMAGE, REAR_DAMAGE, SIDE_DAMAGE, OTHER_VEHICLE_PLATE, WITNESS, ADDITIONAL, POLICE_ABSTRACT, INSURANCE_DOCUMENT]
         '422': { $ref: '#/components/responses/SemanticViolation' }
 
   /accidents/{accidentId}/telemetry/verify:

@@ -4,6 +4,7 @@
 // the consent ledger. All collaborators are faked; totp is mocked so verify() is deterministic.
 import { ok, err, Unauthenticated, ValidationError, DeviceRevoked, NotFound, ConsentRequired } from "@fleet/shared";
 import { MfaService } from "../src/services/mfa";
+import { argon2idHasher } from "../src/security/passwords";
 import type { OtpStore } from "../src/security/otpStore";
 import { SessionService } from "../src/services/session";
 import { DeviceService } from "../src/services/device";
@@ -63,9 +64,10 @@ describe("MfaService", () => {
   beforeEach(() => jest.clearAllMocks());
 
   it("enrols and activates MFA, returning 10 recovery codes", async () => {
-    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c" });
+    const passwordHash = await argon2idHasher.hash("correct-password");
+    users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", password_hash: passwordHash });
     const { svc } = build([]);
-    const r = await svc.enroll("u1");
+    const r = await svc.enroll("u1", "correct-password");
     expect(r.ok).toBe(true);
     expect(recovery.replaceAll).toHaveBeenCalled();
     expect(users.activateMfa).toHaveBeenCalledWith("u1");
@@ -75,8 +77,19 @@ describe("MfaService", () => {
   it("enrol fails for unknown user", async () => {
     users.getById.mockResolvedValue(null);
     const { svc } = build([]);
-    expect((await svc.enroll("x")).ok).toBe(false);
+    expect((await svc.enroll("x", "correct-password")).ok).toBe(false);
   });
+
+  it("enrol refuses a wrong password — a live session token must not arm a second factor",
+    async () => {
+      const passwordHash = await argon2idHasher.hash("correct-password");
+      users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", password_hash: passwordHash });
+      const { svc } = build([]);
+      const r = await svc.enroll("u1", "wrong-password");
+      expect(r.ok).toBe(false);
+      expect(recovery.replaceAll).not.toHaveBeenCalled();
+      expect(users.activateMfa).not.toHaveBeenCalled();
+    });
 
   it("sendCode routes a driver with a phone number to SMS", async () => {
     users.getById.mockResolvedValue({ id: "u1", email: "a@b.c", phone: "+254700000000", mfa_enabled: true });
