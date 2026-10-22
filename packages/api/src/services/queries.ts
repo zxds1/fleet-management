@@ -464,6 +464,7 @@ export interface VehicleState {
   latitude: number | null;
   longitude: number | null;
   driver_name: string | null;
+  driver_photo_media_object_id: string | null;
   next_eligible_clock_in_at: string | null;
   /** `app.v_vehicle_display_state` names the plate `license_plate`; the contract calls it `plate`. */
   plate: string | null;
@@ -501,6 +502,7 @@ export class DashboardQuery {
       latitude: string | null;
       longitude: string | null;
       driver_name: string | null;
+      driver_photo_media_object_id: string | null;
       next_eligible_clock_in_at: string | null;
       plate: string | null;
       odometer_km: string | null;
@@ -516,6 +518,7 @@ export class DashboardQuery {
               s.latitude,
               s.longitude,
               s.driver_name,
+              s.driver_photo_media_object_id,
               s.next_eligible_clock_in_at,
               s.license_plate            AS plate,
               v.current_odometer_km      AS odometer_km,
@@ -535,6 +538,7 @@ export class DashboardQuery {
       latitude: r.latitude != null ? Number(r.latitude) : null,
       longitude: r.longitude != null ? Number(r.longitude) : null,
       driver_name: r.driver_name,
+      driver_photo_media_object_id: r.driver_photo_media_object_id,
       next_eligible_clock_in_at: r.next_eligible_clock_in_at,
       plate: r.plate,
       odometer_km: r.odometer_km != null ? Number(r.odometer_km) : null,

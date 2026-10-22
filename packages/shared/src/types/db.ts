@@ -760,6 +760,7 @@ export interface DriverRow {
   status: DriverStatus;
   status_changed_at: string;
   hired_on: string | null;
+  profile_photo_media_object_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -1594,6 +1595,9 @@ export interface UserRow {
   password_hash: string;
   full_name: string;
   phone: string | null;
+  pending_email: string | null;
+  pending_phone: string | null;
+  profile_change_status: string;
   is_active: boolean;
   mfa_enabled: boolean;
   mfa_secret_encrypted: Buffer | null;
@@ -1774,6 +1778,7 @@ export interface VehicleDisplayStateViewRow {
   shift_id: string | null;
   driver_id: string | null;
   driver_name: string | null;
+  driver_photo_media_object_id: string | null;
   last_position: string | null;
   latitude: number | null;
   longitude: number | null;

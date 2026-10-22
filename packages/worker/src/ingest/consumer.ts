@@ -71,7 +71,17 @@ export class IngestConsumer {
       // BUSYGROUP: group already exists on restart — expected, not fatal.
       if (!msg.includes("BUSYGROUP")) throw e;
     }
-    this.timer = setInterval(() => void this.poll(), this.blockMs);
+    const loop = async (): Promise<void> => {
+      if (!this.running || !this.deps.redis) return;
+      await this.poll();
+      if (this.running) {
+        this.timer = setTimeout(() => void loop(), this.blockMs);
+        if (typeof (this.timer as { unref?: () => void }).unref === "function") {
+          (this.timer as { unref: () => void }).unref();
+        }
+      }
+    };
+    this.timer = setTimeout(() => void loop(), this.blockMs);
     if (typeof (this.timer as { unref?: () => void }).unref === "function") {
       (this.timer as { unref: () => void }).unref();
     }
@@ -80,7 +90,7 @@ export class IngestConsumer {
   async stop(): Promise<void> {
     this.running = false;
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = null;
     }
   }

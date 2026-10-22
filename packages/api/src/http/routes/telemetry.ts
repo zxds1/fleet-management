@@ -145,6 +145,10 @@ async function touchTrackerPing(pool: PoolLike, vehicleId: string): Promise<void
   const now = Date.now();
   const last = lastPingWrite.get(vehicleId) ?? 0;
   if (now - last < 60_000) return;
+  if (lastPingWrite.size >= 10_000) {
+    const oldest = lastPingWrite.keys().next().value;
+    if (oldest) lastPingWrite.delete(oldest);
+  }
   lastPingWrite.set(vehicleId, now);
   try {
     const client = await pool.connect();
@@ -172,6 +176,10 @@ async function touchTrackerProvisioning(pool: PoolLike, vehicleId: string, tracc
   const now = Date.now();
   const last = lastProvisionWrite.get(vehicleId) ?? 0;
   if (now - last < 60_000) return;
+  if (lastProvisionWrite.size >= 10_000) {
+    const oldest = lastProvisionWrite.keys().next().value;
+    if (oldest) lastProvisionWrite.delete(oldest);
+  }
   lastProvisionWrite.set(vehicleId, now);
   try {
     const client = await pool.connect();

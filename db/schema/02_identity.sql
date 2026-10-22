@@ -22,6 +22,10 @@ CREATE TABLE app.users (
     password_hash           text NOT NULL,               -- argon2id
     full_name               text NOT NULL CHECK (btrim(full_name) <> ''),
     phone                   app.phone_e164,
+    pending_email           citext,
+    pending_phone           app.phone_e164,
+    profile_change_status   text NOT NULL DEFAULT 'APPROVED'
+                            CHECK (profile_change_status IN ('PENDING','APPROVED','REJECTED')),
     is_active               boolean NOT NULL DEFAULT true,
 
     -- A3.7: TOTP MFA is mandatory for ADMIN and FLEET_MANAGER. Enforcement is in
@@ -221,6 +225,12 @@ CREATE TABLE app.drivers (
     licence_class               text,
     licence_expiry              date,
     medical_certificate_expiry  date,
+
+    profile_photo_media_object_id uuid,
+    profile_photo_status         text NOT NULL DEFAULT 'APPROVED'
+                                CHECK (profile_photo_status IN ('PENDING','APPROVED','REJECTED')),
+    profile_photo_approved_by    uuid REFERENCES app.users(id),
+    profile_photo_approved_at    timestamptz,
 
     emergency_contact_name      text,
     emergency_contact_phone     app.phone_e164,

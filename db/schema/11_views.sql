@@ -39,6 +39,7 @@ SELECT
     os.shift_id,
     os.driver_id,
     u.full_name                         AS driver_name,
+    CASE WHEN d.profile_photo_status = 'APPROVED' THEN d.profile_photo_media_object_id END AS driver_photo_media_object_id,
     th.last_position,
     ST_Y(th.last_position::geometry)    AS latitude,
     ST_X(th.last_position::geometry)    AS longitude,

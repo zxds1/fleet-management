@@ -28,9 +28,9 @@ export type TraccarWebhookPayload = z.infer<typeof TraccarWebhookSchema>;
  * which needs them as numbers.
  */
 export const PHONE_POINTS = {
-  maxPoints: 60,
+  maxPoints: 30,
   maxHistorySeconds: 300,
-  minIntervalSeconds: 10,
+  minIntervalSeconds: 15,
 } as const;
 
 /**

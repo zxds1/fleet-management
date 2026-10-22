@@ -223,8 +223,15 @@ export function attachGateway(io: MinimalIo, deps: GatewayDeps, state: GatewaySt
     void handleConnection(socket, deps, state);
   });
 
-  const offVehicles = subscribeBus(deps.bus, Channels.vehicleStates, async () => {
-    const snapshot = await deps.vehicleSnapshot().catch(onFail("vehicleSnapshot", [] as VehicleDisplayStateViewRow[]));
+  const offVehicles = subscribeBus(deps.bus, Channels.vehicleStates, async (payload) => {
+    const vehicleId = (payload as { vehicleId?: unknown } | null)?.vehicleId;
+    let snapshot: VehicleDisplayStateViewRow[];
+    if (typeof vehicleId === "string" && vehicleId.length > 0) {
+      const row = await deps.driverVehicleState(vehicleId).catch(onFail("driverVehicleState", null));
+      snapshot = row ? [row] : [];
+    } else {
+      snapshot = await deps.vehicleSnapshot().catch(onFail("vehicleSnapshot", [] as VehicleDisplayStateViewRow[]));
+    }
     const changed = diffVehicleStates(state.vehicleCache, snapshot);
     for (const row of snapshot) if (row.vehicle_id) state.vehicleCache.set(row.vehicle_id, row);
     if (changed.length > 0) emitTo(io, ROOM_VEHICLES, EVENT_VEHICLES, changed);
