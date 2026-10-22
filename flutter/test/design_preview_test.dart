@@ -5,8 +5,6 @@ import 'package:helix/core/api_client.dart';
 import 'package:helix/core/design_preview.dart';
 import 'package:helix/core/kv_store.dart';
 import 'package:helix/core/session.dart';
-import 'package:helix/core/clerk_config.dart';
-import 'package:helix/core/clerk_service.dart';
 import 'mock_backend.dart';
 
 /// The offline design preview must be exercisable without a backend.
@@ -14,7 +12,7 @@ void main() {
   test('preview installs both shells, every permission, consent and the admin shell', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
-    final session = SessionService(store: MemoryKeyValueStore(), clerk: ClerkService(config: ClerkConfig.fromEnv()));
+    final session = SessionService(store: MemoryKeyValueStore());
     session.attachPrefs(prefs);
     await DesignPreview.install(session);
 

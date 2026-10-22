@@ -9,59 +9,8 @@ import 'package:helix/core/kv_store.dart';
 import 'package:helix/core/media.dart';
 import 'package:helix/core/offline/queue.dart';
 import 'package:helix/core/session.dart';
-import 'package:helix/core/clerk_config.dart';
-import 'package:helix/core/clerk_service.dart';
 import 'package:helix/data/repository.dart';
 import 'mock_backend.dart';
-
-/// Mock ClerkService for integration tests — returns a canned session without
-/// hitting the Clerk API (there is no Clerk server in the test environment).
-class TestClerkService extends ClerkService {
-  String? _mockToken;
-
-  TestClerkService() : super(config: ClerkConfig.fromEnv(), dio: Dio());
-
-  @override
-  Future<ClerkAuthResult> signIn({required String identifier, required String password}) async {
-    if (password == 'wrong') {
-      throw HelixError.fromProblem({'error_code': 'UNAUTHENTICATED'}, 401);
-    }
-    _mockToken = 'test-session-token';
-    return ClerkAuthResult(
-      sessionToken: _mockToken!,
-      userId: 'test-user-id',
-      email: identifier,
-      roles: ['DRIVER', 'ADMIN'],
-      permissions: [
-        'shift:clock_in', 'shift:clock_out', 'fuel:view', 'fuel:verify', 'inspection:view',
-        'user:read', 'vehicle:read', 'trailer:read', 'accident:view', 'media:view',
-        'admin:read', 'fleet:read', 'training:view', 'training:complete',
-      ],
-    );
-  }
-
-  @override
-  Future<void> signOut() async {
-    _mockToken = null;
-  }
-
-  @override
-  Future<Map<String, dynamic>> mfaVerify({required String strategy, required String code}) async {
-    return {'session': {'last_active_token': 'test-session-token'}};
-  }
-
-  @override
-  bool get isSignedIn => _mockToken != null;
-
-  @override
-  String? get sessionToken => _mockToken;
-
-  @override
-  Future<void> boot() async {
-    _mockToken = null;
-  }
-}
-
 
 /// The harness under test: a real ApiClient/Session/OfflineQueue wired to the
 /// semantics-faithful mock backend, with in-memory secure storage and SQLite.
@@ -91,7 +40,7 @@ class Harness {
       onAuthLost: () => session.refreshIfNeeded(),
       dio: Dio(BaseOptions(baseUrl: '${backend.apiBase}/', contentType: 'application/json')),
     );
-    session = SessionService(store: MemoryKeyValueStore(), clerk: TestClerkService());
+    session = SessionService(store: MemoryKeyValueStore());
     session.attachApi(api);
     final db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath + _dbCounter.toString());
     _dbCounter += 1;
@@ -160,21 +109,28 @@ void main() {
       );
     });
 
-    test('mfa verify is handled by Clerk natively', () async {
-      // Clerk handles MFA natively; the app's session service delegates to Clerk.
-      // There is no challenge-token flow in the app layer.
+    test('an MFA challenge is issued and spent', () async {
+      // The API issues the challenge; the app spends it. A driver with a
+      // second factor cannot sign in without it.
+      final body = await h.session.login(email: 'mfa@example.com', password: 'correct-horse');
+      expect(body, isNull, reason: 'the MFA challenge has no session yet');
+      expect(h.session.pendingChallengeToken, isNotNull);
+      expect(h.session.status, AuthStatus.needsMfa);
+
+      final session = await h.session.verifyMfa('123456');
+      expect(session.accessToken, isNotNull);
       expect(h.session.pendingChallengeToken, isNull);
+      expect(h.session.status, AuthStatus.signedIn);
     });
 
-    test('refresh keeps the Clerk session alive', () async {
+    test('refresh rotates the session at the API', () async {
       await h.session.login(email: 'amina@example.com', password: 'correct-horse');
-      // Clerk handles session rotation natively; the app just confirms the token exists.
       expect(await h.session.refreshIfNeeded(), isTrue);
       expect(h.session.accessToken, isNotNull);
     });
 
     test('offline ceiling: a fresh install cannot restore a session', () async {
-      final fresh = SessionService(store: MemoryKeyValueStore(), clerk: TestClerkService());
+      final fresh = SessionService(store: MemoryKeyValueStore());
       await fresh.boot(secure: true);
       expect(fresh.status, AuthStatus.signedOut);
     });
@@ -231,7 +187,7 @@ void main() {
       await h.session.login(email: 'amina@example.com', password: 'correct-horse');
       h.expireAccessToken = true;
       final keysBefore = h.backend.receivedIdempotencyKeys.length;
-      // With Clerk, session rotation is native; the app just confirms the session is alive
+      // The API rotates the refresh token; the app confirms the session is alive
       // and replays the 401'd request with the same idempotency key.
       await h.api.write('POST', 'fuel/purchases/1/verify', body: {'action': 'VERIFY'}, parse: (b) => b);
       // exactly one key travelled for both attempts (replay keeps it)

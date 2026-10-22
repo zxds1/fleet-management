@@ -179,6 +179,7 @@ components:
         open_anomalies: { type: integer, nullable: true }
         worst_open_severity: { type: string, nullable: true }
         receipt_media_object_id: { type: string, format: uuid, nullable: true }
+        pump_photo_media_object_id: { type: string, format: uuid, nullable: true }
         odometer_photo_media_object_id: { type: string, format: uuid, nullable: true }
 
     FuelPurchasePage:

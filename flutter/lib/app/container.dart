@@ -8,8 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../core/session.dart';
-import '../core/clerk_service.dart';
-import '../core/clerk_config.dart';
 import '../core/api_client.dart';
 import '../core/offline/queue.dart';
 import '../core/media.dart';
@@ -19,7 +17,7 @@ import '../core/offline/drain_scheduler.dart';
 import '../core/secure_store.dart';
 import '../core/kv_store.dart';
 
-/// Composition root: wires SessionService → ClerkService → ApiClient →
+/// Composition root: wires SessionService → ApiClient →
 /// OfflineQueue → MediaService. Holds the shared service instances so screens
 /// can reach them through Riverpod providers.
 class AppContainer {
@@ -95,10 +93,7 @@ class AppContainer {
     SecurityContext? trustContext,
   }) async {
     final store = SecureStore.instance;
-    final clerkConfig = ClerkConfig.fromEnv();
-    final clerk = ClerkService(config: clerkConfig);
-
-    final session = SessionService(store: store, clerk: clerk);
+    final session = SessionService(store: store);
     session.attachPrefs(prefs);
 
     final api = ApiClient(

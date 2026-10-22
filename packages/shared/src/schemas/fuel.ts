@@ -29,7 +29,11 @@ export const PhotoFirstRefuelSchema = z
     vehicle_id: z.string().uuid(),
     odometer_reading: z.number().int().nonnegative(),
     receipt_media_object_id: z.string().uuid(),
-    odometer_photo_media_object_id: z.string().uuid(),
+    // A1.4 v2: the pump photograph replaces the odometer gauge photo. The
+    // pump reading is what the OCR reads for litres, amount, date and station.
+    pump_photo_media_object_id: z.string().uuid(),
+    /** Legacy odometer gauge photograph; no longer required. */
+    odometer_photo_media_object_id: z.string().uuid().optional().nullable(),
     fuel_card_last_four: z.string().regex(/^\d{4}$/).optional(),
     purchased_at: z.string().datetime(),
   })
@@ -110,6 +114,9 @@ export const FuelPurchaseRowSchema = z.object({
   open_anomalies: numeric,
   worst_open_severity: z.string().nullable().optional(),
   receipt_media_object_id: z.string().nullable().optional(),
+  /** The pump photograph (A1.4 v2): the reading the OCR reads for litres and cost. */
+  pump_photo_media_object_id: z.string().nullable().optional(),
+  /** Legacy odometer gauge photograph; retained for historical rows. */
   odometer_photo_media_object_id: z.string().nullable().optional(),
 });
 export type FuelPurchaseSummary = z.infer<typeof FuelPurchaseRowSchema>;

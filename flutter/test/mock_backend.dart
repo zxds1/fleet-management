@@ -101,6 +101,9 @@ class MockBackend {
     }
   }
 
+  /// The users the fixture has enrolled a second factor for.
+  static bool _mfaEnrolled(Object? identifier) => identifier == 'mfa@example.com';
+
   Future<Map<String, dynamic>?> _route(String method, String path, HttpRequest request, String? rawBody, String? auth, String? idemKey) async {
     // ignore: avoid_print
     // ── auth ──
@@ -112,8 +115,13 @@ class MockBackend {
       if (body['password'] != 'correct-horse') {
         return _problem(401, 'UNAUTHENTICATED', 'Bad credentials');
       }
-      if (body['mfa_code'] == null && body['force_mfa'] != true && _sessions.isNotEmpty) {
-        // first login in this process: require MFA when the user is enrolled
+      if (body['mfa_code'] == null && _mfaEnrolled(body['email'] ?? body['phone'])) {
+        // A second factor is enrolled: no session is issued until the code is
+        // verified, exactly as the API does.
+        return _ok(200, {
+          'mfa_required': true,
+          'mfa_challenge_token': 'challenge-1',
+        });
       }
       return _ok(201, _sessionBody());
     }

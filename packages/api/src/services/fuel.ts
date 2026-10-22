@@ -443,6 +443,7 @@ const FUEL_PURCHASE_PROJECTION = (thresholdParam: number) => `
        v.gauge_before_percent,
        v.gauge_after_percent,
        fp.receipt_media_object_id,
+       fp.pump_photo_media_object_id,
        fp.odometer_photo_media_object_id,
        fp.admin_verified,
        fp.rejected_at,

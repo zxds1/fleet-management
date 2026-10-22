@@ -122,7 +122,10 @@ class _RefuelScreenState extends ConsumerState<RefuelScreen> {
             'vehicle_id': vehicleId,
             'odometer_reading': km,
             'receipt_media_object_id': receipt.slot,
-            'odometer_photo_media_object_id': pump.slot,
+            // A1.4 v2: the pump photograph replaces the odometer gauge photo.
+            // The pump reading is what the OCR reads for litres, cost, date
+            // and station.
+            'pump_photo_media_object_id': pump.slot,
             'purchased_at': purchasedAt.toUtc().toIso8601String(),
             // The card is identified by its last four digits, never by its id.
             if (RegExp(r'^\d{4}$').hasMatch(last4)) 'fuel_card_last_four': last4,

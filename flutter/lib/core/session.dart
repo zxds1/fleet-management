@@ -5,7 +5,6 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
-import 'clerk_service.dart';
 import 'design_preview.dart';
 import 'errors.dart';
 import 'policy.dart';
@@ -50,20 +49,20 @@ class PinVerification {
 ///
 /// Clerk handles sign-in, sign-up, MFA, password reset, and session rotation.
 /// SessionService owns the local state machine (PIN gate, consent, shell
-/// choice) and delegates credential operations to ClerkService.
+/// choice). Credential operations are the API's own: /auth/login,
+/// /auth/mfa/verify, /auth/refresh and /auth/logout.
 ///
 /// Access token = the Helix-issued HS256 JWT, lives in memory only. The
 /// refresh token is the durable half of the session and is rotated by the
 /// server on every use.
 class SessionService extends ChangeNotifier {
-  SessionService({required this._store, this._clerk});
+  SessionService({required this._store});
 
   final KeyValueStore _store;
 
   /// Optional Clerk session, kept only for a Clerk-hosted deployment. The
   /// Helix API issues and verifies its own HS256 tokens and has no way to
   /// verify a Clerk token, so the backend is the default path.
-  final ClerkService? _clerk;
   late ApiClient _api;
   bool _apiAttached = false;
 
@@ -86,7 +85,7 @@ class SessionService extends ChangeNotifier {
   String? _pendingChallengeToken;
   bool _consentSatisfied = true;
 
-  String? get accessToken => _accessToken ?? _clerk?.sessionToken;
+  String? get accessToken => _accessToken;
   String? get pendingChallengeToken => _pendingChallengeToken;
   bool get consentSatisfied => _consentSatisfied;
   bool get signedIn => status == AuthStatus.signedIn;
@@ -428,7 +427,6 @@ class SessionService extends ChangeNotifier {
         // best effort — the local session is cleared either way
       }
     }
-    await _clerk?.signOut();
     await _clear();
     await _wipeLocalData();
   }

@@ -1,11 +1,8 @@
 import 'dart:math' as math;
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helix/app/router.dart';
-import 'package:helix/core/clerk_config.dart';
-import 'package:helix/core/clerk_service.dart';
 import 'package:helix/core/kv_store.dart';
 import 'package:helix/core/session.dart';
 import 'package:helix/design/tokens.dart';
@@ -19,10 +16,7 @@ SessionService _session({
   AuthStatus status = AuthStatus.signedOut,
   List<String> roles = const [],
 }) {
-  final session = SessionService(
-    store: MemoryKeyValueStore(),
-    clerk: ClerkService(config: ClerkConfig.fromEnv(), dio: Dio()),
-  );
+  final session = SessionService(store: MemoryKeyValueStore());
   session.status = status;
   session.roles = roles;
   return session;
