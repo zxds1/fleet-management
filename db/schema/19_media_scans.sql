@@ -1,5 +1,5 @@
 -- =============================================================================
--- 15_media_scans.sql
+-- 19_media_scans.sql
 -- Fleet Management Platform - Malware scan table for quarantined media (S-2)
 --
 -- Decisions: S-2 (malware scan on PUT)

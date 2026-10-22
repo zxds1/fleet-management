@@ -1,6 +1,14 @@
 // packages/api/src/security/webhookAuth.ts
-// Authenticates the public Traccar telemetry webhook with an HMAC-SHA256 signature over the raw body
-// plus a timestamp replay window (security.md S-1).
+// Authenticates the public Traccar telemetry webhook with an HMAC-SHA256 signature over the
+// timestamp and the raw body, plus a timestamp replay window (security.md S-1).
+//
+// SIGNING RECIPE (integrators must implement exactly this):
+//
+//   signed_material = <x-timestamp header value> + "." + <raw request body bytes>
+//   x-signature     = "sha256=" + lowercase_hex( HMAC_SHA256(secret, signed_material) )
+//
+// The timestamp is part of the signed material, so a captured (signature, timestamp, body) triple
+// cannot be replayed with a fresh timestamp — and the freshness window is 120 seconds.
 //
 // Fail-closed: when `enforce` is true (SECURITY_ENFORCE is on) and no WEBHOOK_SECRET is configured,
 // every request to the webhook is rejected with 401 — the ingest is never silently open. In dev
@@ -11,7 +19,8 @@ import type { RequestHandler } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { logger, Unauthenticated } from "@fleet/shared";
 
-const MAX_SKEW_MS = 300_000;
+/** Replay window for the signed timestamp. */
+const MAX_SKEW_MS = 120_000;
 
 export function webhookAuth(secret?: string, enforce = false): RequestHandler {
   if (!secret) {
@@ -39,7 +48,8 @@ export function webhookAuth(secret?: string, enforce = false): RequestHandler {
     if (!Number.isFinite(age) || Math.abs(age) > MAX_SKEW_MS) {
       return next(new Unauthenticated("Webhook timestamp expired"));
     }
-    const expected = "sha256=" + createHmac("sha256", secret).update(raw).digest("hex");
+    const signedMaterial = Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), raw]);
+    const expected = "sha256=" + createHmac("sha256", secret).update(signedMaterial).digest("hex");
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
     if (a.length !== b.length || !timingSafeEqual(a, b)) {

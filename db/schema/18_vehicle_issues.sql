@@ -1,5 +1,5 @@
 -- =============================================================================
--- 14_vehicle_issues.sql
+-- 18_vehicle_issues.sql
 -- Fleet Management Platform - Driver-reported vehicle issues (defect reports)
 --
 -- Purpose: the driver-facing "report vehicle issue" flow (spec

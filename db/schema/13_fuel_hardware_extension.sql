@@ -1,5 +1,5 @@
 -- =============================================================================
--- 12_fuel_hardware_extension.sql
+-- 13_fuel_hardware_extension.sql
 -- Fleet Management Platform - Photo-first fuel capture and tracker
 --                             (hardware) provisioning extension
 --

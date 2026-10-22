@@ -8,6 +8,14 @@
 #   * a Redis URL secret (fleet/redis, key REDIS_URL)
 #   * external secrets for FCM / Google Vision / Africa's Talking
 #   * an OIDC/internal CA issuer for mTLS between services (service mesh optional)
+#
+# Runtime contract:
+#   * the API image serves HTTP on $PORT (4000) and answers GET /healthz
+#     (always 200), GET /readyz (DB + Redis) and GET /health/deep
+#   * the worker image serves GET /healthz and GET /readyz on $HEALTH_PORT (8082)
+#   * the compiled entrypoints are packages/api/dist/server.js and
+#     packages/worker/dist/index.js, because every package tsconfig sets
+#     outDir relative to the package
 # =============================================================================
 
 ---
@@ -38,6 +46,11 @@ metadata:
   namespace: fleet
 data:
   NODE_ENV: "production"
+  # The API's env schema defaults PORT to 8080; every probe, containerPort and
+  # Service targetPort in this manifest uses 4000, so the port is pinned here.
+  PORT: "4000"
+  # The worker exposes its health server on HEALTH_PORT.
+  HEALTH_PORT: "8082"
   TRACCAR_BASE_URL: "http://traccar.fleet.svc.cluster.local:8082"
   # N2.3: durable Redis Stream forward; HTTP + back-fill poller is the fallback.
   FORWARD_REDIS_URI: "redis://redis.fleet.svc.cluster.local:6379/0"
@@ -73,11 +86,48 @@ spec:
       labels: { app: fleet-api }
     spec:
       serviceAccountName: fleet-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        # Applies db/schema + db/seed before the API can serve a request. The
+        # script is idempotent (public.schema_migrations), so this is a no-op
+        # when the db-migrate Job below already ran, and it is what makes the
+        # Deployment depend on the migration instead of racing it.
+        - name: migrate
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -u
+              for i in $(seq 1 12); do
+                if bash /app/db/migrate.sh; then exit 0; fi
+                echo "migrate attempt $i failed; retrying in 10s"
+                sleep 10
+              done
+              echo "migration did not complete" >&2
+              exit 1
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
       containers:
         - name: api
           image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
-          args: ["node", "dist/api/server.js"]
-          ports: [{ containerPort: 4000 }]
+          args: ["node", "packages/api/dist/server.js"]
+          ports: [{ containerPort: 4000, name: http }]
           envFrom:
             - configMapRef: { name: fleet-config }
             - secretRef: { name: fleet-secrets }
@@ -88,17 +138,32 @@ spec:
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef: { name: fleet-redis, key: REDIS_URL }
+          # /healthz is always 200: it must not depend on the database or Redis,
+          # or a dependency outage would restart every pod.
           readinessProbe:
-            httpGet: { path: /healthz, port: 4000 }
+            httpGet: { path: /readyz, port: 4000 }
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
-            httpGet: { path: /livez, port: 4000 }
+            httpGet: { path: /healthz, port: 4000 }
             initialDelaySeconds: 20
             periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: "500m", memory: "512Mi" }
             limits: { cpu: "1", memory: "1Gi" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -125,10 +190,17 @@ spec:
       labels: { app: fleet-worker }
     spec:
       serviceAccountName: fleet-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: worker
           image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
-          args: ["node", "dist/worker/index.js"]
+          args: ["node", "packages/worker/dist/index.js", "--role", "worker"]
+          ports: [{ containerPort: 8082, name: health }]
           envFrom:
             - configMapRef: { name: fleet-config }
             - secretRef: { name: fleet-secrets }
@@ -139,9 +211,34 @@ spec:
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef: { name: fleet-redis, key: REDIS_URL }
+            # The image HEALTHCHECK must probe the worker's health port, not the
+            # API port.
+            - name: HEALTHCHECK_PORT
+              value: "8082"
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8082 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8082 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: "500m", memory: "512Mi" }
             limits: { cpu: "1", memory: "1Gi" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -157,20 +254,30 @@ spec:
     metadata:
       labels: { app: traccar }
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: traccar
-          image: traccar/traccar:latest
+          # Pinned to an explicit release: `latest` made the running server
+          # change under a rollout with no image digest to trace it back to.
+          image: traccar/traccar:6.16.0
           ports:
             - { containerPort: 8082, name: web }
             - { containerPort: 5005, name: tracker }
           env:
+            # Without this flag Traccar ignores the environment variables below
+            # and falls back to the image's bundled traccar.xml.
+            - name: CONFIG_USE_ENVIRONMENT_VARIABLES
+              value: "true"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: fleet-traccar-db, key: DATABASE_URL }
             - name: DATABASE_DRIVER
               value: "org.postgresql.Driver"
-            - name: DATABASE_USER
-              value: "fleet"
             # N2.3: durable forward.
             - name: FORWARD_REDIS_ENABLED
               value: "true"
@@ -182,9 +289,29 @@ spec:
             tcpSocket: { port: 8082 }
             initialDelaySeconds: 30
             periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /api/server, port: 8082 }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Traccar creates its home subdirectories (media/, export/, ...) under
+            # /opt/traccar at start-up and offers no way to relocate them, so a
+            # read-only root aborts the boot. The writable paths that carry
+            # state are backed by emptyDir volumes below.
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: "250m", memory: "512Mi" }
             limits: { cpu: "1", memory: "1Gi" }
+          volumeMounts:
+            - { name: traccar-data, mountPath: /opt/traccar/data }
+            - { name: traccar-logs, mountPath: /opt/traccar/logs }
+      volumes:
+        - name: traccar-data
+          emptyDir: {}
+        - name: traccar-logs
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -198,6 +325,20 @@ spec:
     - { name: tracker, port: 5005, targetPort: 5005 }
   type: ClusterIP
 ---
+# Redis runs as ONE instance behind one ClusterIP.
+#
+# The previous manifest ran three replicas of a standalone server
+# (--cluster-enabled no) with one ReadWriteOnce PVC each. Those were three
+# unrelated databases behind one service name: a session token minted by pod A
+# was invisible to pod B, so roughly two thirds of legitimate refreshes
+# failed, and the rate-limit counters were split three ways. One instance with
+# one PVC is the only topology that is correct without a real cluster.
+#
+# Trade-off: Redis is now a single point of failure. A pod restart drops the
+# in-flight buffer (AOF keeps it on the PVC) and takes sessions and rate
+# limits down with it. The next step is Redis Sentinel (or ElastiCache) with
+# automatic failover, which needs a quorum and a rewrite of the REDIS_URL
+# resolution - not a config change on this manifest.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -206,24 +347,34 @@ metadata:
   labels: { app: redis }
 spec:
   serviceName: redis
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels: { app: redis }
   template:
     metadata:
       labels: { app: redis }
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         # C5.10: AOF so the pending:gps buffer survives restart.
         - name: redis
           image: redis:7-alpine
           command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--cluster-enabled", "no"]
           ports: [{ containerPort: 6379 }]
-          volumeMounts:
-            - { name: data, mountPath: /data }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: "250m", memory: "512Mi" }
             limits: { cpu: "500m", memory: "1Gi" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:
@@ -272,9 +423,71 @@ spec:
   selector:
     matchLabels: { app: fleet-api }
 ---
+# =============================================================================
+# Schema migration
+# =============================================================================
+# Applies db/schema/*.sql and db/seed/*.sql to the live DATABASE_URL.
+#
+# The helm.sh/hook annotations make this a pre-install/pre-upgrade hook when
+# the manifest is rendered by Helm. Under plain `kubectl apply` the hook
+# annotations are inert, so the API Deployment also runs the same script as an
+# init container: the script is idempotent (public.schema_migrations) and holds
+# an advisory lock, so whichever runs first applies the schema and the other
+# one is a no-op.
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: fleet
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: db-migrate }
+    spec:
+      restartPolicy: Never
+      serviceAccountName: fleet-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
+          command: ["bash", "/app/db/migrate.sh"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
 # Nightly partition maintenance + retention sweep (7.3/D6) and the daily
 # document-expiry scan run inside the worker; this CronJob is a safety net that
 # guarantees partition provisioning even if the worker is down.
+#
+# The provisioning functions are SQL, so the job calls them through psql. The
+# previous command pointed at dist/scripts/partition-maint.js, which does not
+# exist in the image: the job failed on every run and no partition was ever
+# provisioned by the safety net.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -289,14 +502,35 @@ spec:
         spec:
           serviceAccountName: fleet-api
           restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile: { type: RuntimeDefault }
           containers:
             - name: partition-maint
               image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0
-              command: ["node", "dist/scripts/partition-maint.js"]
+              command: ["bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  psql "$DATABASE_URL" --no-psqlrc --set ON_ERROR_STOP=1 -c "SELECT * FROM telemetry.fn_ensure_location_partitions(3);"
+                  psql "$DATABASE_URL" --no-psqlrc --set ON_ERROR_STOP=1 -c "SELECT * FROM app.fn_ensure_error_event_partitions(3);"
+                  psql "$DATABASE_URL" --no-psqlrc --set ON_ERROR_STOP=1 -c "SELECT * FROM audit.fn_ensure_audit_partitions(1);"
               env:
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef: { name: fleet-db, key: DATABASE_URL }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
               resources:
                 requests: { cpu: "100m", memory: "256Mi" }
                 limits: { cpu: "250m", memory: "512Mi" }
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: tmp
+              emptyDir: {}

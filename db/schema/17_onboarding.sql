@@ -1,5 +1,5 @@
 -- =============================================================================
--- 13_onboarding.sql
+-- 17_onboarding.sql
 -- Fleet Management Platform - Driver onboarding + background check
 --
 -- Purpose: the driver-facing onboarding workflow that precedes the first shift —

@@ -364,9 +364,9 @@ export class FuelCardService {
   }
 }
 
-import type { DbClient, FuelReconciliationInboxViewRow } from "@fleet/shared";
+import type { DbClient } from "@fleet/shared";
 import { FuelStatementRepository } from "../repositories/fuel";
-import { OCR_CONFIDENCE_THRESHOLD, FuelPendingRowSchema, type FuelPendingRow } from "@fleet/shared";
+import { OCR_CONFIDENCE_THRESHOLD, FuelPurchaseRowSchema, type FuelPurchaseSummary } from "@fleet/shared";
 import { buildPage, decodeCursor, MAX_PAGE_LIMIT, resolveSortColumn } from "../http/pagination";
 
 export interface StatementInput {
@@ -412,19 +412,98 @@ export class ReconciliationService {
   }
 }
 
-const INBOX_SORT = { purchased_at: "purchased_at" } as const;
+const INBOX_SORT = { purchased_at: "fp.purchased_at" } as const;
+
+/**
+ * The ONE projection every fuel read surface returns (M6). `total_cost` / `litres` are the
+ * canonical names; the photo-first capture columns (`amount_spent` / `liters_pumped`) are the
+ * fallback for a purchase that has not been verified yet — the database seeds `litres` /
+ * `total_cost` with 0 until an Admin settles them, and the column comments state that the
+ * promoted pair stays authoritative once it is set.
+ */
+const FUEL_PURCHASE_PROJECTION = (thresholdParam: number) => `
+       fp.id                                   AS fuel_purchase_id,
+       fp.purchased_at,
+       fp.receipt_date,
+       fp.station_name,
+       fp.vehicle_id,
+       v.vehicle_plate,
+       fp.driver_id,
+       v.driver_name,
+       COALESCE(NULLIF(fp.total_cost, 0), fp.amount_spent)  AS total_cost,
+       COALESCE(NULLIF(fp.litres, 0), fp.liters_pumped)     AS litres,
+       fp.currency,
+       fp.unit_price,
+       fp.odometer_km,
+       fp.ocr_status,
+       fp.ocr_method,
+       fp.ocr_raw                              AS ocr_raw_data,
+       fp.ocr_confidence,
+       fp.driver_corrected,
+       v.gauge_before_percent,
+       v.gauge_after_percent,
+       fp.receipt_media_object_id,
+       fp.odometer_photo_media_object_id,
+       fp.admin_verified,
+       fp.rejected_at,
+       fp.cleared_for_payment_at,
+       v.open_anomalies,
+       v.worst_open_severity,
+       (fp.odometer_km - prev.odometer_km)     AS distance_since_last_refuel,
+       CASE WHEN prev.odometer_km IS NOT NULL
+             AND fp.odometer_km IS NOT NULL
+             AND (fp.odometer_km - prev.odometer_km) > 0
+             AND COALESCE(NULLIF(fp.total_cost, 0), fp.amount_spent) IS NOT NULL
+            THEN round(COALESCE(NULLIF(fp.total_cost, 0), fp.amount_spent)
+                       / (fp.odometer_km - prev.odometer_km), 2)
+       END                                    AS cost_per_km,
+       CASE
+         WHEN a.open_severe > 0 THEN 'FLAGGED'
+         WHEN fp.driver_corrected = false AND fp.ocr_confidence >= $${thresholdParam} THEN 'AUTO'
+         ELSE 'REVIEW'
+       END                                    AS badge`;
+
+/**
+ * The joins every fuel read surface needs: the reporting view (vehicle plate, driver name, gauge
+ * percentages, anomaly counters) and the two lateral lookups (the previous refuel on the same
+ * vehicle, and the open-severe anomaly count that drives the triage badge).
+ */
+const FUEL_PURCHASE_JOINS = `
+      JOIN app.v_fuel_reconciliation_inbox v ON v.fuel_purchase_id = fp.id
+      -- Baseline = the most recent earlier refuel on the same vehicle, verified or not, so the
+      -- distance is measured against the real previous fill-up.
+      LEFT JOIN LATERAL (
+             SELECT prev_fp.odometer_km
+               FROM app.fuel_purchases prev_fp
+              WHERE prev_fp.vehicle_id = fp.vehicle_id
+                AND prev_fp.purchased_at < fp.purchased_at
+                AND prev_fp.rejected_at IS NULL
+                AND prev_fp.odometer_km IS NOT NULL
+              ORDER BY prev_fp.purchased_at DESC
+              LIMIT 1
+          ) prev ON true
+      LEFT JOIN LATERAL (
+             SELECT count(*)::int AS open_severe
+               FROM app.fuel_purchase_anomalies fa
+              WHERE fa.fuel_purchase_id = fp.id
+                AND fa.resolved_at IS NULL
+                AND fa.severity IN ('CRITICAL','HIGH')
+          ) a ON true`;
 
 export class FuelQuery {
   constructor(private readonly client: DbClient) {}
 
-  /** Cursor page over `v_fuel_reconciliation_inbox` (03 §2.3, D7). */
+  /**
+   * Cursor page over the fuel purchases awaiting reconciliation (03 §2.3, D7). Returns the
+   * canonical fuel purchase row — the same shape `GET /admin/fuel/pending` returns (M6).
+   */
   async reconciliationInbox(opts: {
     vehicleId?: string;
     verified?: boolean;
     sort?: string;
     limit: number;
     cursor?: string;
-  }): Promise<Result<{ data: FuelReconciliationInboxViewRow[]; next_cursor: string | null; has_more: boolean }>> {
+  }): Promise<Result<{ data: FuelPurchaseSummary[]; next_cursor: string | null; has_more: boolean }>> {
     const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
     const sortColumn = resolveSortColumn(INBOX_SORT, opts.sort, "purchased_at");
     const where: string[] = [];
@@ -432,45 +511,56 @@ export class FuelQuery {
 
     if (opts.vehicleId) {
       params.push(opts.vehicleId);
-      where.push(`vehicle_id = $${params.length}`);
+      where.push(`fp.vehicle_id = $${params.length}`);
     }
     if (opts.verified === true) {
-      where.push(`admin_verified = true`);
+      where.push(`fp.admin_verified = true`);
     } else if (opts.verified === false) {
-      where.push(`admin_verified = false AND rejected_at IS NULL`);
+      where.push(`fp.admin_verified = false AND fp.rejected_at IS NULL`);
     }
 
     const cursor = decodeCursor(opts.cursor);
     if (cursor) {
       params.push(cursor.sort, cursor.id);
-      where.push(`(purchased_at, fuel_purchase_id) < ($${params.length - 1}::timestamptz, $${params.length})`);
+      where.push(`(fp.purchased_at, fp.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
     }
 
+    params.push(OCR_CONFIDENCE_THRESHOLD);
+    const thresholdParam = params.length;
+
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const res = await this.client.query<FuelReconciliationInboxViewRow>(
-      `SELECT * FROM app.v_fuel_reconciliation_inbox ${whereSql}
-       ORDER BY ${sortColumn} DESC, fuel_purchase_id DESC
-       LIMIT $${params.length + 1}`,
+    const res = await this.client.query<Record<string, unknown>>(
+      `SELECT ${FUEL_PURCHASE_PROJECTION(thresholdParam)}
+         FROM app.fuel_purchases fp
+         ${FUEL_PURCHASE_JOINS}
+         ${whereSql}
+        ORDER BY ${sortColumn} DESC, fp.id DESC
+        LIMIT $${params.length + 1}`,
       [...params, limit + 1],
     );
 
-    const page = buildPage(res.rows, limit, (row) => ({
-      sort: String(row.purchased_at ?? ""),
-      id: row.fuel_purchase_id ?? "",
-    }));
+    const page = buildPage(
+      res.rows.map((row) => FuelPurchaseRowSchema.parse(row)),
+      limit,
+      (row) => ({
+        sort: String(row.purchased_at ?? ""),
+        id: row.fuel_purchase_id ?? "",
+      }),
+    );
     return ok(page);
   }
 
   /**
    * GET /admin/fuel/pending (2.7, A1.4). Photo-first review queue: each unverified purchase with
    * the distance and cost-per-km implied by the previous refuel on the same vehicle, plus a triage
-   * badge.
+   * badge. Returns the canonical fuel purchase row — the same shape `GET /fuel/reconciliation-inbox`
+   * returns (M6).
    *
    *  FLAGGED — an unresolved CRITICAL/HIGH anomaly is attached.
    *  AUTO    — OCR read it cleanly (confidence >= OCR_CONFIDENCE_THRESHOLD) and the driver did not override it.
    *  REVIEW  — everything else; a human decides.
    */
-  async pendingReview(opts: { limit: number; tenantId: string }): Promise<Result<{ purchases: FuelPendingRow[] }>> {
+  async pendingReview(opts: { limit: number; tenantId: string }): Promise<Result<{ purchases: FuelPurchaseSummary[] }>> {
     const limit = Math.min(Math.max(opts.limit, 1), MAX_PAGE_LIMIT);
     const res = await this.client.query<Record<string, unknown>>(
       // The page is selected FIRST (bounded by the partial index on unverified purchases), then the
@@ -481,71 +571,21 @@ export class FuelQuery {
       // Tenant-scoped explicitly (defence in depth on top of RLS): a fuel purchase and its vehicle
       // both carry the tenant, so the queue can never surface another company's receipts.
       `WITH pending AS (
-         SELECT fp.id, fp.vehicle_id, fp.driver_id, fp.purchased_at, fp.receipt_date,
-                fp.station_name, fp.amount_spent, fp.liters_pumped, fp.price_per_liter,
-                fp.odometer_km, fp.receipt_media_object_id, fp.odometer_photo_media_object_id,
-                fp.ocr_status, fp.ocr_method, fp.ocr_raw, fp.ocr_confidence, fp.driver_corrected
+         SELECT fp.*
            FROM app.fuel_purchases fp
           WHERE fp.tenant_id = $3 AND fp.admin_verified = false AND fp.rejected_at IS NULL
           ORDER BY fp.purchased_at DESC
           LIMIT $1
        )
-       SELECT p.id                                   AS fuel_purchase_id,
-              p.vehicle_id,
-              v.license_plate                        AS vehicle_plate,
-              p.driver_id,
-              p.purchased_at,
-              p.receipt_date,
-              p.station_name,
-              p.amount_spent,
-              p.liters_pumped,
-              p.price_per_liter,
-              p.odometer_km,
-              p.receipt_media_object_id,
-              p.odometer_photo_media_object_id,
-              p.ocr_status,
-              p.ocr_method,
-              p.ocr_raw                              AS ocr_raw_data,
-              p.ocr_confidence                       AS confidence_score,
-              p.driver_corrected,
-              (p.odometer_km - prev.odometer_km)     AS distance_since_last_refuel,
-              CASE WHEN prev.odometer_km IS NOT NULL
-                    AND (p.odometer_km - prev.odometer_km) > 0
-                    AND p.amount_spent IS NOT NULL
-                   THEN round(p.amount_spent / (p.odometer_km - prev.odometer_km), 2)
-              END                                    AS cost_per_km,
-              CASE
-                WHEN a.open_severe > 0 THEN 'FLAGGED'
-                WHEN p.driver_corrected = false AND p.ocr_confidence >= $2 THEN 'AUTO'
-                ELSE 'REVIEW'
-              END                                    AS badge
-         FROM pending p
-         JOIN app.vehicles v ON v.id = p.vehicle_id AND v.tenant_id = $3
-         -- Baseline = the most recent earlier refuel on the same vehicle, verified or not, so the
-         -- distance is measured against the real previous fill-up.
-         LEFT JOIN LATERAL (
-                SELECT prev_fp.odometer_km
-                  FROM app.fuel_purchases prev_fp
-                 WHERE prev_fp.vehicle_id = p.vehicle_id
-                   AND prev_fp.purchased_at < p.purchased_at
-                   AND prev_fp.rejected_at IS NULL
-                   AND prev_fp.odometer_km IS NOT NULL
-                 ORDER BY prev_fp.purchased_at DESC
-                 LIMIT 1
-              ) prev ON true
-         LEFT JOIN LATERAL (
-                SELECT count(*)::int AS open_severe
-                  FROM app.fuel_purchase_anomalies fa
-                 WHERE fa.fuel_purchase_id = p.id
-                   AND fa.resolved_at IS NULL
-                   AND fa.severity IN ('CRITICAL','HIGH')
-              ) a ON true
-        ORDER BY p.purchased_at DESC`,
+       SELECT ${FUEL_PURCHASE_PROJECTION(2)}
+         FROM pending fp
+         ${FUEL_PURCHASE_JOINS}
+        ORDER BY fp.purchased_at DESC`,
       [limit, OCR_CONFIDENCE_THRESHOLD, opts.tenantId],
     );
     // Parsed through the shared schema so PG's numeric-as-string columns are normalised to numbers
     // exactly once, server-side, and the emitted payload is provably the shape the client parses.
-    return ok({ purchases: res.rows.map((row) => FuelPendingRowSchema.parse(row)) });
+    return ok({ purchases: res.rows.map((row) => FuelPurchaseRowSchema.parse(row)) });
   }
 
   /**

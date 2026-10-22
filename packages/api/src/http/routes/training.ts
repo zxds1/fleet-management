@@ -18,9 +18,11 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler, PROBLEM_CONTENT_TYPE } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import { CursorQuerySchema } from "../pagination";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -49,8 +51,9 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
     "/lessons",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.training.listLessons({ limit: query.limit, cursor: query.cursor ?? null });
@@ -62,8 +65,8 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Manager roster ───────────────────────────────────────────────────────────────────────
@@ -73,8 +76,9 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
     "/roster",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:review")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.training.roster({ limit: query.limit, cursor: query.cursor ?? null });
@@ -86,8 +90,8 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Complete a lesson (current driver) ───────────────────────────────────────────────────
@@ -129,8 +133,9 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
     "/lessons/:id",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.training.getLesson(req.params.id!);
         if (!result.ok) {
@@ -141,8 +146,8 @@ export function createTrainingRouter(deps: TrainingRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;

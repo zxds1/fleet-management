@@ -18,8 +18,10 @@ import { requirePermission } from "../../middleware/requirePermission";
 import { asyncHandler, PROBLEM_CONTENT_TYPE } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -148,8 +150,9 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
     "/assignment",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("assignment:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const principal = (req as { principal?: Principal }).principal as Principal;
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.getByUserId(principal.userId);
@@ -174,8 +177,8 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
           return;
         }
         res.status(200).json(toDriverAssignmentResponse(row));
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Training completion status (contract status endpoint) ─────────────────────────────
@@ -183,8 +186,9 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
     "/training-status",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("training:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const principal = (req as { principal?: Principal }).principal as Principal;
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.getByUserId(principal.userId);
@@ -198,8 +202,8 @@ export function createOnboardingRouter(deps: OnboardingRouterDeps): Router {
         }
         const status = await svc.training.trainingStatus(driver.id);
         res.status(200).json(status);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;

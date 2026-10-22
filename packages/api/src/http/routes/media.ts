@@ -42,7 +42,7 @@ export function createMediaRouter(deps: MediaRouterDeps): Router {
           email: principal.email,
           roles: principal.roles,
         }, input);
-        if (result.ok) return ok({ status: 201, body: result.value, resourceId: result.value.mediaObjectId });
+        if (result.ok) return ok({ status: 201, body: result.value, resourceId: result.value.media_object_id });
         return err(result.error);
       }),
     ),

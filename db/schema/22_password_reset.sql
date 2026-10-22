@@ -1,4 +1,4 @@
--- packages/db/src/migrations/16_password_reset.sql
+-- db/schema/22_password_reset.sql
 -- Password-reset delegation (immune-system follow-on).
 --
 -- A reset is REQUESTED by the account owner and, unless the owner is the tenant's company owner

@@ -91,6 +91,31 @@ export function createApp(container: Container): Express {
   // Prometheus/Grafana Cloud scrapes succeed. Excluded from SLOs (slo.md §2).
   app.get("/metrics", startMetrics());
 
+  // Dedicated rate-limit scopes (security Layer 4). The password-reset flow gets its own bucket
+  // instead of the generic auth one, and the financial surface (fuel adjudication, statement
+  // import, reporting) gets its own instead of the global one. Mounted BEFORE the routers they
+  // guard so the tighter bucket is evaluated first.
+  app.use(
+    `${base}/auth/password-reset`,
+    rateLimiter.middleware({ scope: "password_reset", max: container.env.RATE_LIMIT_PASSWORD_RESET_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/fuel/purchases`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/admin/fuel/verify`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/reconciliation/statements`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+  app.use(
+    `${base}/reports`,
+    rateLimiter.middleware({ scope: "financial", max: container.env.RATE_LIMIT_FINANCIAL_PER_MINUTE }),
+  );
+
   app.use(`${base}/auth`, rateLimiter.middleware({ scope: "auth", max: container.env.RATE_LIMIT_AUTH_PER_MINUTE }));
   app.use(`${base}/auth`, createAuthRouter({
     pool: container.pool,

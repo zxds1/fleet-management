@@ -32,7 +32,10 @@ export function problemHandler(persistErrorEvent?: PersistErrorEvent) {
   return (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
     const requestId = (req as { requestId?: string }).requestId;
     const appError = toAppError(err);
-    const problem = { ...appError.toProblem(), instance: appError.requestId ?? requestId };
+    const problem = withRetryAfter(
+      { ...appError.toProblem(), instance: appError.requestId ?? requestId },
+      res,
+    );
 
     const route = `${req.method} ${req.path}`;
     const severity = problem.status >= 500 ? "error" : "warn";
@@ -116,6 +119,34 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) if (v !== undefined) out[k] = v;
   return out as T;
+}
+
+/**
+ * Mirrors the `Retry-After` response header into the problem body as `retry_after_seconds`.
+ * The rate limiter sets the header; without this the client's backoff hint is always null because
+ * it only reads the body.
+ */
+export function withRetryAfter<T extends object>(
+  problem: T,
+  res: Response,
+): T & { retry_after_seconds?: number } {
+  const raw = res.getHeader("Retry-After");
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const seconds = Number(first);
+  if (!Number.isFinite(seconds) || seconds <= 0) return problem as T & { retry_after_seconds?: number };
+  return { ...problem, retry_after_seconds: Math.ceil(seconds) };
+}
+
+/**
+ * Serialises a domain error as an RFC7807 `application/problem+json` document. Every route-level
+ * failure goes through here so the OpenAPI `Problem` schema is honoured on every error path.
+ */
+export function problemResponse(res: Response, error: AppError, instance?: string): void {
+  const problem = { ...error.toProblem(), instance: instance ?? error.requestId };
+  res
+    .status(error.httpStatus)
+    .type(PROBLEM_CONTENT_TYPE)
+    .json(stripUndefined(withRetryAfter(problem, res)));
 }
 
 /** Wraps an async handler so rejections reach the problem handler. */

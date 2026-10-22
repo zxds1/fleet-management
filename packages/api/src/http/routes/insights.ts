@@ -12,7 +12,7 @@ import { err, ok, type IdempotencyService, type PermissionCode, type PoolLike, t
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { withClient } from "../../db/withClient";
@@ -90,7 +90,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
           ...(driverId ? { driverId } : {}),
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -116,7 +116,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
           ...(driverId ? { driverId } : {}),
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -135,8 +135,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.document.getDocument(req.params.id!);
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -192,8 +191,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.anomaly.getAnomaly(req.params.id!);
         if (!result.ok) {
-          const status = result.error.httpStatus ?? 422;
-          res.status(status).json({ error_code: result.error.error_code, status, title: result.error.title });
+problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -213,7 +211,7 @@ export function createInsightsRouter(deps: InsightsRouterDeps): Router {
         const driverId = await ownScopeDriverId(req, svc, "report:read");
         const result = await svc.dashboard.vehicleStates(driverId ? { driverId } : {});
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);

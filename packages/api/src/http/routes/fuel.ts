@@ -17,11 +17,11 @@ import { FuelCardQuerySchema, FuelCorrectionSchema, PhotoFirstRefuelSchema, Veri
 import { authenticate, principalOf } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withClient, withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
 import { makeServices } from "../../app/compose";
 
@@ -140,8 +140,11 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
     "/reconciliation-inbox",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("fuel:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler(async (req, res) => {
+      const principal = principalOf(req);
+      // Tenant-bound: the inbox reads tenant-scoped rows, and FORCE RLS needs the tenant GUC
+      // bound to return them at all.
+      await withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(InboxQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.fuelQuery.reconciliationInbox({
@@ -151,12 +154,12 @@ export function createFuelRouter(deps: FuelRouterDeps): Router {
           cursor: query.cursor,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;

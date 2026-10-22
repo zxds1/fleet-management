@@ -51,7 +51,7 @@ export class VehicleIssueRepository extends BaseRepository<VehicleIssueRow> {
    */
   async listByVehicle(
     vehicleId: string,
-    opts: { limit: number; cursorSort?: string; cursorId?: string },
+    opts: { limit: number; cursorSort?: string; cursorId?: string; tenantId?: string | null },
   ): Promise<VehicleIssueListRow[]> {
     const params: unknown[] = [vehicleId];
     let keyset = "";
@@ -59,12 +59,19 @@ export class VehicleIssueRepository extends BaseRepository<VehicleIssueRow> {
       params.push(opts.cursorSort, opts.cursorId);
       keyset = `AND (i.created_at, i.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
     }
+    // The tenant is filtered explicitly as well as by the row-level policy:
+    // the policy is the backstop, this is the statement that says so.
+    let tenantClause = "";
+    if (opts.tenantId) {
+      params.push(opts.tenantId);
+      tenantClause = `AND i.tenant_id = $${params.length}::uuid`;
+    }
     params.push(opts.limit);
     const res = await this.client.query<VehicleIssueListRow>(
       `SELECT ${VEHICLE_ISSUE_SELECT_SQL}
        ${VEHICLE_ISSUE_JOINS_SQL}
         WHERE i.vehicle_id = $1::uuid
-          AND i.deleted_at IS NULL ${keyset}
+          AND i.deleted_at IS NULL ${tenantClause} ${keyset}
         ORDER BY i.created_at DESC, i.id DESC
         LIMIT $${params.length}`,
       params,

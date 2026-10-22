@@ -9,6 +9,7 @@ import { randomInt, timingSafeEqual } from "node:crypto";
 import { type Result, err, ok, Unauthenticated, ValidationError } from "@fleet/shared";
 import type { MfaDeliveryChannel } from "@fleet/shared";
 import { generateRecoveryCodes, sha256Hex } from "../security/crypto";
+import { argon2idHasher } from "../security/passwords";
 import type { TokenService } from "../security/tokens";
 import type { OtpStore } from "../security/otpStore";
 import type { UserRepository, MfaRecoveryCodeRepository, PermissionRepository } from "../repositories/identity";
@@ -37,11 +38,19 @@ export class MfaService {
     private readonly delivery: MfaDeliveryService,
   ) {}
 
-  /** One-step enrolment: generate + store recovery codes and activate MFA. Returns the plaintext
-   *  recovery codes once (they are never returned again). No TOTP secret is created. */
-  async enroll(userId: string): Promise<Result<EnrollResult>> {
+  /**
+   * One-step enrolment: generate + store recovery codes and activate MFA. Returns the plaintext
+   * recovery codes once (they are never returned again). No TOTP secret is created.
+   *
+   * The caller's password is REQUIRED and verified against the stored hash: enrolment arms a
+   * second factor, so a live-but-stolen session token must not be enough to turn MFA on (or to
+   * reset the recovery codes). A wrong password is a 401.
+   */
+  async enroll(userId: string, password: string): Promise<Result<EnrollResult>> {
     const user = await this.users.getById(userId);
     if (!user) return err(new Unauthenticated());
+    const valid = await argon2idHasher.verify(user.password_hash, password);
+    if (!valid) return err(new Unauthenticated("Password is incorrect"));
     const { plain, hashed } = generateRecoveryCodes(10);
     await this.recovery.replaceAll(userId, hashed);
     await this.users.activateMfa(userId);

@@ -57,13 +57,14 @@ const baseInput = {
 describe("MediaService.uploadUrl", () => {
   it("pre-inserts a media object and returns a presigned PUT", async () => {
     const { svc } = makeService();
-    const r: Result<{ mediaObjectId: string; uploadUrl: string; expiresInSeconds: number; method: "PUT" }> =
+    const r: Result<{ media_object_id: string; upload_url: string; expires_in_seconds: number; method: "PUT" }> =
       await svc.uploadUrl(tx, actor, baseInput);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value.mediaObjectId).toBe("mo-1");
+      // Every member is snake_case, like every other endpoint.
+      expect(r.value.media_object_id).toBe("mo-1");
       expect(r.value.method).toBe("PUT");
-      expect(r.value.uploadUrl).toContain("fleet-accident");
+      expect(r.value.upload_url).toContain("fleet-accident");
     }
   });
 

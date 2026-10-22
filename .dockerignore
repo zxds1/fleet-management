@@ -1,0 +1,48 @@
+# =============================================================================
+# .dockerignore - build context for deploy/Dockerfile
+#
+# The context is the repository root, so the Flutter client, the git history and
+# the local build artefacts would otherwise be copied into the production image.
+# =============================================================================
+
+.git/
+.gitignore
+.github/
+
+# The mobile client is built and shipped separately.
+flutter/
+
+# Local build artefacts (the image compiles the TypeScript itself).
+**/dist/
+**/build/
+**/*.tsbuildinfo
+**/.turbo/
+.turbo/
+node_modules/
+**/node_modules/
+
+# Tests are not part of the runtime image.
+**/test/
+**/tests/
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+
+# Documentation and local agent state.
+**/*.md
+docs/
+.kilo/
+**/.kilocode/
+**/.opencode/
+
+# Secrets and local environment overrides.
+**/.env*
+**/*.p12
+**/*.keystore
+**/*.jks
+**/*.mobileprovision
+
+# Editor / OS noise.
+.idea/
+.vscode/
+**/.DS_Store

@@ -14,9 +14,11 @@ import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import { ownScopeDriverId } from "../ownScope";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -72,8 +74,9 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     "/templates",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("inspection:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const result = await svc.inspectionQuery.listTemplates();
         if (!result.ok) {
@@ -81,8 +84,8 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Own DVIR submissions (read, cursor) ──────────────────────────────────────────────────
@@ -90,8 +93,9 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     "/me",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("inspection:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const driver = await svc.drivers.findByUserId((req as { principal: Principal }).principal.userId);
@@ -105,8 +109,8 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── Single DVIR detail with per-item results (read) ───────────────────────────────────────
@@ -117,8 +121,9 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     "/:id",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("inspection:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const svc = makeServices(client, infra);
         const driverId = await ownScopeDriverId(req, svc, "inspection:template_manage");
         const result = await svc.inspectionQuery.getOne(req.params.id!, driverId);
@@ -128,8 +133,8 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   // ── DVIR list (admin review inbox) ────────────────────────────────────────────────────────
@@ -144,8 +149,9 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
     "/",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("inspection:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const driverId = await ownScopeDriverId(req, svc, "inspection:template_manage");
@@ -155,8 +161,8 @@ export function createInspectionRouter(deps: InspectionRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;

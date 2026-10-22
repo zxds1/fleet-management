@@ -4,6 +4,16 @@
 #
 # Validates the full DDL + seed against PostgreSQL 16.
 #
+# The schema file list is DISCOVERED, not hard-coded: db/schema/*.sql in name
+# order, exactly like db/validate.mjs (the harness CI uses). The previous
+# hard-coded array stopped at 11_views.sql, so migrations 12..22 (tenancy,
+# training, onboarding, vehicle issues, privacy requests, media scans,
+# dead-letter, password reset) were never applied and the schema that CI
+# validated was not the schema that ships.
+#
+# Paths are resolved from this script's own location, so it works from any
+# working directory (`npm run db:validate:bash` runs it with db/ as cwd).
+#
 # In an environment WITHOUT the PostGIS binaries (e.g. a non-admin laptop where
 # StackBuilder/winget cannot install them), pass POSTGIS=shim to install a tiny
 # local stand-in for the `postgis` extension symbols. The shipped schema files
@@ -16,6 +26,9 @@
 #   POSTGIS=shim PGURI='postgresql://postgres:pg_local_dev@localhost:5444/fleet' ./db/validate.sh
 # =============================================================================
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 PGURI="${PGURI:-postgresql://postgres:pg_local_dev@localhost:5444/fleet}"
 POSTGIS_MODE="${POSTGIS:-real}"
@@ -30,32 +43,20 @@ fi
 
 if [ "$POSTGIS_MODE" = "shim" ]; then
   echo "==> Installing local PostGIS shim (validation only)"
-  "${PSQL[@]}" -d fleet -f db/validate-postgis-shim.sql
+  "${PSQL[@]}" -d fleet -f "${ROOT_DIR}/db/validate-postgis-shim.sql"
 fi
 
-SCHEMA=( \
-  db/schema/00_extensions.sql \
-  db/schema/01_enums.sql \
-  db/schema/02_identity.sql \
-  db/schema/03_platform_core.sql \
-  db/schema/04_assets.sql \
-  db/schema/05_operations.sql \
-  db/schema/06_telemetry_hos.sql \
-  db/schema/07_financial.sql \
-  db/schema/08_safety.sql \
-  db/schema/09_audit_notifications.sql \
-  db/schema/10_partitions.sql \
-  db/schema/11_views.sql \
-)
-
 echo "==> Applying schema"
-for f in "${SCHEMA[@]}"; do
-  echo "  - $f"
+while IFS= read -r f; do
+  echo "  - db/schema/$(basename "$f")"
   "${PSQL[@]}" -d fleet -f "$f"
-done
+done < <(find "${ROOT_DIR}/db/schema" -maxdepth 1 -name '*.sql' -type f | LC_ALL=C sort)
 
 echo "==> Applying seed"
-"${PSQL[@]}" -d fleet -f db/seed/01_seed.sql
+for f in $(find "${ROOT_DIR}/db/seed" -maxdepth 1 -name '*.sql' -type f | LC_ALL=C sort); do
+  echo "  - db/seed/$(basename "$f")"
+  "${PSQL[@]}" -d fleet -f "$f"
+done
 
 echo "==> Post-apply smoke checks"
 "${PSQL[@]}" -d fleet -v ON_ERROR_STOP=1 <<'SQL'
@@ -72,6 +73,11 @@ SELECT (SELECT count(*) FROM app.roles)            AS roles,
        (SELECT count(*) FROM app.hos_policies)     AS hos_policies;
 SELECT count(*) FROM app.v_vehicle_display_state;
 SELECT count(*) AS chain_rows FROM app.fn_verify_accident_chain('00000000-0000-0000-0000-000000000000');
+SELECT count(*) AS tenants FROM app.tenants;
+SELECT count(*) AS rls_protected_tables
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname IN ('app','telemetry') AND c.relrowsecurity AND c.relforcerowsecurity;
+SELECT count(*) AS reset_codes FROM app.password_reset_codes;
 SQL
 
 echo "==> Schema validation PASSED (POSTGIS=${POSTGIS_MODE})"

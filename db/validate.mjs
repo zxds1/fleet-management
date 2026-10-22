@@ -26,10 +26,15 @@ const PGURI = process.env.PGURI ?? "postgresql://postgres:pg_local_dev@localhost
 const POSTGIS_MODE = process.env.POSTGIS ?? "real";
 
 /**
- * Every .sql in db/schema, in name order (00_ .. 16_). Discovered rather than
- * hardcoded: a fixed list silently stopped at 11_views.sql, so 12_..16_ — error
- * events, onboarding, tenancy, vehicle issues, privacy requests, dead-letter —
- * were never applied and the API failed at runtime on tables that "should" exist.
+ * Every .sql in db/schema, in name order: 00_ .. 22_, then 90_tenancy_rls,
+ * 91_tenant_scope and 92_tenant_policies. The last three are the tenancy
+ * migration and MUST stay in that order: the sweep adds the parent tables'
+ * tenant_id, the scope migration derives the missing ones from it, and the
+ * policy migration applies row-level security to every table that has one.
+ * Discovered rather than hardcoded: a fixed list silently stopped at
+ * 11_views.sql, so 12_..16_ — error events, onboarding, tenancy, vehicle issues,
+ * privacy requests, dead-letter — were never applied and the API failed at
+ * runtime on tables that "should" exist.
  */
 const SCHEMA_FILES = readdirSync(path.join(ROOT, "db", "schema"))
   .filter((f) => f.endsWith(".sql"))

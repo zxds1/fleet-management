@@ -18,7 +18,7 @@ import {
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
@@ -99,7 +99,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
           limit: query.limit,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({
@@ -412,7 +412,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.fuelQuery.pendingReview({ limit: query.limit, tenantId: principal.tenantId });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -464,7 +464,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.tenancy.listUsers({ tenantId: principal.tenantId, roleCode: query.role_code, status: query.status, limit: 100 });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json(result.value);
@@ -483,7 +483,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         const svc = makeServices(client, infra);
         const result = await svc.tenancy.listPendingInvitations(principal.tenantId);
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({ data: result.value });
@@ -584,7 +584,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
           callerRoles: principal.roles,
         });
         if (!result.ok) {
-          res.status(422).json({ error_code: result.error.error_code, status: 422, title: result.error.title });
+          problemResponse(res, result.error, req.requestId);
           return;
         }
         res.status(200).json({ managers: result.value });

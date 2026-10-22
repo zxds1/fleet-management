@@ -1,5 +1,5 @@
 -- =============================================================================
--- 13_error_events.sql
+-- 16_error_events.sql
 -- Fleet Management Platform - Error <-> flow correlation store (audit #6)
 --
 -- Every >=400 RFC7807 response that carries an error_code is mirrored here so a

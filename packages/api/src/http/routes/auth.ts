@@ -6,11 +6,11 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { err, isErr, ok, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
+import { err, isErr, ok, RateLimited, type IdempotencyService, type PermissionCode, type PoolLike, type Principal } from "@fleet/shared";
 import { authenticate } from "../../middleware/authenticate";
 import { idempotency } from "../../middleware/idempotency";
 import { requirePermission } from "../../middleware/requirePermission";
-import { asyncHandler } from "../problem";
+import { asyncHandler, problemResponse } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody } from "../validate";
 import { LoginSchema, MfaEnrollSchema, SetPinSchema, SignupSchema, AcceptInviteSchema, ConsentSchema } from "@fleet/shared";
@@ -107,7 +107,12 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       const rate = checkLoginRate(clientIp);
       if (!rate.allowed) {
         res.setHeader("Retry-After", String(Math.ceil(rate.retryAfterMs / 1000)));
-        return res.status(429).json({ status: 429, code: "RATE_LIMITED", message: `Too many login attempts. Try again in ${Math.ceil(rate.retryAfterMs / 60000)} minutes.` });
+        problemResponse(
+          res,
+          new RateLimited(`Too many login attempts. Try again in ${Math.ceil(rate.retryAfterMs / 60000)} minutes.`),
+          req.requestId,
+        );
+        return;
       }
       return writer(req, res, async (tx, ctx) => {
         const input = parseBody(LoginSchema, req);
@@ -299,9 +304,11 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     asyncHandler((req, res) =>
       writer(req, res, async (tx, ctx) => {
         const principal = ctx.principal as Principal;
-        parseBody(MfaEnrollSchema, req);
+        // The body carries the account password: enrolment arms a second factor, so it must
+        // re-prove the first one. The service verifies it against the stored hash and fails 401.
+        const input = parseBody(MfaEnrollSchema, req);
         const svc = makeServices(tx.client, infra);
-        const result = await svc.mfa.enroll(principal.userId);
+        const result = await svc.mfa.enroll(principal.userId, input.password);
         if (isErr(result)) return err(result.error);
         tx.audit({
           action: "CONFIG_CHANGE",
@@ -393,7 +400,7 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         const principal = ctx.principal as Principal;
         const input = parseBody(DeviceRevokeSchema, req);
         const svc = makeServices(tx.client, infra);
-        const result = await svc.device.revoke(input.device_id_hash, input.device_id_hash, principal.userId);
+        const result = await svc.device.revoke(principal.userId, input.device_id_hash, principal.userId);
         if (isErr(result)) return err(result.error);
         tx.audit({
           action: "DEVICE_REVOKE",

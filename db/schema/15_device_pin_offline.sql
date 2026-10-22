@@ -1,5 +1,5 @@
 -- =============================================================================
--- 13_device_pin_offline.sql
+-- 15_device_pin_offline.sql
 -- Fleet Management Platform - Driver device PIN + offline-lock + device-bound
 --                             refresh token (02-auth.md §4, B12, M4)
 --

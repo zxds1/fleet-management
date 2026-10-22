@@ -24,6 +24,11 @@ export interface RFC7807Problem {
   instance?: string;
   error_code: string;
   field_errors?: FieldError[];
+  /**
+   * Seconds the caller should wait before retrying. Mirrors the `Retry-After` response header, so a
+   * client that only reads the problem body still gets the backoff hint.
+   */
+  retry_after_seconds?: number;
 }
 
 export abstract class AppError extends Error {

@@ -97,7 +97,7 @@ export class VehicleIssueService {
   /** Cursor page of the issues raised against one vehicle, newest first. */
   async getForVehicle(
     vehicleId: string,
-    opts: { limit: number; cursor?: string | null },
+    opts: { limit: number; cursor?: string | null; tenantId?: string | null },
   ): Promise<Result<CursorPage<VehicleIssueListRow>>> {
     const exists = await this.issues.vehicleExists(vehicleId);
     if (!exists) return err(new NotFound("Vehicle not found"));
@@ -107,6 +107,7 @@ export class VehicleIssueService {
     const rows = await this.issues.listByVehicle(vehicleId, {
       limit: limit + 1,
       ...(cursor ? { cursorSort: cursor.sort, cursorId: cursor.id } : {}),
+      ...(opts.tenantId ? { tenantId: opts.tenantId } : {}),
     });
     // The cursor MUST key on the same column the repository orders by (`i.created_at`), otherwise
     // the next page comparison is evaluated against an unrelated timestamp.

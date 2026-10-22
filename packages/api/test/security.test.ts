@@ -68,7 +68,13 @@ describe("rate limiting + IP blocking", () => {
       for (let i = 0; i < 8; i++) {
         const body = JSON.stringify({ lat: 1 });
         const ts = String(Date.now());
-        const sig = "sha256=" + createHmac("sha256", secret).update(Buffer.from(body)).digest("hex");
+        // The signed material is timestamp + "." + body, so a captured triple
+        // cannot be replayed with a fresh timestamp.
+        const sig =
+          "sha256=" +
+          createHmac("sha256", secret)
+            .update(Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), Buffer.from(body)]))
+            .digest("hex");
         const res = await fetch(`http://127.0.0.1:${port}/api/v1/telemetry/webhook`, {
           method: "POST",
           headers: { ...JSON_HEADERS, "x-signature": sig, "x-timestamp": ts },
@@ -123,8 +129,13 @@ describe("telemetry webhook HMAC (S-1)", () => {
     const container = makeClient({ env: withEnv({ SECURITY_ENFORCE: "always", WEBHOOK_SECRET: secret }) });
     const { port, close } = await listen(createApp(container));
     try {
-      const sig = "sha256=" + createHmac("sha256", secret).update(Buffer.from(body)).digest("hex");
-      const res = await post(port, { "x-signature": sig, "x-timestamp": Date.now().toString() });
+      const ts = Date.now().toString();
+      const sig =
+        "sha256=" +
+        createHmac("sha256", secret)
+          .update(Buffer.concat([Buffer.from(ts, "utf8"), Buffer.from(".", "utf8"), Buffer.from(body)]))
+          .digest("hex");
+      const res = await post(port, { "x-signature": sig, "x-timestamp": ts });
       expect(res.status).not.toBe(401);
     } finally {
       await close();

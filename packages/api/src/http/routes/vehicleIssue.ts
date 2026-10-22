@@ -17,8 +17,10 @@ import { asyncHandler } from "../problem";
 import { executeWrite } from "../write";
 import { parseBody, parseQuery } from "../validate";
 import { CursorQuerySchema } from "../pagination";
-import { withClient } from "../../db/withClient";
+import { withTenantClient, tenantContextOf } from "../../db/withClient";
 import type { Infra } from "../../app/compose";
+
+const asPrincipal = (req: Request) => (req as { principal?: Principal }).principal as Principal;
 import { makeServices } from "../../app/compose";
 
 const asPerm = (code: string): PermissionCode => code as PermissionCode;
@@ -79,13 +81,15 @@ export function createVehicleIssueRouter(deps: VehicleIssueRouterDeps): Router {
     "/vehicles/:vehicleId/issues",
     authenticate({ tokens: infra.tokens, sessions: infra.store, strictSessionCheck: infra?.env?.SECURITY_ENFORCE === "always" }),
     requirePermission(asPerm("asset:read"), asPerm("maintenance:read")),
-    asyncHandler((req, res) =>
-      withClient(pool, async (client) => {
+    asyncHandler((req, res) => {
+      const principal = asPrincipal(req);
+      return withTenantClient(pool, tenantContextOf(principal), async (client) => {
         const query = parseQuery(CursorQuerySchema, req);
         const svc = makeServices(client, infra);
         const result = await svc.vehicleIssue.getForVehicle(req.params.vehicleId!, {
           limit: query.limit,
           cursor: query.cursor ?? null,
+          tenantId: principal.tenantId,
         });
         if (!result.ok) {
           const problem = result.error.toProblem();
@@ -96,8 +100,8 @@ export function createVehicleIssueRouter(deps: VehicleIssueRouterDeps): Router {
           return;
         }
         res.status(200).json(result.value);
-      }),
-    ),
+      });
+    }),
   );
 
   return router;
