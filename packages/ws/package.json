@@ -4,7 +4,9 @@
   "description": "Socket.IO gateway for admin real-time channels (07-websocket-gateway.md).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "build": "tsc -b",
@@ -24,11 +26,11 @@
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
+    "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.0.0",
-    "jest": "^29.0.0",
-    "ts-jest": "^29.1.0",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
     "typescript": "^5.4.0"
   }
 }

@@ -176,10 +176,10 @@ jobs:
         run: npm run build
 
       - name: Run chaos / fault-injection tests (network-throttle + DB-latency + Redis-failure + external-5xx + 50-tracker load)
-        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern chaos
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPatterns chaos
 
       - name: Run resilience regression tests
-        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern "resilience"
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPatterns "resilience"
 
   signoff-gates:
     name: sign-off gates (release blockers)

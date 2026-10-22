@@ -4,7 +4,9 @@
   "description": "Data access layer: pool, transaction runner, repositories, migrations, idempotency, outbox relay, config client.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "build": "tsc -b",
@@ -19,11 +21,11 @@
     "pg": "^8.11.0"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.11.0",
-    "jest": "^29.0.0",
-    "ts-jest": "^29.1.0",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
     "typescript": "^5.4.0"
   }
 }

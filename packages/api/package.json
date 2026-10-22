@@ -4,7 +4,9 @@
   "description": "Express HTTP service: REST + media presign + telemetry webhook accept (00-overview.md §3).",
   "main": "dist/server.js",
   "types": "dist/server.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "build": "tsc -b",
@@ -12,9 +14,9 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "tsc -b --noEmit",
     "test": "jest --passWithNoTests",
-      "contract": "jest --passWithNoTests --testPathPattern contract",
-      "dev:api": "npm run build && node dist/server.js",
-      "start": "node dist/server.js"
+    "contract": "jest --passWithNoTests --testPathPatterns contract",
+    "dev:api": "npm run build && node dist/server.js",
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
@@ -31,15 +33,15 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
-    "@types/jest": "^29.5.0",
+    "@types/jest": "^30.0.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.0.0",
     "@types/supertest": "^6.0.2",
+    "jest": "^30.5.2",
     "js-yaml": "^4.1.0",
-    "@types/js-yaml": "^4.0.9",
-    "jest": "^29.0.0",
     "supertest": "^7.0.0",
-    "ts-jest": "^29.1.0",
+    "ts-jest": "^29.4.15",
     "typescript": "^5.4.0"
   }
 }

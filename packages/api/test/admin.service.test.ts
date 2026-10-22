@@ -14,6 +14,8 @@ import type { UserRow, DriverDeviceRow } from "@fleet/shared";
 function user(id: string, email: string, isActive = true): UserRow {
   return {
     id, email, password_hash: "x", full_name: email.split("@")[0] ?? email, phone: null,
+    // Profile-change columns (02_identity.sql): a user with no pending change is APPROVED.
+    pending_email: null, pending_phone: null, profile_change_status: "APPROVED",
     is_active: isActive, mfa_enabled: true, mfa_secret_encrypted: null, mfa_enrolled_at: null,
     dnd_start_local: null, dnd_end_local: null, locale: "en", failed_login_count: 0,
     locked_until: null, last_login_at: null, password_changed_at: new Date().toISOString(),

@@ -126,7 +126,8 @@ jobs:
         with:
           directory: 'deploy'
           framework: 'kubernetes'
-          output_file: 'checkov-results.json'
+          output: 'json'
+          output_file_path: '.'
           soft_fail: false
 
       - name: Upload Checkov results
@@ -134,7 +135,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: checkov-results
-          path: 'checkov-results.json'
+          path: 'results_json.json'
 
   license-check:
     name: Dependency license check

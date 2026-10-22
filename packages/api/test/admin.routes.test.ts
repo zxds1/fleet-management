@@ -8,12 +8,16 @@ import { platformOf, toDriverSummary } from "../src/http/routes/admin";
 import type { UserRow, DriverDeviceRow } from "@fleet/shared";
 
 function user(overrides: Partial<UserRow> = {}): UserRow {
-  return {
+  const base: UserRow = {
     id: "u1",
     email: "amy@fleet.co.ke",
     password_hash: "x",
     full_name: "Amy",
     phone: null,
+    // Profile-change columns (02_identity.sql): a user with no pending change is APPROVED.
+    pending_email: null,
+    pending_phone: null,
+    profile_change_status: "APPROVED",
     is_active: true,
     mfa_enabled: true,
     mfa_secret_encrypted: null,
@@ -28,8 +32,10 @@ function user(overrides: Partial<UserRow> = {}): UserRow {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     deleted_at: null,
-    ...overrides,
   };
+  // Object.assign (not object spread): spreading Partial<UserRow> would widen the base
+  // fields with `| undefined`, which is not assignable to UserRow.
+  return Object.assign(base, overrides);
 }
 
 function device(id: string, provider = "fcm", lastSeen: string | null = null): DriverDeviceRow {

@@ -16,6 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
+# Every workspace's package.json must exist BEFORE `npm ci`: with the workspaces
+# glob only matching existing packages, a missing packages/*/package.json makes
+# npm install just the root's own deps and `npm run build` then fails with
+# TS2307 on every external (zod, @sentry/node, ...).
+COPY packages/api/package.json     ./packages/api/package.json
+COPY packages/shared/package.json  ./packages/shared/package.json
+COPY packages/db/package.json      ./packages/db/package.json
+COPY packages/worker/package.json  ./packages/worker/package.json
+COPY packages/ws/package.json      ./packages/ws/package.json
 RUN npm ci
 COPY . .
 
@@ -27,8 +36,7 @@ EXPOSE 4000 8082
 CMD ["npm", "run", "dev:api"]
 
 # Production dependency tree: workspace packages only, no devDependencies, and
-# without the root package's own dependencies (expo & co. are a client leftover
-# and are not needed by the backend).
+# without the root package's own dependencies (build tooling only at the root).
 FROM node:20-bookworm-slim AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
