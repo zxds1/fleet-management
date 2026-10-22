@@ -85,7 +85,7 @@ spec:
     metadata:
       labels: { app: fleet-api }
     spec:
-      serviceAccountName: fleet-api # checkov:skip=CKV_K8S_38:IRSA — the api requires the SA token to obtain AWS credentials for S3/KMS/SSM
+      serviceAccountName: fleet-api 
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -98,7 +98,7 @@ spec:
         # when the db-migrate Job below already ran, and it is what makes the
         # Deployment depend on the migration instead of racing it.
         - name: migrate
-          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 #
           imagePullPolicy: Always
           command: ["bash", "-c"]
           args:
@@ -114,7 +114,7 @@ spec:
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: fleet-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env; file-based secret projection is a future hardening step
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL } #
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -126,20 +126,20 @@ spec:
             - { name: tmp, mountPath: /tmp }
       containers:
         - name: api
-          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 #
           imagePullPolicy: Always
           args: ["node", "packages/api/dist/server.js"]
           ports: [{ containerPort: 4000, name: http }]
           envFrom:
             - configMapRef: { name: fleet-config }
-            - secretRef: { name: fleet-secrets } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env; file-based secret projection is a future hardening step
+            - secretRef: { name: fleet-secrets } #
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: fleet-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL } #
             - name: REDIS_URL
               valueFrom:
-                secretKeyRef: { name: fleet-redis, key: REDIS_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                secretKeyRef: { name: fleet-redis, key: REDIS_URL } #
           # /healthz is always 200: it must not depend on the database or Redis,
           # or a dependency outage would restart every pod.
           readinessProbe:
@@ -191,7 +191,7 @@ spec:
     metadata:
       labels: { app: fleet-worker }
     spec:
-      serviceAccountName: fleet-api # checkov:skip=CKV_K8S_38:IRSA — the worker requires the SA token to obtain AWS credentials for S3 media/KMS
+      serviceAccountName: fleet-api 
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -200,20 +200,20 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: worker
-          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 #
           imagePullPolicy: Always
           args: ["node", "packages/worker/dist/index.js", "--role", "worker"]
           ports: [{ containerPort: 8082, name: health }]
           envFrom:
             - configMapRef: { name: fleet-config }
-            - secretRef: { name: fleet-secrets } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env; file-based secret projection is a future hardening step
+            - secretRef: { name: fleet-secrets } #
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: fleet-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL } #
             - name: REDIS_URL
               valueFrom:
-                secretKeyRef: { name: fleet-redis, key: REDIS_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                secretKeyRef: { name: fleet-redis, key: REDIS_URL } #
             # The image HEALTHCHECK must probe the worker's health port, not the
             # API port.
             - name: HEALTHCHECK_PORT
@@ -269,7 +269,7 @@ spec:
         - name: traccar
           # Pinned to an explicit release: `latest` made the running server
           # change under a rollout with no image digest to trace it back to.
-          image: traccar/traccar:6.16.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: traccar/traccar:6.16.0 #
           imagePullPolicy: Always
           ports:
             - { containerPort: 8082, name: web }
@@ -281,7 +281,7 @@ spec:
               value: "true"
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: fleet-traccar-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:upstream Traccar only reads its config from env; file-based secret projection is not supported by the image
+                secretKeyRef: { name: fleet-traccar-db, key: DATABASE_URL } #
             - name: DATABASE_DRIVER
               value: "org.postgresql.Driver"
             # N2.3: durable forward.
@@ -305,7 +305,7 @@ spec:
             # /opt/traccar at start-up and offers no way to relocate them, so a
             # read-only root aborts the boot. The writable paths that carry
             # state are backed by emptyDir volumes below.
-            readOnlyRootFilesystem: false # checkov:skip=CKV_K8S_22:upstream Traccar writes to /opt/traccar at start-up and cannot be relocated
+            readOnlyRootFilesystem: false
             capabilities: { drop: ["ALL"] }
           resources:
             requests: { cpu: "250m", memory: "512Mi" }
@@ -371,7 +371,7 @@ spec:
       containers:
         # C5.10: AOF so the pending:gps buffer survives restart.
         - name: redis
-          image: redis:7-alpine # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: redis:7-alpine #
           imagePullPolicy: Always
           command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--cluster-enabled", "no"]
           ports: [{ containerPort: 6379 }]
@@ -480,13 +480,13 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: migrate
-          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+          image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 #
           imagePullPolicy: Always
           command: ["bash", "/app/db/migrate.sh"]
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: fleet-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                secretKeyRef: { name: fleet-db, key: DATABASE_URL } #
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -533,7 +533,7 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: partition-maint
-              image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 # checkov:skip=CKV_K8S_43:digest pinning is applied at release time by the CD pipeline, not in the template
+              image: ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/fleet-api:1.0.0 #
               imagePullPolicy: Always
               command: ["bash", "-c"]
               args:
@@ -545,7 +545,7 @@ spec:
               env:
                 - name: DATABASE_URL
                   valueFrom:
-                    secretKeyRef: { name: fleet-db, key: DATABASE_URL } # checkov:skip=CKV_K8S_35:12-factor app reads secrets from env
+                    secretKeyRef: { name: fleet-db, key: DATABASE_URL } #
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

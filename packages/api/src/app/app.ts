@@ -41,7 +41,6 @@ import { securityHeaders } from "../security/headers";
 import { corsMiddleware } from "../security/cors";
 import { createRateLimiter } from "../security/rateLimit";
 import { createIpBlocker } from "../security/ipBlock";
-import { webhookAuth } from "../security/webhookAuth";
 
 export function createApp(container: Container): Express {
   const app = express();
@@ -300,15 +299,12 @@ export function createApp(container: Container): Express {
   // Public Traccar webhook accept (A1.1) — no auth/idempotency; front of the ingest pipeline.
   // Hardened: rate-limited + HMAC-verified when WEBHOOK_SECRET is set (security.md S-1).
   app.use(`${base}/telemetry`, rateLimiter.middleware({ scope: "telemetry", max: container.env.RATE_LIMIT_TELEMETRY_PER_MINUTE }));
-  // Scoped to the webhook PATH, not the `/telemetry` prefix. Mounted on the prefix it also guarded
-  // POST /telemetry/points (the phone-GPS ingest, U-01), which the app authenticates with a bearer
-  // token and can never sign an HMAC with — so phone tracking was rejected with 401 whenever
-  // WEBHOOK_SECRET was set, and fail-closed 401 for everyone in production.
-  app.post(`${base}/telemetry/webhook`, webhookAuth(container.env.WEBHOOK_SECRET, secure));
   app.use(`${base}/telemetry`, createTelemetryRouter({
     pool: container.pool,
     redis: container.redis.client,
-    // The phone ingest (POST /telemetry/points) authenticates; the Traccar webhook above stays public.
+    env: container.env,
+    // The phone ingest (POST /telemetry/points) authenticates; the Traccar webhook shares the
+    // prefix but is HMAC-verified inside the router (security.md S-1).
     infra: container.infra,
   }));
 

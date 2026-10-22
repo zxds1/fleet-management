@@ -44,7 +44,7 @@ export function webhookAuth(secret?: string, enforce = false): RequestHandler {
     if (!raw || !sig || !ts) {
       return next(new Unauthenticated("Missing webhook authentication"));
     }
-    const age = Date.now() - Number(ts);
+    const age = Date.now() - Number(ts) * 1000;
     if (!Number.isFinite(age) || Math.abs(age) > MAX_SKEW_MS) {
       return next(new Unauthenticated("Webhook timestamp expired"));
     }

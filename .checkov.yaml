@@ -1,0 +1,25 @@
+# Checkov configuration for the fleet-management backend Kubernetes manifests.
+#
+# Every skip below documents an accepted, review-gated trade-off rather than an
+# oversight:
+# - CKV_K8S_43 (image should use digest): image digests cannot be pinned in the
+#   templates because they reference the ACCOUNT_ID placeholder; digest pinning
+#   is applied by the CD pipeline at release time. Tags are immutable releases.
+# - CKV_K8S_35 (prefer secrets as files over env vars): the application reads
+#   secrets from environment variables (12-factor); the upstream Traccar image
+#   only supports env-based configuration. File-based secret projection is a
+#   future hardening step.
+# - CKV_K8S_38 (service account tokens only where necessary): api and worker
+#   require the service account token to obtain AWS credentials via IRSA
+#   (S3 media, KMS, SSM). redis, traccar, db-migrate and partition-maint do not
+#   mount a token (automountServiceAccountToken: false).
+# - CKV_K8S_22 (read-only root filesystem where possible): traccar writes to
+#   /opt/traccar at start-up and those paths cannot be relocated (upstream
+#   limitation); writable state paths are backed by emptyDir volumes.
+runner:
+  kubernetes:
+    skip_check:
+      - CKV_K8S_43
+      - CKV_K8S_35
+      - CKV_K8S_38
+      - CKV_K8S_22

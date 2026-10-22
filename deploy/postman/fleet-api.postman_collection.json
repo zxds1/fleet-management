@@ -364,18 +364,22 @@
           "listen": "prerequest",
           "script": {
             "exec": [
-              "var secret = 'ci-test-webhook-secret-do-not-use-in-prod';",
-              "var body = request.body.raw;",
-              "var hmac = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
-              "var timestamp = Math.floor(Date.now() / 1000);",
-              "pm.request.headers.add({",
-              "  key: 'x-signature',",
-              "  value: 'sha256=' + hmac",
-              "});",
-              "pm.request.headers.add({",
-              "  key: 'x-timestamp',",
-              "  value: timestamp.toString()",
-              "});"
+            "var secret = 'ci-test-webhook-secret-do-not-use-in-prod';",
+            "// Build the body here so the signed material matches the bytes the server receives. The",
+            "// server signs `x-timestamp + \".\" + rawBody` (security.md S-1): sign the same string.",
+            "var payload = JSON.stringify({deviceId: \"dev-123\", lat: 40.7128, lon: -74.006, timestamp: \"2026-10-17T03:00:00Z\"});",
+            "pm.request.body = {mode: 'raw', raw: payload};",
+            "var timestamp = Math.floor(Date.now() / 1000);",
+            "var signedMaterial = timestamp + '.' + payload;",
+            "var hmac = CryptoJS.HmacSHA256(signedMaterial, secret).toString(CryptoJS.enc.Hex);",
+            "pm.request.headers.add({",
+            "  key: 'x-signature',",
+            "  value: 'sha256=' + hmac",
+            "});",
+            "pm.request.headers.add({",
+            "  key: 'x-timestamp',",
+            "  value: timestamp.toString()",
+            "});"
             ],
             "type": "text/javascript"
           }

@@ -10,13 +10,17 @@ import type { Redis as RedisClient } from "ioredis";
 import { Forbidden, PHONE_POINTS, PhonePointsSchema, ServiceUnavailable, TRACCAR_POSITIONS_STREAM, TraccarWebhookSchema, ValidationError, normalizePhonePoint, normalizeTraccarWebhook, ok } from "@fleet/shared";
 import { asyncHandler } from "../problem";
 import { parseBody } from "../validate";
+import { safeJson } from "../../security/bodyParser";
 import { authenticate } from "../../middleware/authenticate";
+import { webhookAuth } from "../../security/webhookAuth";
+import type { Env } from "../../config/env";
 import type { PoolLike, Principal } from "@fleet/shared";
 import type { Infra } from "../../app/compose";
 
 export interface TelemetryRouterDeps {
   pool: PoolLike;
   redis: RedisClient | null;
+  env: Env;
   /** Needed only by the authenticated phone ingest (`POST /points`); the webhook stays public. */
   infra: Infra;
 }
@@ -26,6 +30,8 @@ export function createTelemetryRouter(deps: TelemetryRouterDeps): Router {
 
   router.post(
     "/webhook",
+    safeJson(),
+    webhookAuth(deps.env.WEBHOOK_SECRET, deps.env.SECURITY_ENFORCE === "always"),
     asyncHandler(async (req, res) => {
       const parsed = TraccarWebhookSchema.safeParse(req.body);
       if (!parsed.success) {
