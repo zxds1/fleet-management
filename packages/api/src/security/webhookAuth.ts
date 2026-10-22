@@ -44,7 +44,12 @@ export function webhookAuth(secret?: string, enforce = false): RequestHandler {
     if (!raw || !sig || !ts) {
       return next(new Unauthenticated("Missing webhook authentication"));
     }
-    const age = Date.now() - Number(ts) * 1000;
+    // The timestamp is in seconds when issued by clients that use `Date.now() / 1000`
+    // (e.g. the deploy-gate Postman collection) and in milliseconds when issued by
+    // `Date.now()` (in-repo tests). Accept both.
+    const tsMs = Number(ts);
+    const epochMs = tsMs > 1e12 ? tsMs : tsMs * 1000;
+    const age = Date.now() - epochMs;
     if (!Number.isFinite(age) || Math.abs(age) > MAX_SKEW_MS) {
       return next(new Unauthenticated("Webhook timestamp expired"));
     }
