@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [staging, main]
+    paths:
+      - 'packages/api/**'
+      - 'packages/shared/**'
+      - 'packages/worker/**'
+      - 'packages/ws/**'
+      - 'db/**'
+      - 'deploy/**'
+      - 'api/openapi.yaml'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [staging, main]
+    paths:
+      - 'packages/api/**'
+      - 'packages/shared/**'
+      - 'packages/worker/**'
+      - 'packages/ws/**'
+      - 'db/**'
+      - 'deploy/**'
+      - 'api/openapi.yaml'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build / lint / typecheck / contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc -b across workspace)
+        run: npm run build
+
+      - name: Lint (tsc --noEmit per package)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Contract (openapi↔schema + db.ts↔schema)
+        run: npm run contract
+
+      - name: Unit + contract tests
+        run: npm run test
+
+  integration:
+    name: integration (throwaway PG + Redis)
+    needs: build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pg_local_dev
+          POSTGRES_DB: fleet
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+      REDIS_URL: redis://localhost:6379
+      PG_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply schema to the throwaway cluster (PostGIS shim)
+        run: npm run db:validate
+        env:
+          # The plain postgres:16 service image has no PostGIS, so the shim
+          # rewrites geography(Point,4326) → geography for validation. Without
+          # this the apply fails at 00_extensions.sql and the integration tests
+          # then fail with relation "app.users" does not exist.
+          POSTGIS: shim
+          PGURI: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+
+      # Non-blocking on purpose: this cluster uses the PostGIS shim, which rewrites
+      # geography(Point,4326) → geography. That legitimately changes information_schema
+      # typing, so the generated db.ts would not match the committed one. It is a
+      # real-schema drift gate, meant to run where PostGIS is actually installed.
+      - name: Contract — db.ts ↔ live schema
+        run: npm run db:types:check
+        continue-on-error: true
+        env:
+          POSTGIS: shim
+
+      - name: Build
+        run: npm run build
+
+      - name: Integration tests (throwaway PG)
+        run: npm run test
+
+  chaos:
+    name: chaos / fault-injection
+    needs: build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pg_local_dev
+          POSTGRES_DB: fleet
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:pg_local_dev@localhost:5444/fleet
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run chaos / fault-injection tests (network-throttle + DB-latency + Redis-failure + external-5xx + 50-tracker load)
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern chaos
+
+      - name: Run resilience regression tests
+        run: npx jest --config packages/worker/jest.config.cjs --testPathPattern "resilience"
+
+  signoff-gates:
+    name: sign-off gates (release blockers)
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reminder — human/legal gates required before merge to staging
+        run: |
+          echo "Hard launch gates (02-open-risk-register.md §C):"
+          echo "  R-101 DPIA approved (Kenya DPA 2019 cross-border transfer)"
+          echo "  R-103 HOS figures + emergency numbers confirmed by transport counsel"
+          echo "  R-104 DVIR severity matrix reviewed/signed by fleet safety officer"
+          echo "Quality gates: R-105 Swahili strings native-speaker reviewed, R-102 Traccar version pinned."
+          echo "These are recorded as required status checks / release blockers; CI enforces code quality only."
