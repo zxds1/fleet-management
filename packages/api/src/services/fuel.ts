@@ -91,9 +91,9 @@ export class FuelService {
       `INSERT INTO app.fuel_purchases (
          shift_id, vehicle_id, driver_id, entry_source,
          fuel_card_last_four, litres, total_cost, odometer_km, purchased_at,
-         receipt_media_object_id, odometer_photo_media_object_id,
+         receipt_media_object_id, pump_photo_media_object_id, odometer_photo_media_object_id,
          amount_spent, liters_pumped, ocr_status
-       ) VALUES ($1,$2,$3,'DRIVER_PHOTO',$4,0,0,$5,$6,$7,$8,NULL,NULL,'PENDING')
+       ) VALUES ($1,$2,$3,'DRIVER_PHOTO',$4,0,0,$5,$6,$7,$8,$9,NULL,NULL,'PENDING')
        RETURNING id`,
       [
         input.shift_id,
@@ -103,7 +103,10 @@ export class FuelService {
         input.odometer_reading,
         input.purchased_at,
         input.receipt_media_object_id,
-        input.odometer_photo_media_object_id,
+        // A1.4 v2: the pump photograph is the required capture; the odometer
+        // gauge photo is the legacy optional one.
+        input.pump_photo_media_object_id,
+        input.odometer_photo_media_object_id ?? null,
       ],
     );
     const id = res.rows[0]!.id;

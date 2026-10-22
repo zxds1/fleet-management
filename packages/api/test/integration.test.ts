@@ -336,7 +336,8 @@ integrationDescribe("backend integration (:5444)", () => {
     // Two refuels for the same vehicle; the second reports a lower odometer than the first.
     const postRefuel = async (odometerKm: number) => {
       const receiptId = await mkMedia(`intg-receipt-${crypto.randomUUID()}`);
-      const odometerPhotoId = await mkMedia(`intg-odometer-${crypto.randomUUID()}`);
+      // A1.4 v2: the pump photograph is the required capture.
+      const pumpPhotoId = await mkMedia(`intg-pump-${crypto.randomUUID()}`);
       const res = await fetch(`${base}/api/v1/driver/fuel/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID(), Authorization: `Bearer ${driverToken}` },
@@ -345,7 +346,7 @@ integrationDescribe("backend integration (:5444)", () => {
           vehicle_id: vehicleId,
           odometer_reading: odometerKm,
           receipt_media_object_id: receiptId,
-          odometer_photo_media_object_id: odometerPhotoId,
+          pump_photo_media_object_id: pumpPhotoId,
           purchased_at: new Date().toISOString(),
         }),
       });
