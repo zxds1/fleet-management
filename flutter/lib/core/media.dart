@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
 import 'api_client.dart';
 import 'policy.dart';
 import 'ids.dart';
@@ -14,26 +16,39 @@ class MediaService {
 
   final ApiClient _api;
 
-  // owner_kind values used by the app's captures
-  static const ownerWorkLog = 'WORK_LOG_PHOTO';
-  static const ownerFuelReceipt = 'FUEL_RECEIPT';
-  static const ownerFuelOdometer = 'FUEL_DASHBOARD';
-  static const ownerAccident = 'ACCIDENT_MEDIA';
+  // owner_kind values — the frozen backend enum
+  // (packages/shared/src/schemas/media.ts). Anything else is a 400 at presign.
+  static const ownerWorkLog = 'WORK_LOG';
   static const ownerInspection = 'INSPECTION_ITEM';
-  static const ownerTrailer = 'TRAILER_SWAP';
-  static const ownerIssue = 'VEHICLE_ISSUE';
+  static const ownerFuelRecord = 'FUEL_RECORD';
   static const ownerFuelPurchase = 'FUEL_PURCHASE';
+  static const ownerAccident = 'ACCIDENT_REPORT';
+  static const ownerTrailer = 'TRAILER_ASSIGNMENT';
+  static const ownerIssue = 'MAINTENANCE_RECORD';
+  static const ownerStatement = 'STATEMENT_IMPORT';
 
-  // retention_class values
-  static const retentionReceipt = 'RECEIPT';
-  static const retentionInspection = 'INSPECTION';
-  static const retentionAccident = 'ACCIDENT';
+  // Both fuel photos belong to the purchase; only the retention class differs.
+  static const ownerFuelReceipt = ownerFuelPurchase;
+  static const ownerFuelOdometer = ownerFuelPurchase;
+
+  // retention_class values — the frozen backend enum.
   static const retentionWorkPlan = 'WORK_PLAN';
+  static const retentionInspection = 'INSPECTION';
+  static const retentionReceipt = 'FUEL_RECEIPT';
+  static const retentionDashboard = 'FUEL_DASHBOARD';
+  static const retentionAccident = 'ACCIDENT';
+  static const retentionTrailer = 'TRAILER_SWAP';
+  static const retentionMaintenance = 'MAINTENANCE';
   static const retentionStatement = 'STATEMENT_IMPORT';
 
   /// Compresses [bytes] to the device-side budget (1080px / 500KB, B-07) and
   /// returns the encoded JPEG, or null when it cannot fit.
-  static Future<Uint8List?> fitBudget(Uint8List bytes) async {
+  static Future<Uint8List?> fitBudget(Uint8List bytes) =>
+      compute(fitBudgetIsolate, bytes);
+
+  /// The decode/resize/encode ladder runs off the UI isolate: a 12MP capture
+  /// blocks the main isolate for hundreds of milliseconds otherwise.
+  static Uint8List? fitBudgetIsolate(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return null;
     var image = decoded;
@@ -65,12 +80,34 @@ class MediaService {
     final fitted = await fitBudget(bytes);
     if (fitted == null) return null; // UPLOAD_UNAVAILABLE — caller shows the state
     final dir = await stagingDir();
-    final file = File('${dir.path}/${newUuid()}.jpg');
+    final file = File(p.join(dir.path, '${newUuid()}.jpg'));
     await file.writeAsBytes(fitted);
     return StagedUpload(
       slot: slot,
       stagedPath: file.path,
       contentType: 'image/jpeg',
+      ownerKind: ownerKind,
+      retentionClass: retentionClass,
+    );
+  }
+
+  /// Stages a NON-image document (a CSV statement). The image budget is skipped:
+  /// a CSV never decodes as a picture, so the capture path would refuse it.
+  Future<StagedUpload> stageDocument(
+    Uint8List bytes, {
+    required String filename,
+    required String contentType,
+    String ownerKind = ownerStatement,
+    String retentionClass = retentionStatement,
+  }) async {
+    final dir = await stagingDir();
+    final safeName = filename.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final file = File(p.join(dir.path, '${newUuid()}_$safeName'));
+    await file.writeAsBytes(bytes);
+    return StagedUpload(
+      slot: 'media://document',
+      stagedPath: file.path,
+      contentType: contentType,
       ownerKind: ownerKind,
       retentionClass: retentionClass,
     );
@@ -91,8 +128,9 @@ class MediaService {
       idempotent: false, // the contract deliberately omits the header here
       parse: (b) => b as Map<String, dynamic>,
     );
-    final mediaObjectId = response['mediaObjectId'] as String; // camelCase route
-    final uploadUrl = response['uploadUrl'] as String;
+    // The presign response is snake_case, like every other endpoint.
+    final mediaObjectId = response['media_object_id'] as String;
+    final uploadUrl = response['upload_url'] as String;
     final bytes = await File(upload.stagedPath).readAsBytes();
     await _api.putBytes(uploadUrl, bytes, upload.contentType);
     return mediaObjectId;

@@ -135,7 +135,26 @@ class OfflineQueueStore {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_queue_status_id ON $table (status, id)');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS queue_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ''');
     return OfflineQueueStore(db);
+  }
+
+  Future<String?> meta(String key) async {
+    final rows = await _db.query('queue_meta', where: 'key = ?', whereArgs: [key]);
+    return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  Future<void> setMeta(String key, String value) async {
+    await _db.insert(
+      'queue_meta',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<int> insert(QueueItem item) async {
@@ -185,13 +204,34 @@ class OfflineQueueStore {
   }
 
   Future<List<QueueItem>> openItems() async {
-    final rows = await _db.query(table, where: "status IN ('PENDING','FAILED_REVIEW')", orderBy: 'id ASC');
+    // Only PENDING rows are re-POSTed: a FAILED_REVIEW row already met a
+    // permanent 4xx and waits for a person to edit or discard it.
+    final rows = await _db.query(table, where: "status = 'PENDING'", orderBy: 'id ASC');
     return rows.map(_fromRow).toList();
   }
 
   Future<List<QueueItem>> allRecent() async {
     final rows = await _db.query(table, orderBy: 'id DESC', limit: 200);
     return rows.map(_fromRow).toList();
+  }
+
+  /// How many rows are waiting and how many are parked. One grouped query, so
+  /// the status bar can poll it without reading the queue.
+  Future<({int pending, int failed})> statusCounts() async {
+    final rows = await _db.rawQuery(
+      "SELECT status, COUNT(*) as c FROM $table WHERE status IN ('PENDING','FAILED_REVIEW') GROUP BY status",
+    );
+    var pending = 0;
+    var failed = 0;
+    for (final row in rows) {
+      final count = (row['c'] as int?) ?? 0;
+      if (row['status'] == 'PENDING') {
+        pending = count;
+      } else if (row['status'] == 'FAILED_REVIEW') {
+        failed = count;
+      }
+    }
+    return (pending: pending, failed: failed);
   }
 
   Future<int> openCount() async {
@@ -240,12 +280,24 @@ class OfflineQueueStore {
   }
 }
 
-/// Staged photo staging dir: `Documents/helix/outbox`.
+/// Staged photo staging dir: `<app support>/helix/outbox`.
+///
+/// The application-support directory is excluded from the iOS user backup and
+/// is not user-visible on Android — the documents directory was neither.
 Future<Directory> stagingDir() async {
-  final docs = await getApplicationDocumentsDirectory();
-  final dir = Directory(p.join(docs.path, 'helix', 'outbox'));
+  final support = await getApplicationSupportDirectory();
+  final dir = Directory(p.join(support.path, 'helix', 'outbox'));
   if (!dir.existsSync()) dir.createSync(recursive: true);
   return dir;
+}
+
+/// Where the offline queue database lives. The composition root
+/// (app/container.dart) opens the database at this path.
+Future<String> queueDatabasePath() async {
+  final support = await getApplicationSupportDirectory();
+  final dir = Directory(p.join(support.path, 'helix'));
+  if (!dir.existsSync()) dir.createSync(recursive: true);
+  return p.join(dir.path, 'helix_queue.db');
 }
 
 Future<void> wipeStaging() async {

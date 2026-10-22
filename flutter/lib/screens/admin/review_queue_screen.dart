@@ -75,7 +75,7 @@ class _ShiftsList extends ConsumerWidget {
             query: {'verification_status': 'PENDING'},
           );
         } on HelixError catch (e) {
-          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
         }
       },
       itemBuilder: (context, row) => ListTile(
@@ -110,7 +110,7 @@ class _InspectionsList extends ConsumerWidget {
             query: {'state': 'SUBMITTED'},
           );
         } on HelixError catch (e) {
-          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
         }
       },
       itemBuilder: (context, row) {
@@ -140,7 +140,7 @@ class _FuelList extends ConsumerWidget {
         Align(
           alignment: Alignment.centerRight,
           child: TextButton.icon(
-            icon: Icon(Icons.upload_file, color: AppColors.adminAccent),
+            icon: Icon(Icons.upload_file_rounded, color: AppColors.adminAccent),
             label: HelixText(strings.t('importer.submit'), style: TypeScale.button(AppColors.adminAccent)),
             onPressed: () => context.push('/admin/import-statement'),
           ),
@@ -156,7 +156,7 @@ class _FuelList extends ConsumerWidget {
                   query: {'verified': 'false'},
                 );
               } on HelixError catch (e) {
-                throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+                throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
               }
             },
             itemBuilder: (context, row) {

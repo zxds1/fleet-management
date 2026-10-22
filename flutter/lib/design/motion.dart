@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 
+
 /// Spring physics tuned to Apple's damping-ratio / response model.
 ///
 /// - Damping ratio: 1.0 = critically damped (no overshoot); <1.0 bounces.
@@ -39,12 +40,14 @@ class AppSpring {
 /// When a gesture ends, continue the spring at the finger's exact velocity so
 /// there is no seam between dragging and animating.
 ///
-/// Normalize absolute px/s velocity by remaining distance when the API expects
-/// relative velocity: velocity / (target − current).
-double gestureVelocityToSpring(double gestureVelocity, double current, double target) {
-  final remaining = target - current;
-  if (remaining == 0) return 0;
-  return gestureVelocity / remaining;
+/// The animated value runs *opposite* to the pixel axis in both the sheet
+/// (offset = height × (1 − value)) and the swipe row (offset = −value ×
+/// width): dragging down opens nothing, it closes. So the handoff inverts the
+/// sign and divides by the number of pixels one unit of value spans, which is
+/// what puts the spring back on the path the finger was already travelling.
+double gestureVelocityToValue(double gestureVelocityPxPerSecond, double pixelsPerValueUnit) {
+  if (pixelsPerValueUnit == 0) return 0;
+  return -gestureVelocityPxPerSecond / pixelsPerValueUnit;
 }
 
 /// Momentum projection (Apple's exponential-decay form from Designing Fluid

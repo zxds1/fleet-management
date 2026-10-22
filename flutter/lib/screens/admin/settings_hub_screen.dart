@@ -62,14 +62,14 @@ class AdminSettingsHubScreen extends ConsumerWidget {
             for (final entry in entries)
               if (entry.$3)
                 ListTile(
-                  trailing: Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                  trailing: Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
                   title: HelixText(entry.$1, style: TypeScale.body(AppColors.text)),
                   onTap: () => context.push(entry.$2),
                 ),
             Divider(height: 32, color: AppColors.line),
             if (hasDriver)
               ListTile(
-                leading: Icon(Icons.swap_horiz, color: AppColors.accent),
+                leading: Icon(Icons.swap_horiz_rounded, color: AppColors.accent),
                 title: HelixText(
                   strings.t('settings.switchRole', {'role': strings.t('settings.roleDRIVER')}),
                   style: TypeScale.body(AppColors.text),

@@ -27,13 +27,11 @@ class SafetyScreen extends ConsumerWidget {
           const SizedBox(height: AppSpace.s5),
 
           // ── primary: incident report ──
-          SizedBox.expand(
-            child: StrandButton(
-              label: strings.t('nav.accidents'),
-              icon: const Icon(Icons.warning_amber_outlined, size: 20),
-              shell: Shell.driver,
-              onPressed: () => context.push('/driver/accidents'),
-            ),
+          StrandButton(
+            label: strings.t('nav.accidents'),
+            icon: const Icon(Icons.warning_amber_rounded, size: 20),
+            shell: Shell.driver,
+            onPressed: () => context.push('/driver/accidents'),
           ),
 
           // ── secondary: queues ──
@@ -46,14 +44,14 @@ class SafetyScreen extends ConsumerWidget {
                 const SizedBox(height: AppSpace.s3),
                 _SafetyRow(
                   label: strings.t('outbox.title'),
-                  icon: Icons.send,
+                  icon: Icons.send_rounded,
                   badge: outboxCount > 0 ? '${strings.t('outbox.title')} · $outboxCount' : null,
                   route: '/driver/outbox',
                 ),
                 Divider(height: 1, color: AppColors.line),
                 _SafetyRow(
                   label: strings.t('nav.inbox'),
-                  icon: Icons.inbox,
+                  icon: Icons.inbox_rounded,
                   badge: null,
                   route: '/driver/inbox',
                 ),
@@ -81,7 +79,7 @@ class _SafetyRow extends StatelessWidget {
       leading: Icon(icon, size: 20, color: AppColors.textSecondary),
       title: HelixText(label, style: TypeScale.body(AppColors.text)),
       trailing: badge == null
-          ? Icon(Icons.chevron_right, size: 20, color: AppColors.textSecondary)
+          ? Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.textSecondary)
           : PendingChip(label: badge!),
       onTap: () => context.push(route),
     );

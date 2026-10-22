@@ -3,120 +3,204 @@ import 'package:flutter/material.dart';
 /// Design tokens — "Field Instrument" (see flutter/.design/helix-flutter-app/DESIGN_TOKENS.md).
 /// Single source of truth: components reference these, never raw values.
 ///
-/// Dark mode: every color resolves through the `dark` flag, flipped by
-/// `AppColors.setDark(bool)`. The whole tree rebuilds on change because the
-/// app theme key changes. Component call sites stay `AppColors.x` — no
-/// per-site migration required. Compile-time `const` call sites that pass
-/// an AppColors color directly (e.g. `const Icon(..., color: AppColors.x)`)
-/// are the only breakage and must drop `const`.
+/// Palette: two immutable [HelixPalette] instances, one per brightness. The
+/// dark palette is *derived*, not inverted — every text pair in it was
+/// contrast-checked against its own surfaces (the light accent-text tone is
+/// unreadable on graphite, so the dark palette carries its own).
+///
+/// Resolution: [AppColors.x] resolves against the *active* palette, which the
+/// app sets with [AppColors.setDark] immediately before it builds the themed
+/// subtree. Call sites stay `AppColors.x` — there is no per-site migration and
+/// no per-site `Theme.of(context)` lookup.
+class HelixPalette {
+  const HelixPalette({
+    required this.bg,
+    required this.surface,
+    required this.surfaceSunk,
+    required this.surfaceInverse,
+    required this.text,
+    required this.textSecondary,
+    required this.textTertiary,
+    required this.textInverse,
+    required this.line,
+    required this.lineStrong,
+    required this.accent,
+    required this.accentText,
+    required this.accentPressed,
+    required this.accentQuiet,
+    required this.onAccent,
+    required this.adminAccent,
+    required this.adminAccentQuiet,
+    required this.adminAccentPressed,
+    required this.onAdminAccent,
+    required this.statusOk,
+    required this.statusDanger,
+    required this.statusWarn,
+    required this.statusWarnFill,
+    required this.statusInfo,
+    required this.statusNeutral,
+    required this.statusPlum,
+    required this.statusAmber,
+    required this.statusOlive,
+  });
+
+  final Color bg;
+  final Color surface;
+  final Color surfaceSunk;
+  final Color surfaceInverse;
+  final Color text;
+  final Color textSecondary;
+  final Color textTertiary;
+  final Color textInverse;
+  final Color line;
+  final Color lineStrong;
+
+  final Color accent;
+  final Color accentText;
+  final Color accentPressed;
+  final Color accentQuiet;
+
+  /// Label colour for content sitting *on* the accent fill.
+  final Color onAccent;
+
+  final Color adminAccent;
+  final Color adminAccentQuiet;
+  final Color adminAccentPressed;
+
+  /// Label colour for content sitting *on* the admin accent fill.
+  final Color onAdminAccent;
+
+  final Color statusOk;
+  final Color statusDanger;
+  final Color statusWarn;
+  final Color statusWarnFill;
+  final Color statusInfo;
+  final Color statusNeutral;
+  final Color statusPlum;
+  final Color statusAmber;
+  final Color statusOlive;
+
+  /// "Daylight Field" — warm paper surfaces, ink type.
+  static const light = HelixPalette(
+    bg: Color(0xFFF6F3EC),
+    surface: Color(0xFFFDFCF7),
+    surfaceSunk: Color(0xFFEFEBE1),
+    surfaceInverse: Color(0xFF0F172A), // logo navy
+    text: Color(0xFF191713),
+    textSecondary: Color(0xFF57503F),
+    textTertiary: Color(0xFF6E6759),
+    textInverse: Color(0xFFF6F3EC),
+    line: Color(0xFFD8D2C4),
+    lineStrong: Color(0xFF8C8266), // input outline — ≥3:1 on surfaceSunk
+    accent: Color(0xFF06B6D4), // driver strand — fills/indicators
+    accentText: Color(0xFF0E7490), // AA-safe tone of the same strand
+    accentPressed: Color(0xFF0891B2),
+    accentQuiet: Color(0xFFDFF3F8),
+    onAccent: Color(0xFF191713),
+    adminAccent: Color(0xFF6D28D9), // admin strand
+    adminAccentQuiet: Color(0xFFEEE9FD),
+    adminAccentPressed: Color(0xFF5B21B6),
+    onAdminAccent: Color(0xFFFFFFFF),
+    statusOk: Color(0xFF166B3F),
+    statusDanger: Color(0xFF9E2B1F),
+    statusWarn: Color(0xFF8A5A00),
+    statusWarnFill: Color(0xFFF5B400),
+    statusInfo: Color(0xFF2A5EA8),
+    statusNeutral: Color(0xFF5C6468),
+    statusPlum: Color(0xFF7A1F5C),
+    statusAmber: Color(0xFFA85500),
+    statusOlive: Color(0xFF7A6100),
+  );
+
+  /// "Night Ops" — warm graphite. Every value re-derived against the dark
+  /// surfaces; the light accent-text tone is not reused (it measures 3.07:1
+  /// on graphite and would fail AA).
+  static const dark = HelixPalette(
+    bg: Color(0xFF141310),
+    surface: Color(0xFF211F19),
+    surfaceSunk: Color(0xFF0C0B09),
+    surfaceInverse: Color(0xFFF6F3EC),
+    text: Color(0xFFECE9E0),
+    textSecondary: Color(0xFFA8A394),
+    textTertiary: Color(0xFF948D7E),
+    textInverse: Color(0xFF141310),
+    line: Color(0xFF3A372E),
+    lineStrong: Color(0xFF847C6D),
+    accent: Color(0xFF22D3EE),
+    accentText: Color(0xFF22D3EE),
+    accentPressed: Color(0xFF0CA5C4),
+    accentQuiet: Color(0xFF1B2A30),
+    onAccent: Color(0xFF141310),
+    adminAccent: Color(0xFFA78BFA),
+    adminAccentQuiet: Color(0xFF2A1F42),
+    adminAccentPressed: Color(0xFF8B5CF6),
+    onAdminAccent: Color(0xFF141310),
+    statusOk: Color(0xFF5CB87E),
+    statusDanger: Color(0xFFE0776A),
+    statusWarn: Color(0xFFD9A22E),
+    statusWarnFill: Color(0xFFF5B400),
+    statusInfo: Color(0xFF7FA8E8),
+    statusNeutral: Color(0xFF8A9189),
+    statusPlum: Color(0xFFC98CAC),
+    statusAmber: Color(0xFFF0A03E),
+    statusOlive: Color(0xFFC4A45B),
+  );
+}
+
+/// Active-palette accessors. Call sites use these; the app flips the active
+/// palette with [setDark] before building the themed subtree.
 class AppColors {
   AppColors._();
 
-  /// Flip between light ("Daylight Field") and dark ("Night Ops").
+  /// Which palette [AppColors.x] currently resolves against.
   static bool dark = false;
 
-  // ── Light palette (const backing values) ─────────────────────────────
+  static HelixPalette get _active => dark ? HelixPalette.dark : HelixPalette.light;
 
-  static const Color _lBg = Color(0xFFF6F3EC);
-  static const Color _lSurface = Color(0xFFFDFCF7);
-  static const Color _lSurfaceSunk = Color(0xFFEFEBE1);
-  static const Color _lSurfaceInverse = Color(0xFF0F172A); // logo navy
-  static const Color _lText = Color(0xFF191713);
-  static const Color _lTextSecondary = Color(0xFF57503F);
-  static const Color _lTextTertiary = Color(0xFF6E6759);
-  static const Color _lTextInverse = Color(0xFFF6F3EC);
-  static const Color _lLine = Color(0xFFD8D2C4);
-  static const Color _lLineStrong = Color(0xFFB7AF9C);
+  static Color get bg => _active.bg;
+  static Color get surface => _active.surface;
+  static Color get surfaceSunk => _active.surfaceSunk;
+  static Color get surfaceInverse => _active.surfaceInverse;
+  static Color get text => _active.text;
+  static Color get textSecondary => _active.textSecondary;
+  static Color get textTertiary => _active.textTertiary;
+  static Color get textInverse => _active.textInverse;
+  static Color get line => _active.line;
+  static Color get lineStrong => _active.lineStrong;
 
-  // Brand strands
-  static const Color _lBrandNavy = Color(0xFF0F172A);
-  static const Color _lAccent = Color(0xFF06B6D4); // driver strand — fills/indicators
-  static const Color _lAccentText = Color(0xFF0E7490); // AA-safe tone of the same strand
-  static const Color _lAccentPressed = Color(0xFF0891B2);
-  static const Color _lAccentQuiet = Color(0xFFDFF3F8);
-  static const Color _lAdminAccent = Color(0xFF6D28D9); // admin strand
-  static const Color _lAdminAccentQuiet = Color(0xFFEEE9FD);
-  static const Color _lAdminAccentPressed = Color(0xFF5B21B6);
+  static Color get brandNavy => HelixPalette.light.surfaceInverse; // brand moment, never flips
+  static Color get accent => _active.accent;
+  static Color get accentText => _active.accentText;
+  static Color get accentPressed => _active.accentPressed;
+  static Color get accentQuiet => _active.accentQuiet;
+  static Color get onAccent => _active.onAccent;
+  static Color get adminAccent => _active.adminAccent;
+  static Color get adminAccentQuiet => _active.adminAccentQuiet;
+  static Color get adminAccentPressed => _active.adminAccentPressed;
+  static Color get onAdminAccent => _active.onAdminAccent;
 
-  // Status (N5 semantics — colour + glyph + word, never colour alone)
-  static const Color _lStatusOk = Color(0xFF166B3F);
-  static const Color _lStatusDanger = Color(0xFF9E2B1F);
-  static const Color _lStatusWarn = Color(0xFF8A5A00);
-  static const Color _lStatusWarnFill = Color(0xFFF5B400);
-  static const Color _lStatusInfo = Color(0xFF2A5EA8);
-  static const Color _lStatusNeutral = Color(0xFF5C6468);
-  static const Color _lStatusPlum = Color(0xFF7A1F5C);
-  static const Color _lStatusAmber = Color(0xFFA85500);
-  static const Color _lStatusOlive = Color(0xFF7A6100);
+  static Color get statusOk => _active.statusOk;
+  static Color get statusDanger => _active.statusDanger;
+  static Color get statusWarn => _active.statusWarn;
+  static Color get statusWarnFill => _active.statusWarnFill;
+  static Color get statusInfo => _active.statusInfo;
+  static Color get statusNeutral => _active.statusNeutral;
+  static Color get statusPlum => _active.statusPlum;
+  static Color get statusAmber => _active.statusAmber;
+  static Color get statusOlive => _active.statusOlive;
 
-  // ── Dark palette ("Night Ops") ───────────────────────────────────────
+  /// Foreground tone for the strand accent. The raw strand fill is too light
+  /// to use as an icon or label colour on paper — this is its AA-safe twin.
+  static Color get accentFg => accentText;
 
-  static const Color _dBg = Color(0xFF141310);
-  static const Color _dSurface = Color(0xFF211F19);
-  static const Color _dSurfaceSunk = Color(0xFF0C0B09);
-  static const Color _dSurfaceInverse = Color(0xFFF6F3EC);
-  static const Color _dText = Color(0xFFECE9E0);
-  static const Color _dTextSecondary = Color(0xFFA8A394);
-  static const Color _dTextTertiary = Color(0xFF6E6759);
-  static const Color _dTextInverse = Color(0xFF141310);
-  static const Color _dLine = Color(0xFF3A372E);
-  static const Color _dLineStrong = Color(0xFF57503F);
-
-  static const Color _dAccent = Color(0xFF22D3EE);
-  static const Color _dAccentText = Color(0xFF0E7490);
-  static const Color _dAccentPressed = Color(0xFF0891B2);
-  static const Color _dAccentQuiet = Color(0xFF1B2A30);
-  static const Color _dAdminAccent = Color(0xFFA78BFA);
-  static const Color _dAdminAccentQuiet = Color(0xFF2A1F42);
-  static const Color _dAdminAccentPressed = Color(0xFF8B5CF6);
-
-  static const Color _dStatusOk = Color(0xFF5CB87E);
-  static const Color _dStatusDanger = Color(0xFFE0776A);
-  static const Color _dStatusWarn = Color(0xFFD9A22E);
-  static const Color _dStatusWarnFill = Color(0xFFF5B400);
-  static const Color _dStatusInfo = Color(0xFF7FA8E8);
-  static const Color _dStatusNeutral = Color(0xFF8A9189);
-  static const Color _dStatusPlum = Color(0xFFB86A94);
-  static const Color _dStatusAmber = Color(0xFFF0A03E);
-  static const Color _dStatusOlive = Color(0xFFC4A45B);
-
-  // ── Public accessors (light unless AppColors.dark == true) ───────────
-
-  static Color get bg => dark ? _dBg : _lBg;
-  static Color get surface => dark ? _dSurface : _lSurface;
-  static Color get surfaceSunk => dark ? _dSurfaceSunk : _lSurfaceSunk;
-  static Color get surfaceInverse => dark ? _dSurfaceInverse : _lSurfaceInverse;
-  static Color get text => dark ? _dText : _lText;
-  static Color get textSecondary => dark ? _dTextSecondary : _lTextSecondary;
-  static Color get textTertiary => dark ? _dTextTertiary : _lTextTertiary;
-  static Color get textInverse => dark ? _dTextInverse : _lTextInverse;
-  static Color get line => dark ? _dLine : _lLine;
-  static Color get lineStrong => dark ? _dLineStrong : _lLineStrong;
-
-  static Color get brandNavy => _lBrandNavy; // brand moment, never flips
-  static Color get accent => dark ? _dAccent : _lAccent;
-  static Color get accentText => dark ? _dAccentText : _lAccentText;
-  static Color get accentPressed => dark ? _dAccentPressed : _lAccentPressed;
-  static Color get accentQuiet => dark ? _dAccentQuiet : _lAccentQuiet;
-  static Color get adminAccent => dark ? _dAdminAccent : _lAdminAccent;
-  static Color get adminAccentQuiet => dark ? _dAdminAccentQuiet : _lAdminAccentQuiet;
-  static Color get adminAccentPressed => dark ? _dAdminAccentPressed : _lAdminAccentPressed;
-
-  static Color get statusOk => dark ? _dStatusOk : _lStatusOk;
-  static Color get statusDanger => dark ? _dStatusDanger : _lStatusDanger;
-  static Color get statusWarn => dark ? _dStatusWarn : _lStatusWarn;
-  static Color get statusWarnFill => dark ? _dStatusWarnFill : _lStatusWarnFill;
-  static Color get statusInfo => dark ? _dStatusInfo : _lStatusInfo;
-  static Color get statusNeutral => dark ? _dStatusNeutral : _lStatusNeutral;
-  static Color get statusPlum => dark ? _dStatusPlum : _lStatusPlum;
-  static Color get statusAmber => dark ? _dStatusAmber : _lStatusAmber;
-  static Color get statusOlive => dark ? _dStatusOlive : _lStatusOlive;
+  /// Foreground tone for the admin strand.
+  static Color get adminAccentFg => adminAccent;
 
   // ── Materials (frosted chrome) ───────────────────────────────────────
 
   /// Translucent backing for navigation bar / tab bar (content scrolls under).
-  static Color get frostChrome => dark ? _dSurface.withValues(alpha: 0.88) : _lSurface.withValues(alpha: 0.88);
-  static Color get frostSheet => dark ? _dSurface.withValues(alpha: 0.92) : _lSurface.withValues(alpha: 0.92);
+  static Color get frostChrome => surface.withValues(alpha: 0.88);
+  static Color get frostSheet => surface.withValues(alpha: 0.92);
   static const double blurChrome = 20.0;
   static const double blurSheet = 16.0;
 
@@ -144,8 +228,16 @@ class AppTarget {
   AppTarget._();
   static const touchPhone = 56.0;
   static const touchAdmin = 64.0;
-  static const chipPhone = 44.0;
-  static const chipAdmin = 52.0;
+  static const chipPhone = 48.0;
+  static const chipAdmin = 56.0;
+
+  /// Minimum height for a non-interactive badge or status chip. These are not
+  /// controls, so they follow the type scale rather than the touch-target
+  /// floor — an interactive chip uses [chipPhone].
+  static const badge = 32.0;
+
+  /// Width of one swipe-revealed action.
+  static const swipeAction = 88.0;
 }
 
 /// Type scale. Phone is the base; [adminScale] switches to the admin scale.
@@ -162,7 +254,13 @@ class AppType {
   static const fontBody = 'Barlow';
   static const fontMono = 'IBMPlexMono';
 
-  static const maxTextScale = 1.3;
+  /// Body copy honours the platform text-size setting up to the WCAG 1.4.4
+  /// ceiling of 200%. Chrome labels that live in fixed-height controls use
+  /// [maxChromeTextScale] instead.
+  static const maxTextScale = 2.0;
+
+  /// Fixed-height chrome (tab labels, badge numerals, segmented labels).
+  static const maxChromeTextScale = 1.3;
 }
 
 class AppMotion {
@@ -175,6 +273,39 @@ class AppMotion {
   static const easeOut = Cubic(0.23, 1, 0.32, 1);
   static const easeInOut = Cubic(0.77, 0, 0.175, 1);
   static const easeStandard = Cubic(0.4, 0, 0.2, 1);
+
+  /// Critically damped — the default for anything the user can touch. No
+  /// overshoot, ~0.35 s to settle.
+  static final springCritical = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 130,
+    ratio: 1.0,
+  );
+
+  /// Under-damped — reserve for gestures that carried momentum (a flick, a
+  /// throw, a release). ~0.3 s with a small overshoot.
+  static final springBouncy = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 160,
+    ratio: 0.8,
+  );
+
+  /// Sheets and drawers — a sheet settles fast and overshoots slightly.
+  static final springSheet = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 220,
+    ratio: 0.85,
+  );
+
+  /// Press/release on a control — quick, no overshoot.
+  static final springSnappy = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 380,
+    ratio: 1.0,
+  );
+
+  /// Scale applied to a control while it is held.
+  static const pressScale = 0.975;
 }
 
 /// Which shell is active — picks the brand strand (the logo's twin strands).
@@ -185,7 +316,7 @@ extension ShellAccent on Shell {
   Color get textTone => this == Shell.driver ? AppColors.accentText : AppColors.adminAccent;
   Color get pressed => this == Shell.driver ? AppColors.accentPressed : AppColors.adminAccentPressed;
   Color get quiet => this == Shell.driver ? AppColors.accentQuiet : AppColors.adminAccentQuiet;
-  Color get onFill => this == Shell.driver ? AppColors.text : Colors.white;
+  Color get onFill => this == Shell.driver ? AppColors.onAccent : AppColors.onAdminAccent;
   bool get isAdmin => this == Shell.admin;
 }
 
@@ -205,4 +336,5 @@ class AppScale {
   double get caption => admin ? AppType.captionAdmin : AppType.captionPhone;
   double get radiusControl => admin ? 12.0 : AppRadius.control;
   double get radiusSheet => admin ? 24.0 : AppRadius.sheet;
+  double get tabBarHeight => admin ? 72.0 : 64.0;
 }

@@ -4,6 +4,7 @@ import '../../design/components/helix_logo.dart';
 import '../../design/components/privacy_shield.dart';
 import '../../design/tokens.dart';
 import '../../design/components/text.dart';
+import '../../i18n/strings.dart';
 
 /// Boot screen: logo tile on bone, silent restore — no spinner theatre.
 class SplashScreen extends ConsumerWidget {
@@ -20,7 +21,10 @@ class SplashScreen extends ConsumerWidget {
             children: [
               HelixLogo(size: 96),
               SizedBox(height: AppSpace.s5),
-              HelixText('Checking your sign-in…', style: TypeScale.caption(AppColors.textSecondary)),
+              HelixText(
+                Strings.of(context).t('auth.splashHint'),
+                style: TypeScale.caption(AppColors.textSecondary),
+              ),
             ],
           ),
         ),

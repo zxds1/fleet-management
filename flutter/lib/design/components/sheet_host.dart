@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../tokens.dart';
+import '../../i18n/strings.dart';
+import 'text.dart';
 
 /// Modal bottom sheets for pickers and contextual actions: drag handle,
 /// swipe-to-dismiss AND a visible close button, safe-area aware.
 ///
 /// The sheet tracks the finger 1:1 while dragging; on release it springs to
-/// its nearest detent carrying the release velocity (interruptible, redirectable
-/// at any instant — apple-design §3–5). Reduced motion degrades to an instant,
-/// fully-visible sheet.
+/// its nearest detent carrying the release velocity (interruptible,
+/// redirectable at any instant — apple-design §3–5). The drag lives on the
+/// sheet's own header, so a list or a text field inside the sheet scrolls
+/// normally instead of fighting the dismiss gesture. Reduced motion degrades
+/// to an instant, fully-visible sheet.
 class SheetHost extends StatefulWidget {
   const SheetHost({super.key, required this.child, this.title});
 
@@ -26,7 +30,7 @@ class SheetHost extends StatefulWidget {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       useRootNavigator: true,
-      barrierColor: AppColors.surfaceInverse.withValues(alpha: 0.25),
+      barrierColor: AppColors.bg.withValues(alpha: 0.5),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet)),
       ),
@@ -50,18 +54,24 @@ class _SheetHostState extends State<SheetHost> with SingleTickerProviderStateMix
   double? _sheetHeight;
   double _dragStartValue = 1.0;
   double _dragStartY = 0;
-  bool _reduceMotion = false;
 
   @override
   void initState() {
     super.initState();
-    _reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    _controller.addStatusListener(_onStatus);
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed && _controller.value == 0.0 && mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   double get _closedY => (_sheetHeight ?? MediaQuery.sizeOf(context).height);
 
   @override
   void dispose() {
+    _controller.removeStatusListener(_onStatus);
     _controller.dispose();
     super.dispose();
   }
@@ -81,12 +91,11 @@ class _SheetHostState extends State<SheetHost> with SingleTickerProviderStateMix
   }
 
   void _onDragEnd(DragEndDetails details) {
-    if (_reduceMotion) {
+    if (MediaQuery.disableAnimationsOf(context)) {
       if (_controller.value < 0.5) Navigator.of(context).pop();
       return;
     }
     final height = _closedY;
-    final currentY = height * (1.0 - _controller.value);
     // direction: moving down → close, moving up → open
     final velocityY = details.primaryVelocity ?? 0;
     // commit to the nearest detent, carrying release velocity; a strong push
@@ -98,19 +107,13 @@ class _SheetHostState extends State<SheetHost> with SingleTickerProviderStateMix
             : _controller.value > 0.5
                 ? 1.0
                 : 0.0;
-    final commitY = height * (1.0 - commitValue);
-    springTo(_controller, commitValue,
-        description: AppSpring.drawer(),
-        velocity: gestureVelocityToSpring(
-          velocityY,
-          currentY,
-          commitY,
-        ));
-    if (commitValue == 0.0) {
-      _controller.addStatusListener((status) {
-        if (status == AnimationStatus.completed && mounted) Navigator.of(context).pop();
-      });
-    }
+    springTo(
+      _controller,
+      commitValue,
+      description: AppSpring.drawer(),
+      // The value runs opposite to the pixel axis, so the handoff inverts.
+      velocity: gestureVelocityToValue(velocityY, height),
+    );
   }
 
   @override
@@ -127,28 +130,38 @@ class _SheetHostState extends State<SheetHost> with SingleTickerProviderStateMix
               child: child,
             );
           },
-          child: _SheetBody(title: widget.title, child: widget.child),
+          child: _SheetBody(
+            title: widget.title,
+            onDragStart: _onDragStart,
+            onDragUpdate: _onDragUpdate,
+            onDragEnd: _onDragEnd,
+            child: widget.child,
+          ),
         );
-        return GestureDetector(
-          onVerticalDragStart: _onDragStart,
-          onVerticalDragUpdate: _onDragUpdate,
-          onVerticalDragEnd: _onDragEnd,
-          behavior: HitTestBehavior.translucent,
-          child: open,
-        );
+        return open;
       },
     );
   }
 }
 
 class _SheetBody extends StatelessWidget {
-  const _SheetBody({required this.child, this.title});
+  const _SheetBody({
+    required this.child,
+    this.title,
+    this.onDragStart,
+    this.onDragUpdate,
+    this.onDragEnd,
+  });
 
   final Widget child;
   final String? title;
+  final GestureDragStartCallback? onDragStart;
+  final GestureDragUpdateCallback? onDragUpdate;
+  final GestureDragEndCallback? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
+    final strings = Strings.of(context);
     return SafeArea(
       top: false,
       child: Padding(
@@ -157,36 +170,48 @@ class _SheetBody extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: AppSpace.s3),
-            Center(
-              child: Container(
-                width: 44,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: AppColors.line,
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                ),
-              ),
-            ),
-            if (title != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpace.s5, AppSpace.s4, AppSpace.s2, 0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title ?? '',
-                        style: Theme.of(context).textTheme.titleLarge,
+            GestureDetector(
+              onVerticalDragStart: onDragStart,
+              onVerticalDragUpdate: onDragUpdate,
+              onVerticalDragEnd: onDragEnd,
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: AppSpace.s3),
+                  Center(
+                    child: Container(
+                      width: 44,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: AppColors.line,
+                        borderRadius: BorderRadius.circular(AppRadius.full),
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.close, color: AppColors.textSecondary),
-                      tooltip: 'Dismiss',
-                      onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  if (title != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(AppSpace.s5, AppSpace.s4, AppSpace.s2, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: HelixText(
+                              title ?? '',
+                              style: TypeScale.title(AppColors.text),
+                              maxLines: 2,
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                            tooltip: strings.t('state.dismiss'),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
+                ],
               ),
+            ),
             Flexible(child: child),
             const SizedBox(height: AppSpace.s4),
           ],
@@ -195,4 +220,3 @@ class _SheetBody extends StatelessWidget {
     );
   }
 }
-

@@ -43,10 +43,12 @@ class OfflineQueue {
 
   bool draining = false;
   final Map<String, String> _refs = {};
-  String? _owner;
 
   Future<int> get openCount => _store.openCount();
   Future<List<QueueItem>> items() => _store.allRecent();
+
+  /// How many writes are waiting and how many are parked for a person.
+  Future<({int pending, int failed})> statusCounts() => _store.statusCounts();
   Future<QueueItem?> itemById(int id) => _store.byId(id);
 
   /// Try online with a fixed key; on a network failure enqueue the same key.
@@ -63,21 +65,18 @@ class OfflineQueue {
   }
 
   /// Queue-first for photo/dependent forms: enqueue all ops in order, drain,
-  /// report. Throws the server error (after discarding the rows) so the driver
-  /// can fix the form.
+  /// report. Throws the server error so the driver can fix the form.
+  ///
+  /// A row that ends in FAILED_REVIEW is KEPT: the driver's captured photos
+  /// stay on disk and the Outbox "Edit" path can fix and resend the write.
+  /// Only an explicit discard deletes a row.
   Future<DrainResult> submitStaged(List<QueueOp> ops) async {
-    final failedBefore = <int>[];
+    final submitted = <int>[];
     for (final op in ops) {
-      failedBefore.add(await enqueue(op));
+      submitted.add(await enqueue(op));
     }
     final result = await drain();
     if (result.failedIds.isNotEmpty) {
-      for (final id in result.failedIds) {
-        final item = await _store.byId(id);
-        if (item != null && item.status == QueueStatus.failedReview) {
-          await discard(id); // driver fixes the form; no stale row left behind
-        }
-      }
       final first = await _store.byId(result.failedIds.first);
       throw HelixError(
         code: first?.lastErrorCode ?? 'TRANSACTION_FAILED',
@@ -85,7 +84,22 @@ class OfflineQueue {
         detail: first?.lastErrorCode,
       );
     }
-    return result;
+    return DrainResult(
+      sent: result.sent,
+      queuedCount: result.queuedCount,
+      failedIds: result.failedIds,
+      firstResponse: await _responseFor(submitted),
+    );
+  }
+
+  /// The response of the write(s) submitted in this call. A drain pass may
+  /// also have sent older queued writes, and their response is not ours.
+  Future<Map<String, dynamic>?> _responseFor(List<int> ids) async {
+    for (final id in ids) {
+      final item = await _store.byId(id);
+      if (item != null && item.status == QueueStatus.done) return item.responseBody;
+    }
+    return null;
   }
 
   Future<int> enqueue(QueueOp op) async {
@@ -154,15 +168,16 @@ class OfflineQueue {
   }
 
   /// A different user signing in destroys the previous queue — unsent work is
-  /// personal data.
+  /// personal data. The owner is persisted, so the check survives a restart.
   Future<void> reconcileOwner(String userId) async {
-    if (_owner == null) {
-      _owner = userId;
+    final stored = await _store.meta('owner');
+    if (stored == null) {
+      await _store.setMeta('owner', userId);
       return;
     }
-    if (_owner != userId) {
+    if (stored != userId) {
       await clearAll();
-      _owner = userId;
+      await _store.setMeta('owner', userId);
     }
   }
 
@@ -237,16 +252,23 @@ class OfflineQueue {
           _onDone(queryKeysForPath(item.path));
           await _deleteStagedFiles(item);
         } on HelixError catch (e) {
-          item.attempts += 1;
           item.lastErrorCode = e.code;
           item.responseStatus = e.status;
           if (e.isRetryable) {
-            item.status =
-                item.attempts >= Policy.queueMaxAttempts ? QueueStatus.failedReview : QueueStatus.pending;
+            // A write that could not reach the server has not been *tried* in
+            // any meaningful sense: a dead zone, a paused app or a captive
+            // portal must not exhaust its attempt budget, or a driver who
+            // drives through a tunnel loses the shift they clocked in.
+            final offline = e.isNetwork;
+            if (!offline) item.attempts += 1;
+            item.status = !offline && item.attempts >= Policy.queueMaxAttempts
+                ? QueueStatus.failedReview
+                : QueueStatus.pending;
             await _store.update(item);
-            if (item.attempts >= Policy.queueMaxAttempts) failed.add(item.id!);
+            if (item.status == QueueStatus.failedReview) failed.add(item.id!);
             break; // stop the whole pass on a retryable failure
           }
+          item.attempts += 1;
           if (e.code == 'IDEMPOTENCY_CONFLICT' || e.code == 'DUPLICATE') {
             item.status = QueueStatus.discarded;
             await _store.update(item);

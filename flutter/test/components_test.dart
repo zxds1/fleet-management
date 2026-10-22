@@ -53,7 +53,7 @@ void main() {
     expect(confirmed, 1);
   });
 
-  testWidgets('HelixText clamps text scaling to 1.3x', (tester) async {
+  testWidgets('HelixText honours text scaling up to 200%', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: MediaQuery(
         data: const MediaQueryData(textScaler: TextScaler.linear(3.0)),
@@ -61,12 +61,26 @@ void main() {
       ),
     ));
     final text = tester.widget<Text>(find.text('Hello'));
+    // WCAG 1.4.4: text must be resizable to 200%. Body copy therefore clamps
+    // at 2.0, not at a decorative 1.3.
+    expect(text.textScaler!.scale(16) / 16, closeTo(2.0, 0.001));
+  });
+
+  testWidgets('chrome text clamps to 1.3x for fixed-height controls', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(3.0)),
+        child: const Scaffold(body: HelixText.chrome('Hi', style: null)),
+      ),
+    ));
+    final text = tester.widget<Text>(find.text('Hi'));
     expect(text.textScaler!.scale(16) / 16, closeTo(1.3, 0.001));
   });
 
   test('shell strands map to the logo colours', () {
     expect(Shell.driver.fill, AppColors.accent);
     expect(Shell.admin.fill, AppColors.adminAccent);
+    AppColors.setDark(false);
     expect(Shell.driver.onFill, AppColors.text); // ink on cyan = 7.37:1
     expect(Shell.admin.onFill, Colors.white); // white on violet = 7.10:1
   });

@@ -1,8 +1,37 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Network: dio API client, socket.io gateway. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera: clock-in/out, DVIR photos, accident photos, fuel receipts. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Location: shift tracking and the Mayday fix (phone GPS fallback). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Notifications: shift/incident events (Android 13+ runtime prompt). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Vibration: alert delivery for fleet events. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- No ACCESS_BACKGROUND_LOCATION: the phone tracker only samples while the app is open. -->
+
+    <!-- The app degrades to a no-camera install rather than refusing to install. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <!-- camera_android_camerax declares camera.any with an implied required=true; the
+         OR merge rule would keep the app filtered off camera-less devices, so the
+         app-level value is forced. -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false"
+        tools:replace="android:required" />
+
     <application
-        android:label="helix"
+        android:label="Helix"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -24,7 +53,34 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- helix://<kind>/<uuid>; helix is a custom scheme, not an App Link. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="helix" android:host="accident" android:pathPattern="/*" />
+                <data android:scheme="helix" android:host="dvir" android:pathPattern="/*" />
+                <data android:scheme="helix" android:host="fuel" android:pathPattern="/*" />
+                <data android:scheme="helix" android:host="vehicle" android:pathPattern="/*" />
+                <data android:scheme="helix" android:host="notifications" android:pathPattern="/*" />
+                <data android:scheme="helix" android:host="outbox" android:pathPattern="/*" />
+            </intent-filter>
+            <!-- helix://<kind> without an id (vehicle/notifications/outbox only). -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="helix" android:host="vehicle" />
+                <data android:scheme="helix" android:host="notifications" />
+                <data android:scheme="helix" android:host="outbox" />
+            </intent-filter>
         </activity>
+        <!--
+             The map is drawn by flutter_map over raster tiles: the Google Maps
+             SDK is not on the device, so there is no API key here and none is
+             needed. The tile source is a build input —
+             --dart-define=MAP_TILE_URL=...
+        -->
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -40,6 +96,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Camera package capture intent (package visibility on API 30+). -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE"/>
         </intent>
     </queries>
 </manifest>

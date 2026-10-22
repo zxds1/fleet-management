@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 
 /// Resolves the media 302 (token stripped) and caches the image.
@@ -17,6 +18,7 @@ class MediaThumb extends StatefulWidget {
 class _MediaThumbState extends State<MediaThumb> {
   String? _url;
   bool _failed = false;
+  bool _resolving = false;
 
   @override
   void didChangeDependencies() {
@@ -25,6 +27,8 @@ class _MediaThumbState extends State<MediaThumb> {
   }
 
   Future<void> _resolve() async {
+    if (_resolving || _url != null) return;
+    _resolving = true;
     final api = InheritedApi.of(context);
     try {
       final url = await api.resolveMediaUrl(widget.mediaId);
@@ -38,25 +42,39 @@ class _MediaThumbState extends State<MediaThumb> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(
-          color: AppColors.surfaceSunk,
-          borderRadius: BorderRadius.circular(AppRadius.control),
-          border: Border.all(color: AppColors.line),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: _url == null
-            ? Center(
-                child: Icon(
-                  _failed ? Icons.broken_image_outlined : Icons.image_outlined,
-                  color: AppColors.textTertiary,
+    return Semantics(
+      label: Strings.of(context).t('detail.photo'),
+      image: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceSunk,
+            borderRadius: BorderRadius.circular(AppRadius.control),
+            border: Border.all(color: AppColors.line),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _url == null
+              ? Center(
+                  child: Icon(
+                    _failed ? Icons.broken_image_rounded : Icons.image_rounded,
+                    color: AppColors.textTertiary,
+                  ),
+                )
+              : Image.network(
+                  _url!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Center(
+                    child: Icon(
+                      Icons.broken_image_rounded,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
                 ),
-              )
-            : Image.network(_url!, fit: BoxFit.cover),
+        ),
       ),
     );
   }

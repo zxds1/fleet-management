@@ -1,11 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../tokens.dart';
 import 'buttons.dart';
 import 'text.dart';
 
 /// Error state: the catalogue message and EXACTLY ONE action button.
-/// RATE_LIMITED shows a countdown before the retry unlocks.
-class ErrorState extends StatelessWidget {
+/// RATE_LIMITED shows a live countdown before the retry unlocks.
+class ErrorState extends StatefulWidget {
   const ErrorState({
     super.key,
     required this.message,
@@ -22,23 +24,61 @@ class ErrorState extends StatelessWidget {
   final int? waitSeconds;
 
   @override
+  State<ErrorState> createState() => _ErrorState();
+}
+
+class _ErrorState extends State<ErrorState> {
+  Timer? _timer;
+  late int _remaining = widget.waitSeconds ?? 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_remaining > 0) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) return;
+        setState(() => _remaining -= 1);
+        if (_remaining <= 0) timer.cancel();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final waiting = _remaining > 0;
     return Padding(
       padding: const EdgeInsets.all(AppSpace.s5),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          HelixText(message, style: TypeScale.body(AppColors.text), textAlign: TextAlign.center),
-          if (detail != null) ...[
+          Semantics(
+            liveRegion: true,
+            child: HelixText(
+              widget.message,
+              style: TypeScale.body(AppColors.text),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          if (widget.detail != null) ...[
             const SizedBox(height: AppSpace.s2),
-            HelixText(detail!, style: TypeScale.caption(AppColors.textSecondary), textAlign: TextAlign.center),
+            HelixText(
+              widget.detail!,
+              style: TypeScale.caption(AppColors.textSecondary),
+              textAlign: TextAlign.center,
+            ),
           ],
-          if (actionLabel != null) ...[
+          if (widget.actionLabel != null) ...[
             const SizedBox(height: AppSpace.s4),
-            if (waitSeconds != null && waitSeconds! > 0)
-              QuietButton(label: '$actionLabel (${waitSeconds}s)', onPressed: null)
+            if (waiting)
+              QuietButton(label: '${widget.actionLabel} ($_remaining s)', onPressed: null)
             else
-              QuietButton(label: actionLabel!, onPressed: onAction),
+              QuietButton(label: widget.actionLabel!, onPressed: widget.onAction),
           ],
         ],
       ),
@@ -61,7 +101,11 @@ class EmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          HelixText(message, style: TypeScale.body(AppColors.textSecondary), textAlign: TextAlign.center),
+          HelixText(
+            message,
+            style: TypeScale.body(AppColors.textSecondary),
+            textAlign: TextAlign.center,
+          ),
           if (actionLabel != null) ...[
             const SizedBox(height: AppSpace.s4),
             QuietButton(label: actionLabel!, onPressed: onAction),

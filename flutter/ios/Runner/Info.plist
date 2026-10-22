@@ -15,17 +15,44 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>helix</string>
+	<string>Helix</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLName</key>
+	<string>com.helix.helix</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.helix.helix</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>helix</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Helix takes photos for work logs, vehicle inspections, accident reports and fuel receipts. Photos are only taken when you tap the camera button, and they are attached to the record you are working on.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Helix uses Face ID to unlock the app quickly on a shared device, so a driver can get back to their shift without typing their PIN.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Helix records your position during an active shift so dispatch can see where the vehicle is. Choosing “Always” lets Helix keep recording during the shift even when the app is in the background. Tracking stops when you clock out.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Helix records where your vehicle is while you are clocked in, so dispatch can follow the fleet on the live map and know where to send help. Helix only asks for your location while the app is open and you are on shift.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Helix can attach a photo that is already on your phone to a work log, an inspection or a fuel receipt. Helix only opens the pictures you pick, and only after you tap to attach one.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

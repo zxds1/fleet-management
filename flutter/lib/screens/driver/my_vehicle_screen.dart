@@ -21,6 +21,7 @@ class MyVehicleScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: HelixText(strings.t('vehicle.title'), style: TypeScale.title(AppColors.text))),
       body: Screen(
+        offlineCopy: true,
         refresh: () async => ref.invalidate(myVehicleProvider),
         child: states.when(
           loading: () => const LoadingBody(),
@@ -48,7 +49,7 @@ class MyVehicleScreen extends ConsumerWidget {
                         HelixChip(label: strings.t('status.OFFLINE'), color: AppColors.statusNeutral, glyph: '○'),
                         const SizedBox(height: AppSpace.s3),
                         HelixText(
-                          'No position has been received for this vehicle yet.',
+                          strings.t('detail.noData'),
                           style: TypeScale.body(AppColors.textSecondary),
                         ),
                       ],

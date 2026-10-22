@@ -123,8 +123,8 @@ class Harness {
       idempotent: false,
       parse: (b) => b as Map<String, dynamic>,
     );
-    await api.putBytes(presign['uploadUrl'] as String, [1, 2, 3], 'image/jpeg');
-    return presign['mediaObjectId'] as String;
+    await api.putBytes(presign['upload_url'] as String, [1, 2, 3], 'image/jpeg');
+    return presign['media_object_id'] as String;
   }
 }
 

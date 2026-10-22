@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 
 /// Pulsing skeleton bars. Honours reduced-motion (static). Announced once.
@@ -18,12 +19,18 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
     vsync: this,
     duration: const Duration(milliseconds: 900),
   );
+  bool _reduce = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (!reduce && !_controller.isAnimating) _controller.repeat(reverse: true);
+    _reduce = MediaQuery.disableAnimationsOf(context);
+    if (_reduce) {
+      _controller.stop();
+      _controller.value = 0;
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -35,7 +42,7 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: 'Loading',
+      label: Strings.of(context).t('state.loading'),
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
@@ -49,8 +56,18 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
                   height: widget.height,
                   width: widget.width ?? double.infinity,
                   decoration: BoxDecoration(
-                    color: Color.lerp(AppColors.surfaceSunk, AppColors.line, t),
+                    color: AppColors.surfaceSunk,
                     borderRadius: BorderRadius.circular(AppRadius.control - 4),
+                  ),
+                  child: Opacity(
+                    // A shimmer is an opacity sweep, not a colour change.
+                    opacity: _reduce ? 0 : 0.10 + 0.35 * t,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadius.control - 4),
+                      ),
+                    ),
                   ),
                 ),
               ],

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../core/errors.dart';
 import '../../core/policy.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 import 'buttons.dart';
+import 'chips.dart';
 import 'states.dart';
 import 'skeleton.dart';
 
@@ -17,6 +20,10 @@ class CursorPage<T> {
 /// The single cursor list: skeleton → error (with action) → empty (with next
 /// action) → rows; pull-to-refresh; "Load more" for screen readers. Never offset
 /// pagination — keyset only.
+///
+/// Every state is recoverable: the error state always offers a retry (the
+/// list's own reload, unless the caller supplies its own), and the empty
+/// state names the next action.
 class PagedList<T> extends StatefulWidget {
   const PagedList({
     super.key,
@@ -77,10 +84,12 @@ class _PagedListState<T> extends State<PagedList<T>> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final page = await widget.loadMore(null);
       if (!mounted) return;
@@ -98,6 +107,20 @@ class _PagedListState<T> extends State<PagedList<T>> {
         _error = e.message;
         _errorAction = e.actionLabel;
         _waitSeconds = e.waitSeconds;
+        _loading = false;
+      });
+    } on HelixError catch (e) {
+      // The domain error the repository throws. Without this the list would
+      // show nothing at all instead of the error state — a blank screen where
+      // the user expects "Try again".
+      if (!mounted) return;
+      // The locale is resolved here, not at the top of _load: this runs from
+      // initState, where the Localizations scope does not exist yet.
+      final strings = Strings.of(context);
+      setState(() {
+        _error = strings.error(e.code);
+        _errorAction = null;
+        _waitSeconds = null;
         _loading = false;
       });
     }
@@ -120,7 +143,15 @@ class _PagedListState<T> extends State<PagedList<T>> {
       setState(() {
         _loadingMore = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(e.message)));
+    } on HelixError catch (e) {
+      if (!mounted) return;
+      final strings = Strings.of(context);
+      setState(() {
+        _loadingMore = false;
+      });
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(strings.error(e.code))));
     }
   }
 
@@ -132,6 +163,7 @@ class _PagedListState<T> extends State<PagedList<T>> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = Strings.of(context);
     if (_loading) {
       return Padding(
         padding: const EdgeInsets.all(AppSpace.s4),
@@ -149,16 +181,26 @@ class _PagedListState<T> extends State<PagedList<T>> {
     if (_error != null) {
       return ErrorState(
         message: _error!,
-        actionLabel: _errorAction,
-        onAction: widget.onRetry,
+        actionLabel: _errorAction ?? strings.t('actions.retry'),
+        onAction: widget.onRetry ?? _load,
         waitSeconds: _waitSeconds,
       );
     }
     if (_items.isEmpty) {
-      return EmptyState(
-        message: widget.emptyMessage ?? 'Nothing here.',
-        actionLabel: widget.onRetry != null ? 'Refresh' : null,
-        onAction: widget.onRetry,
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.offlineCopy) ...[
+            const OfflineTag(),
+            const SizedBox(height: AppSpace.s3),
+          ],
+          EmptyState(
+            message: widget.emptyMessage ?? strings.t('state.empty'),
+            actionLabel: strings.t('actions.refresh'),
+            onAction: widget.onRetry ?? _load,
+          ),
+        ],
       );
     }
     return RefreshIndicator(
@@ -179,7 +221,7 @@ class _PagedListState<T> extends State<PagedList<T>> {
                     child: Center(child: Skeleton(height: 24, width: 120)),
                   )
                 : QuietButton(
-                    label: 'Load more',
+                    label: strings.t('actions.loadMore'),
                     onPressed: _loadMore,
                   );
           }

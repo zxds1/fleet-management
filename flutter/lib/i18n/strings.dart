@@ -52,6 +52,12 @@ class Strings {
 
   String t(String key, [Map<String, String> params = const {}]) {
     final entry = _dict[key];
+    assert(() {
+      if (entry == null && !en.containsKey(key)) {
+        debugPrint('Helix i18n: no entry for "$key" (${locale.languageCode})');
+      }
+      return true;
+    }());
     var value = entry?['v'] ?? en[key]?['v'] ?? key;
     params.forEach((k, v) {
       value = value.replaceAll('{{$k}}', v);
@@ -64,4 +70,10 @@ class Strings {
 
   /// Action label from the catalogue entry.
   String actionLabel(String action) => t('actions.$action');
+}
+
+/// Localised strings from any build context. Lives here (not in the screen
+/// layer) so design components can localise without importing a screen.
+extension HelixStringsX on BuildContext {
+  Strings get s => Strings.of(this);
 }

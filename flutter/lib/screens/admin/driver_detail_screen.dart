@@ -70,13 +70,15 @@ class _DriverDetailScreenState extends ConsumerState<DriverDetailScreen> {
             children: [
               HelixText(row['full_name']?.toString() ?? '', style: TypeScale.title(AppColors.text)),
               const SizedBox(height: AppSpace.s2),
-              Row(
+              // A chip row wraps: two labels can be wider than a phone.
+              Wrap(
+                spacing: AppSpace.s2,
+                runSpacing: AppSpace.s2,
                 children: [
                   HelixChip(
                     label: strings.t('drivers.${row['status']?.toString().toLowerCase() ?? 'active'}'),
                     color: row['status'] == 'SUSPENDED' ? AppColors.statusDanger : AppColors.statusOk,
                   ),
-                  const SizedBox(width: AppSpace.s2),
                   HelixChip(
                     label: row['mfa_enrolled'] == true ? strings.t('drivers.mfa') : strings.t('drivers.noMfa'),
                     color: AppColors.statusNeutral,
@@ -102,6 +104,7 @@ class _DriverDetailScreenState extends ConsumerState<DriverDetailScreen> {
                               ),
                             ),
                             QuietButton(
+                              fillWidth: false,
                               label: strings.t('drivers.revokeDevice'),
                               onPressed: () => _revokeDevice(context, device['device_id'].toString()),
                             ),

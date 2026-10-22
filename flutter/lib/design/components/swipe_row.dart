@@ -4,19 +4,25 @@ import '../motion.dart';
 import 'text.dart';
 
 /// One swipe action exposed when a row is dragged. Every action also has a
-/// visible tap fallback (see [SwipeActionRow] trailing menu) — gestures never
-/// hide the only path to an action.
+/// visible tap fallback — the trailing button on the row itself — so a
+/// gesture never hides the only path to an action.
 class SwipeAction {
-  const SwipeAction({required this.label, required this.icon, this.color, required this.onPressed});
+  const SwipeAction({
+    required this.label,
+    required this.icon,
+    this.color,
+    required this.onPressed,
+  });
+
   final String label;
   final IconData icon;
   final Color? color;
   final VoidCallback onPressed;
 }
 
-/// Row that reveals trailing actions when dragged; always reachable by tap
-/// via its trailing menu. Gesture-tracking is 1:1 with velocity handoff to a
-/// spring on release (apple-design §3–5).
+/// Row that reveals trailing actions when dragged; the same actions stay
+/// reachable by tapping the trailing button. Gesture-tracking is 1:1 with
+/// velocity handoff to a spring on release (apple-design §3–5).
 class SwipeActionRow extends StatefulWidget {
   const SwipeActionRow({
     super.key,
@@ -38,7 +44,7 @@ class _SwipeActionRowState extends State<SwipeActionRow> with SingleTickerProvid
   double _dragStartValue = 0;
   double _dragStartX = 0;
 
-  double get _actionsWidth => 96.0 * widget.actions.length;
+  double get _actionsWidth => AppTarget.swipeAction * widget.actions.length;
 
   void _onDragStart(DragStartDetails details) {
     _dragStartValue = _controller.value;
@@ -56,15 +62,13 @@ class _SwipeActionRowState extends State<SwipeActionRow> with SingleTickerProvid
   void _onDragEnd(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
     final target = _controller.value > widget.threshold || velocity < -400 ? 1.0 : 0.0;
-    setState(() {
-      springTo(_controller, target,
-          description: AppSpring.ui(),
-          velocity: gestureVelocityToSpring(
-            velocity,
-            _controller.value * _actionsWidth,
-            target * _actionsWidth,
-          ));
-    });
+    springTo(
+      _controller,
+      target,
+      description: AppSpring.ui(),
+      // The value runs opposite to the pixel axis, so the handoff inverts.
+      velocity: gestureVelocityToValue(velocity, _actionsWidth),
+    );
   }
 
   @override
@@ -76,55 +80,63 @@ class _SwipeActionRowState extends State<SwipeActionRow> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     if (widget.actions.isEmpty) return widget.child;
-    return GestureDetector(
-      onHorizontalDragStart: _onDragStart,
-      onHorizontalDragUpdate: _onDragUpdate,
-      onHorizontalDragEnd: _onDragEnd,
-          child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          AnimatedBuilder(
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onHorizontalDragStart: _onDragStart,
+          onHorizontalDragUpdate: _onDragUpdate,
+          onHorizontalDragEnd: _onDragEnd,
+          child: AnimatedBuilder(
             animation: _controller,
             builder: (context, _) {
               final offset = -_actionsWidth * _controller.value;
               return Transform.translate(
                 offset: Offset(offset, 0),
-                child: Container(width: double.infinity, color: AppColors.surface, child: widget.child),
+                child: Container(
+                  width: double.infinity,
+                  color: AppColors.surface,
+                  child: widget.child,
+                ),
               );
             },
           ),
-          Positioned(
-            right: -_actionsWidth * (1.0 - _controller.value),
-            top: 0,
-            bottom: 0,
-            width: _actionsWidth,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < widget.actions.length; i++) ...[
-                  Container(
-                    width: 96,
-                    color: widget.actions[i].color ?? AppColors.accentQuiet,
-                    alignment: Alignment.center,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(widget.actions[i].icon,
-                            size: 20, color: widget.actions[i].color ?? AppColors.accentText),
-                        const SizedBox(height: AppSpace.s1),
-                        HelixText(widget.actions[i].label,
-                            style: TypeScale.caption(widget.actions[i].color ?? AppColors.accentText),
-                            textAlign: TextAlign.center),
-                      ],
-                    ),
+        ),
+        Positioned(
+          right: -_actionsWidth * (1.0 - _controller.value),
+          top: 0,
+          bottom: 0,
+          width: _actionsWidth,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final action in widget.actions)
+                Container(
+                  width: AppTarget.swipeAction,
+                  color: action.color ?? AppColors.accentQuiet,
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        action.icon,
+                        size: 20,
+                        color: action.color ?? AppColors.accentText,
+                      ),
+                      const SizedBox(height: AppSpace.s1),
+                      HelixText(
+                        action.label,
+                        style: TypeScale.caption(action.color ?? AppColors.accentText),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
-                ],
-              ],
-            ),
+                ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

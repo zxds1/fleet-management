@@ -6,15 +6,14 @@ import '../../design/tokens.dart';
 import '../../core/errors.dart';
 import '../../i18n/strings.dart';
 
-/// Localised strings + the standard error surface for every screen.
-extension ScreenX on BuildContext {
-  Strings get s => Strings.of(this);
-}
+export '../../i18n/strings.dart' show HelixStringsX;
 
 /// Catalogue message + exactly one action (mirrors the Expo ErrorState).
 void showHelixError(BuildContext context, Object error, {VoidCallback? retry}) {
   final strings = context.s;
-  final message = error is HelixError ? strings.error(error.code) : strings.error('UNKNOWN');
+  final message = error is HelixError
+      ? strings.t(error.catalogue.i18nKey)
+      : strings.t('errors.UNKNOWN');
   if (retry != null) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -27,18 +26,25 @@ void showHelixError(BuildContext context, Object error, {VoidCallback? retry}) {
   }
 }
 
+/// The server's message for one field of a failed write. A 422 carries
+/// `field_errors` — the generic message alone hides which field is wrong.
+String? fieldErrorFor(HelixError error, String field) {
+  final message = error.fieldErrors[field];
+  if (message == null || message.trim().isEmpty) return null;
+  return message;
+}
+
 /// Catalogue message + one action rendered inline (list-level failures).
 Widget inlineError(BuildContext context, Object error, {VoidCallback? retry}) {
   final strings = context.s;
-  final code = error is HelixError ? error.code : 'UNKNOWN';
   final catalogue = (error is HelixError ? error.catalogue : null);
   int? wait;
   if (error is HelixError && error.code == 'RATE_LIMITED') {
     wait = error.retryAfterSeconds ?? 15;
   }
   return ErrorState(
-    message: strings.error(code),
-    actionLabel: catalogue == null ? null : strings.actionLabel(catalogue.action.name),
+    message: catalogue == null ? strings.t('errors.UNKNOWN') : strings.t(catalogue.i18nKey),
+    actionLabel: catalogue == null ? null : strings.t(catalogue.action.labelKey),
     onAction: retry,
     waitSeconds: wait,
   );

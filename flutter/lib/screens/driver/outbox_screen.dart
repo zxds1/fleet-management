@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../app/container.dart';
 import '../../app/providers.dart';
 import '../../core/offline/queue_store.dart';
@@ -12,6 +13,7 @@ import '../../design/components/text.dart';
 import '../../design/components/status_badge.dart';
 import '../../design/components/states.dart';
 import '../../design/tokens.dart';
+import '../../data/providers.dart';
 import '../common.dart';
 
 /// The outbox: every queued write with its exact state. Retry (same key),
@@ -40,7 +42,9 @@ class _OutboxScreenState extends ConsumerState<OutboxScreen> {
       _items = items;
       _loading = false;
     });
-    ref.read(badgeCountsProvider.notifier).setOutbox(items.where((i) => i.status == QueueStatus.pending || i.status == QueueStatus.failedReview).length);
+    final open = items.where((i) => i.status == QueueStatus.pending || i.status == QueueStatus.failedReview).length;
+    ref.read(badgeCountsProvider.notifier).setOutbox(open);
+    ref.invalidate(outboxCountProvider);
   }
 
   Future<void> _sendNow() async {
@@ -70,13 +74,13 @@ class _OutboxScreenState extends ConsumerState<OutboxScreen> {
         child: _loading
             ? const LoadingBody()
             : _items.isEmpty
-                ? EmptyState(message: strings.t('forms.queued'))
+                ? EmptyState(message: strings.t('state.empty'))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       QuietButton(
                         label: strings.t('outbox.flush'),
-                        icon: Icon(Icons.send, size: 20, color: AppColors.textSecondary),
+                        icon: Icon(Icons.send_rounded, size: 20, color: AppColors.textSecondary),
                         onPressed: _sendNow,
                       ),
                       const SizedBox(height: AppSpace.s4),
@@ -87,13 +91,13 @@ class _OutboxScreenState extends ConsumerState<OutboxScreen> {
                             actions: [
                               SwipeAction(
                                 label: strings.t('outbox.retry'),
-                                icon: Icons.repeat,
+                                icon: Icons.repeat_rounded,
                                 color: AppColors.accent,
                                 onPressed: () async => await _retryItem(item),
                               ),
                               SwipeAction(
                                 label: strings.t('outbox.discard'),
-                                icon: Icons.delete_outline,
+                                icon: Icons.delete_outline_rounded,
                                 color: AppColors.statusDanger,
                                 onPressed: () async => await _discardItem(item),
                               ),
@@ -102,7 +106,9 @@ class _OutboxScreenState extends ConsumerState<OutboxScreen> {
                               item: item,
                               onRetry: () async => await _retryItem(item),
                               onEdit: () async {
-                                await Navigator.of(context).pushNamed('/driver/outbox/${item.id}/edit');
+                                final id = item.id;
+                                if (id == null) return;
+                                await context.push('/driver/outbox/$id/edit');
                                 await _load();
                               },
                               onDiscard: () async => await _discardItem(item),
@@ -148,7 +154,10 @@ class _QueueCard extends StatelessWidget {
             HelixText(item.lastErrorCode!, style: TypeScale.caption(AppColors.statusDanger)),
           ],
           const SizedBox(height: AppSpace.s2),
-          HelixText('attempts ${item.attempts}', style: TypeScale.caption(AppColors.textSecondary)),
+          HelixText(
+            context.s.t('outbox.attempts', {'n': '${item.attempts}'}),
+            style: TypeScale.caption(AppColors.textSecondary),
+          ),
           const SizedBox(height: AppSpace.s3),
           Row(
             children: [
@@ -163,7 +172,7 @@ class _QueueCard extends StatelessWidget {
                   label: context.s.t('outbox.discard'),
                   onConfirmed: onDiscard,
                   hold: const Duration(seconds: 1),
-                  reducedMotion: MediaQuery.of(context).disableAnimations,
+                  reducedMotion: MediaQuery.disableAnimationsOf(context),
                   fillColor: AppColors.statusDanger,
                   height: 40,
                 ),

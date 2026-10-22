@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- "Field Instrument" palette — see flutter/.design/helix-flutter-app/DESIGN_TOKENS.md -->
+    <color name="helix_bone">#F6F3EC</color>
+    <color name="helix_night">#141310</color>
+    <color name="helix_icon_background">#0F172A</color>
+    <color name="helix_accent">#06B6D4</color>
+    <color name="helix_admin_accent">#8B5CF6</color>
+    <!-- Splash surface. The night variant lives in values-night/colors.xml. -->
+    <color name="helix_splash">@color/helix_bone</color>
+</resources>

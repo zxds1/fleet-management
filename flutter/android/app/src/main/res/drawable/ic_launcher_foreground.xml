@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Helix mark: two crossing strands, driver strand (cyan) and admin strand (violet). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M40,32 C40,52 68,56 68,76"
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="8"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M68,32 C68,52 40,56 40,76"
+        android:strokeColor="#8B5CF6"
+        android:strokeWidth="8"
+        android:strokeLineCap="round" />
+</vector>

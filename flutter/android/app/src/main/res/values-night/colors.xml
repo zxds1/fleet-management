@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- "Night Ops" — the splash follows the system dark theme instead of flashing white. -->
+    <color name="helix_splash">@color/helix_night</color>
+</resources>

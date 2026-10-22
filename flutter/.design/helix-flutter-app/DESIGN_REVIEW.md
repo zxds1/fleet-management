@@ -97,17 +97,29 @@ primary buttons and small indicators only. Both are recorded as verification ite
 
 ---
 
-## Build verification (post-implementation pass, 2026-10-14)
+## Build verification (re-verified 2026-10-21)
 
 - `flutter analyze` — **No issues found** (0 errors, 0 warnings, 0 infos).
-- `flutter test` — **26/26 pass** across four suites:
-  - `errors_test.dart` — the frozen 31-code catalogue, one-action contract, classification
+- `flutter test` — **73/73 pass** across eight suites:
+  - `errors_test.dart` — the catalogue, one-action contract, classification
   - `policy_format_test.dart` — single-sourced policy numbers, comma decimals, EAT ISO dates, v4 uuids
   - `security_test.dart` — fail-closed verdicts, deep-link/UUID validation parity with notification taps
   - `components_test.dart` — strand colours, status glyph+word, reduced-motion two-step confirm,
-    text-scale clamp at 1.3×, busy-state button
-- Full graph compile: the widget suite compiles `app.dart → router.dart → all 48 screen files`
-  (~12.7k lines of Dart), so the entire screen layer type-checks against the core.
+    the 200% body / 130% chrome text-scale ceilings, busy-state button
+  - `queue_test.dart`, `integration_test.dart`, `design_preview_test.dart` — queue semantics,
+    idempotent replay, 401 replay, media budget
+  - `widget_test.dart` — the route table, the shell-access redirect, the Helix theme being applied,
+    the admin strand re-theming, and the light/dark contrast pairs
+  - `session_pin_test.dart` — the offline PIN verifier (salt, work factor, lockout, wipe)
+- Full graph compile: `flutter analyze` type-checks the entire tree, including
+  `app.dart → router.dart → shells.dart → all 50 screen files` (~14k lines of Dart).
+
+### The 2026-10-14 verification was unsound
+
+The 2026-10-14 pass reported a clean analyze and 26/26 tests, but the tree it measured was not
+the shipping app: `main.dart` was still the Flutter counter demo, `router.dart` did not exist,
+`HelixApp` was unreferenced, and `test/widget_test.dart` asserted the counter's "0" button. The
+screen layer type-checked; the app did not run. See `docs/FLUTTER-REVIEW-2026-10-19.md`.
 
 ### Not verified here (environment limits, not code gaps)
 
@@ -123,8 +135,12 @@ primary buttons and small indicators only. Both are recorded as verification ite
 
 ### Known functional simplifications shipped (tracked, not silent)
 
-- Tracker pairing accepts **manual 15-digit IMEI** entry; QR scan is a post-MVP addition.
-- Vehicle create/edit uses list + form flows; the create-sheet on Vehicles is the remaining stub
-  (`onPressed` no-op pending the same sheet wiring as VehicleIssues).
+- Tracker pairing accepts **manual 15-digit IMEI** entry (now regex-validated against the server's
+  `^\d{15}$`); QR scan is a post-MVP addition.
+- Vehicle create/edit uses list + form flows; the vehicle **detail/edit** flow now exists against
+  `GET /vehicles/:id` and `PATCH /vehicles/:id`.
 - Root/jailbreak detection policy is implemented and tested (`core/security.dart`); the platform
-  probe (jail-monkey equivalent) is the remaining native wiring.
+  probe (jail-monkey equivalent) is the remaining native wiring, so `AuthStatus.blocked` is still
+  unreachable in a shipped build.
+- Certificate pinning is declared in `Config` but not enforced; `securityVerdict()` is not called
+  from production code. See `docs/FLUTTER-REVIEW-2026-10-19.md` §8.

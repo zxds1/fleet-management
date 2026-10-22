@@ -44,6 +44,10 @@ class MockBackend {
   // ignore: unused_field
   String? _currentUserId;
   bool failNextWithServiceUnavailable = false;
+
+  /// When set, the session body carries an access token that is already past
+  /// its expiry, so the client must take the refresh path.
+  bool expireAccessTokens = false;
   int refreshCount = 0;
   String? openShiftIdForTest; // test-visible accessor for the ingest-bounds scenarios
   final List<String> receivedIdempotencyKeys = <String>[];
@@ -329,7 +333,15 @@ class MockBackend {
 
   Future<Map<String, dynamic>> _readRoute(String method, String path, HttpRequest request, String? rawBody, String? auth) async {
     _requireAuth(request, auth);
-    final cursor = request.uri.queryParameters['cursor'];
+    return readBody(path, cursor: request.uri.queryParameters['cursor']);
+  }
+
+  /// The canned body for a GET, without going through a socket.
+  ///
+  /// A widget test runs in a fake-async zone, where a real HTTP request never
+  /// completes — so the render suite drives the same fixtures through a Dio
+  /// adapter instead of a server.
+  Map<String, dynamic> readBody(String path, {String? cursor}) {
 
     if (path == '$basePath/drivers/me/onboarding') {
       return _ok(200, {
@@ -377,9 +389,9 @@ class MockBackend {
     }
     if (path == '$basePath/media/upload-url') {
       return _ok(201, {
-        'mediaObjectId': newUuid(),
-        'uploadUrl': '$host/_upload/${newUuid()}',
-        'expiresInSeconds': 60,
+        'media_object_id': newUuid(),
+        'upload_url': '$host/_upload/${newUuid()}',
+        'expires_in_seconds': 60,
         'method': 'PUT',
       });
     }
@@ -449,7 +461,9 @@ class MockBackend {
     return {
       'token_type': 'Bearer',
       'access_token': _accessToken,
-      'access_token_expires_at': DateTime.now().toUtc().add(const Duration(minutes: 15)).toIso8601String(),
+      'access_token_expires_at': expireAccessTokens
+          ? DateTime.now().toUtc().subtract(const Duration(minutes: 1)).toIso8601String()
+          : DateTime.now().toUtc().add(const Duration(minutes: 15)).toIso8601String(),
       'refresh_token': refreshToken,
       'refresh_token_expires_at': DateTime.now().toUtc().add(const Duration(days: 7)).toIso8601String(),
       'session_id': newUuid(),
@@ -508,12 +522,18 @@ class MockBackend {
     request.response.statusCode = status;
     if (status == 204) {
       // 204 must not carry a body
+      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
       await request.response.close();
       return;
     }
     final isProblem = result['problem'] == true;
     request.response.headers.contentType =
         isProblem ? ContentType('application', 'problem+json') : ContentType.json;
+    // Dart's HttpServer does not support request pipelining: a second request
+    // that arrives on a connection before the first response is written comes
+    // back as a bodiless 400. Closing the connection keeps every request
+    // independent, the way a real server on a keep-alive pool behaves.
+    request.response.headers.set(HttpHeaders.connectionHeader, 'close');
     request.response.write(jsonEncode(body));
     await request.response.close();
   }

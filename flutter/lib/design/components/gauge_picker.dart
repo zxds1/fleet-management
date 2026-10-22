@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 import 'text.dart';
 
@@ -30,7 +31,8 @@ class GaugePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: 'Fuel gauge reading',
+      container: true,
+      label: Strings.of(context).t('gauge.label'),
       child: Row(
         children: [
           for (final position in GaugePosition.values)
@@ -61,23 +63,32 @@ class _GaugeCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       selected: selected,
+      inMutuallyExclusiveGroup: true,
       button: true,
       label: _gaugeLabels[position]!,
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: AppMotion.durPress,
-          curve: AppMotion.easeOut,
-          height: AppTarget.chipPhone,
-          decoration: BoxDecoration(
-            color: selected ? AppColors.accentQuiet : AppColors.surfaceSunk,
-            borderRadius: BorderRadius.circular(AppRadius.control),
-            border: Border.all(color: selected ? AppColors.accentText : AppColors.line),
-          ),
-          alignment: Alignment.center,
-          child: HelixText(
-            _gaugeLabels[position]!,
-            style: TypeScale.mono(selected ? AppColors.accentText : AppColors.textSecondary, size: 22),
+      excludeSemantics: true,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.control),
+          splashColor: AppColors.accent.withValues(alpha: 0.12),
+          highlightColor: Colors.transparent,
+          child: Container(
+            height: AppTarget.chipPhone,
+            decoration: BoxDecoration(
+              color: selected ? AppColors.accentQuiet : AppColors.surfaceSunk,
+              borderRadius: BorderRadius.circular(AppRadius.control),
+              border: Border.all(color: selected ? AppColors.accentText : AppColors.line),
+            ),
+            alignment: Alignment.center,
+            child: HelixText.chrome(
+              _gaugeLabels[position]!,
+              style: TypeScale.mono(
+                selected ? AppColors.accentText : AppColors.textSecondary,
+                size: AppType.leadPhone,
+              ),
+            ),
           ),
         ),
       ),
@@ -86,10 +97,14 @@ class _GaugeCell extends StatelessWidget {
 }
 
 /// Fuel-gauge fill level (0..1) drawn as a hairline tank — used in detail rows.
+/// The fill colour carries the level: a nearly empty tank must not read as
+/// healthy, so it shifts to warn at a quarter and to danger at empty.
 class GaugeBar extends StatelessWidget {
   const GaugeBar({super.key, required this.gauge});
 
   final String? gauge;
+
+  static const _barWidth = 72.0;
 
   static double? fraction(String? gauge) => switch (gauge?.toUpperCase()) {
         'EMPTY' => 0.05,
@@ -103,9 +118,16 @@ class GaugeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final level = fraction(gauge);
+    final fill = level == null
+        ? AppColors.textTertiary
+        : level <= 0.05
+            ? AppColors.statusDanger
+            : level < 0.3
+                ? AppColors.statusWarn
+                : AppColors.statusOk;
     return Container(
       height: 10,
-      width: 72,
+      width: _barWidth,
       decoration: BoxDecoration(
         color: AppColors.surfaceSunk,
         borderRadius: BorderRadius.circular(AppRadius.full),
@@ -117,7 +139,7 @@ class GaugeBar extends StatelessWidget {
           widthFactor: level ?? 0,
           child: Container(
             decoration: BoxDecoration(
-              color: AppColors.statusOk,
+              color: fill,
               borderRadius: BorderRadius.circular(AppRadius.full),
             ),
           ),

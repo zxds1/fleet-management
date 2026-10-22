@@ -1,181 +1,221 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../app/providers.dart';
 import '../../core/errors.dart';
+import '../../core/format.dart';
 import '../../data/providers.dart';
-import '../../design/components/segmented.dart';
-import '../../design/components/text.dart';
 import '../../design/components/buttons.dart';
+import '../../design/components/card.dart';
 import '../../design/components/field.dart';
 import '../../design/components/sheet_host.dart';
-import '../../design/components/status_badge.dart';
+import '../../design/components/states.dart';
+import '../../design/components/text.dart';
 import '../../design/tokens.dart';
 import '../common.dart';
+import 'admin_support.dart';
+import 'vehicle_detail_screen.dart';
 
-/// Vehicle fleet list (GET /vehicles returns a raw array — the client caps at
-/// one page and manages its own window).
-class VehiclesScreen extends ConsumerStatefulWidget {
+/// Fleet vehicles: live status, odometer, issues. Tapping a row opens the
+/// vehicle, which is where it is edited.
+class VehiclesScreen extends ConsumerWidget {
   const VehiclesScreen({super.key});
 
-  @override
-  ConsumerState<VehiclesScreen> createState() => _VehiclesScreenState();
-}
-
-class _VehiclesScreenState extends ConsumerState<VehiclesScreen> {
-  List<Map<String, dynamic>> _vehicles = const [];
-  bool _loading = true;
-  String _filter = 'all';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
+  Future<void> _create(BuildContext context, WidgetRef ref) async {
+    if (!adminCan(ref, 'asset:create')) return;
+    final strings = context.s;
+    await SheetHost.show<void>(
+      context: context,
+      title: strings.t('vehicle.create'),
+      child: const _VehicleCreateForm(),
+    );
+    ref.invalidate(adminVehiclesProvider);
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final strings = context.s;
+    final async = ref.watch(adminVehiclesProvider);
+    final canCreate = ref.watch(sessionProvider).permissions.contains('asset:create');
+    return Scaffold(
+      appBar: AppBar(
+        title: HelixText(strings.t('vehicle.title'), style: TypeScale.title(AppColors.text)),
+        backgroundColor: AppColors.frostChrome,
+        iconTheme: IconThemeData(color: AppColors.text),
+        foregroundColor: AppColors.text,
+      ),
+      body: async.when(
+        loading: () => const LoadingBody(),
+        error: (e, _) => inlineError(context, e, retry: () => ref.invalidate(adminVehiclesProvider)),
+        data: (vehicles) {
+          if (vehicles.isEmpty) {
+            return EmptyState(message: strings.t('vehicle.none'));
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(AppSpace.s4),
+            itemCount: vehicles.length,
+            separatorBuilder: (_, _) => const SizedBox(height: AppSpace.s2),
+            itemBuilder: (context, index) {
+              final v = vehicles[index];
+              final id = v['id']?.toString() ?? '';
+              final status = v['status']?.toString();
+              final visual = adminVehicleStatusVisual(status);
+              return HelixCard(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => VehicleDetailScreen(vehicleId: id)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: HelixText(
+                            v['license_plate']?.toString() ?? '',
+                            style: TypeScale.bodyStrong(AppColors.text),
+                          ),
+                        ),
+                        AdminStatusChip(
+                          label: adminVehicleStatusLabel(context, status),
+                          glyph: visual.glyph,
+                          color: visual.color,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.s2),
+                    HelixText(
+                      '${v['make'] ?? ''} ${v['model'] ?? ''}'.trim(),
+                      style: TypeScale.caption(AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: AppSpace.s1),
+                    HelixText(
+                      Fmt.km(adminNum(v['current_odometer_km'])),
+                      style: TypeScale.caption(AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: AppSpace.s2),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: QuietButton(
+                        label: strings.t('vehicle.issues'),
+                        onPressed: () => context.push('/admin/vehicle-issues/$id'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: canCreate
+          ? FloatingActionButton(
+              backgroundColor: AppColors.adminAccent,
+              foregroundColor: AppColors.onAdminAccent,
+              onPressed: () => _create(context, ref),
+              child: const Icon(Icons.add_rounded),
+            )
+          : null,
+    );
+  }
+}
+
+/// The create-vehicle form. It owns the write and pops the SHEET, so the
+/// screen behind it is never popped by mistake and the controllers live for
+/// exactly as long as the sheet does.
+class _VehicleCreateForm extends ConsumerStatefulWidget {
+  const _VehicleCreateForm();
+
+  @override
+  ConsumerState<_VehicleCreateForm> createState() => _VehicleCreateFormState();
+}
+
+class _VehicleCreateFormState extends ConsumerState<_VehicleCreateForm> {
+  final _plate = TextEditingController();
+  final _make = TextEditingController();
+  final _model = TextEditingController();
+  final _year = TextEditingController();
+  String _vehicleClass = 'TRUCK';
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _plate.dispose();
+    _make.dispose();
+    _model.dispose();
+    _year.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final strings = context.s;
+    if (_plate.text.trim().isEmpty) {
+      setState(() => _error = strings.error('VALIDATION_ERROR'));
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
-      final rows = await ref.read(repositoryProvider).rawList('vehicles', query: {'limit': 200});
-      if (!mounted) return;
-      setState(() {
-        _vehicles = rows.take(200).toList();
-        _loading = false;
+      await ref.read(repositoryProvider).createVehicle({
+        'license_plate': _plate.text.trim(),
+        'make': _make.text.trim(),
+        'model': _model.text.trim(),
+        'year': int.tryParse(_year.text.trim()),
+        'vehicle_class': _vehicleClass,
       });
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
     } on HelixError catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      showHelixError(context, e);
+      setState(() => _error = e.fieldErrors['license_plate'] ?? strings.error(e.code));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = context.s;
-    final canUpdate = ref.watch(sessionProvider).permissions.contains('asset:update');
-    final visible = _vehicles.where((v) {
-      if (_filter == 'operational') return v['is_operational'] == true;
-      if (_filter == 'non-operational') return v['is_operational'] != true;
-      return true;
-    }).toList();
-    return Scaffold(
-      appBar: AppBar(
-        title: HelixText(strings.t('vehicle.title'), style: TypeScale.title(AppColors.text)),
-        backgroundColor: AppColors.surface,
-      ),
-      body: _loading
-          ? const LoadingBody()
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(AppSpace.s4),
-                    child: Segmented<String>(
-                      value: _filter,
-                      onChanged: (v) => setState(() => _filter = v),
-                      options: [
-                        SegmentedOption('all', strings.t('anomalies.all')),
-                        SegmentedOption('operational', strings.t('status.OPERATIONAL')),
-                        SegmentedOption('non-operational', strings.t('vehicle.nonOperationalReason')),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) {
-                        final vehicle = visible[index];
-                        return ListTile(
-                          title: HelixText('${vehicle['license_plate'] ?? ''}', style: TypeScale.mono(AppColors.text)),
-                          subtitle: HelixText(
-                            '${vehicle['make'] ?? ''} ${vehicle['model'] ?? ''} · ${vehicle['odometer_km'] ?? '—'} km',
-                            style: TypeScale.caption(AppColors.textSecondary),
-                          ),
-                          trailing: vehicle['is_operational'] != true
-                              ? HelixChip(label: '✕', color: AppColors.statusDanger)
-                              : HelixChip(label: '►', color: AppColors.statusOk),
-                          onTap: () => context.push('/admin/vehicle-issues/${vehicle['id']}'),
-                        );
-                      },
-                    ),
-                  ),
-                  if (canUpdate)
-                    Padding(
-                      padding: const EdgeInsets.all(AppSpace.s4),
-                      child: OutlinedButton.icon(
-                        icon: Icon(Icons.add, color: AppColors.adminAccent),
-                        label: HelixText(strings.t('vehicle.create'), style: TypeScale.button(AppColors.adminAccent)),
-                        onPressed: _createVehicle,
-                      ),
-                    ),
-                ],
-              ),
+    return Padding(
+      padding: const EdgeInsets.all(AppSpace.s5),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Field(label: strings.t('vehicle.plate'), controller: _plate, required: true, errorText: _error),
+          const SizedBox(height: AppSpace.s3),
+          Field(label: strings.t('vehicle.make'), controller: _make),
+          const SizedBox(height: AppSpace.s3),
+          Field(label: strings.t('vehicle.model'), controller: _model),
+          const SizedBox(height: AppSpace.s3),
+          Field(label: strings.t('vehicle.year'), controller: _year, keyboardType: TextInputType.number),
+          const SizedBox(height: AppSpace.s3),
+          HelixText(strings.t('vehicle.class'), style: TypeScale.caption(AppColors.textSecondary)),
+          const SizedBox(height: AppSpace.s2),
+          DropdownButtonFormField<String>(
+            initialValue: _vehicleClass,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppColors.surfaceSunk,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.control)),
             ),
-    );
-  }
-
-  /// Create vehicle via a bottom sheet (POST /vehicles).
-  Future<void> _createVehicle() async {
-    final strings = context.s;
-    final plate = TextEditingController();
-    final make = TextEditingController();
-    final model = TextEditingController();
-    final year = TextEditingController();
-    String vehicleClass = 'TRACTOR';
-    await SheetHost.show(
-      context: context,
-      title: strings.t('vehicle.create'),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpace.s5),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Field(label: strings.t('vehicle.plate'), controller: plate),
-            const SizedBox(height: AppSpace.s3),
-            Field(label: strings.t('vehicle.make'), controller: make),
-            const SizedBox(height: AppSpace.s3),
-            Field(label: strings.t('vehicle.model'), controller: model),
-            const SizedBox(height: AppSpace.s3),
-            Field(label: 'Year', controller: year, keyboardType: TextInputType.number),
-            const SizedBox(height: AppSpace.s3),
-            DropdownButtonFormField<String>(
-              initialValue: vehicleClass,
-              decoration: InputDecoration(filled: true, fillColor: AppColors.surfaceSunk),
-              items: ['TRACTOR', 'RIGID', 'VAN', 'PICKUP']
-                  .map((c) => DropdownMenuItem(value: c, child: HelixText(c, style: TypeScale.body(AppColors.text))))
-                  .toList(),
-              onChanged: (v) => vehicleClass = v ?? 'TRACTOR',
-            ),
-            const SizedBox(height: AppSpace.s4),
-            StrandButton(
-              label: strings.t('actions.save'),
-              shell: Shell.admin,
-              onPressed: () async {
-                final navigator = Navigator.of(context);
-                try {
-                  await ref.read(repositoryProvider).createVehicle({
-                    'license_plate': plate.text.trim(),
-                    'vehicle_class': vehicleClass,
-                    if (make.text.trim().isNotEmpty) 'make': make.text.trim(),
-                    if (model.text.trim().isNotEmpty) 'model': model.text.trim(),
-                    if (year.text.trim().isNotEmpty) 'year': int.tryParse(year.text.trim()),
-                  });
-                  navigator.pop();
-                  ref.invalidate(vehiclesProvider);
-                  await _load();
-                } on HelixError catch (e) {
-                  if (mounted) showHelixError(context, e);
-                }
-              },
-            ),
-          ],
-        ),
+            items: const ['TRUCK', 'VAN', 'TRACTOR', 'TRAILER', 'BUS', 'CAR']
+                .map((c) => DropdownMenuItem(value: c, child: HelixText(c, style: TypeScale.body(AppColors.text))))
+                .toList(),
+            onChanged: (v) => setState(() => _vehicleClass = v ?? 'TRUCK'),
+          ),
+          const SizedBox(height: AppSpace.s4),
+          StrandButton(
+            label: strings.t('vehicle.create'),
+            shell: Shell.admin,
+            busy: _busy,
+            onPressed: _busy ? null : _submit,
+          ),
+        ],
       ),
     );
-    plate.dispose();
-    make.dispose();
-    model.dispose();
-    year.dispose();
   }
 }

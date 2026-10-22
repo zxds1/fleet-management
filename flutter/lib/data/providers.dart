@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/container.dart';
+import '../core/format.dart';
 import '../core/policy.dart';
 import 'repository.dart';
 
@@ -29,9 +30,29 @@ final vehicleStatesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) a
   return ref.watch(repositoryProvider).vehicleStates();
 });
 
+/// The vehicle this driver is bound to: the assignment first, the open shift
+/// as the fallback.
+final ownVehicleIdProvider = FutureProvider<String?>((ref) async {
+  final assignment = await ref.watch(assignmentProvider.future);
+  final assigned = assignment?['vehicle_id'] as String?;
+  if (assigned != null && assigned.isNotEmpty) return assigned;
+  final shift = await ref.watch(activeShiftProvider.future);
+  final shifted = shift?['vehicle_id'] as String?;
+  if (shifted != null && shifted.isNotEmpty) return shifted;
+  return null;
+});
+
+/// The driver's OWN vehicle. The fleet map answers every vehicle for a
+/// privileged caller, so the row is joined with the driver's own assignment
+/// instead of taking the first one.
 final myVehicleProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
+  final vehicleId = await ref.watch(ownVehicleIdProvider.future);
+  if (vehicleId == null) return null;
   final states = await ref.watch(repositoryProvider).vehicleStates();
-  return states.isEmpty ? null : states.first;
+  for (final state in states) {
+    if (state['vehicle_id'] == vehicleId) return state;
+  }
+  return null;
 });
 
 final templatesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -86,15 +107,23 @@ final vehiclesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async 
   return ref.watch(repositoryProvider).rawList('vehicles', query: {'limit': 200});
 });
 
+/// The last odometer reading this driver may build on: the open shift's
+/// start reading, else the driver's own vehicle odometer.
+final lastOdometerProvider = FutureProvider<int?>((ref) async {
+  final shift = await ref.watch(activeShiftProvider.future);
+  final shiftKm = (shift?['start_odometer_km'] as num?)?.toInt();
+  if (shiftKm != null) return shiftKm;
+  final vehicle = await ref.watch(myVehicleProvider.future);
+  return (vehicle?['odometer_km'] as num?)?.toInt();
+});
+
+/// When this driver may clock in next — from the driver's own vehicle, never
+/// from the fleet average.
 final hosRestProvider = FutureProvider<DateTime?>((ref) async {
-  final states = await ref.watch(repositoryProvider).vehicleStates();
-  if (states.isEmpty) return null;
-  final next = states
-      .map((v) => DateTime.tryParse(v['next_eligible_clock_in_at']?.toString() ?? ''))
-      .whereType<DateTime>()
-      .where((d) => d.isAfter(DateTime.now().toUtc()))
-      .fold<DateTime?>(null, (a, b) => a == null || b.isBefore(a) ? b : a);
-  return next;
+  final vehicle = await ref.watch(myVehicleProvider.future);
+  final next = Fmt.parseTimestamp(vehicle?['next_eligible_clock_in_at']?.toString());
+  if (next == null) return null;
+  return next.isAfter(DateTime.now().toUtc()) ? next : null;
 });
 
 final outboxCountProvider = FutureProvider<int>((ref) {

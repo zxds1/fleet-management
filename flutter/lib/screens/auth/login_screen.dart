@@ -26,7 +26,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _busy = false;
   String? _deviceRegisterError;
 
-  bool get _isPhone => RegExp(r'^\+?[1-9]\d{6,14}$').hasMatch(_contact.text.trim());
+  /// Kenyan mobiles are written locally as 07… (or 01…) and internationally as
+  /// +2547… — both are the same number.
+  static final RegExp _localPhone = RegExp(r'^0[17]\d{8}$');
+  static final RegExp _kenyaPhone = RegExp(r'^\+254[17]\d{8}$');
+  static final RegExp _intlPhone = RegExp(r'^\+?[1-9]\d{6,14}$');
+
+  bool get _isPhone {
+    final text = _contact.text.trim();
+    if (text.isEmpty) return false;
+    return _localPhone.hasMatch(text) || _kenyaPhone.hasMatch(text) || _intlPhone.hasMatch(text);
+  }
+
+  /// The international form the server expects.
+  String? get _phoneNumber {
+    final text = _contact.text.trim();
+    if (_localPhone.hasMatch(text)) return '+254${text.substring(1)}';
+    return text;
+  }
+
+  TextInputType get _contactKeyboard {
+    final text = _contact.text.trim();
+    if (text.isEmpty) return TextInputType.emailAddress;
+    if (text.contains('@')) return TextInputType.emailAddress;
+    if (RegExp(r'^[+0-9]').hasMatch(text)) return TextInputType.phone;
+    return TextInputType.emailAddress;
+  }
 
   Future<void> _submit() async {
     final strings = context.s;
@@ -40,7 +65,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final contact = _contact.text.trim();
       final result = await session.login(
         email: _isPhone ? null : contact,
-        phone: _isPhone ? contact : null,
+        phone: _isPhone ? _phoneNumber : null,
         password: _password.text,
         deviceIdHash: deviceIdHash,
       );
@@ -92,7 +117,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Field(
                   label: strings.t('auth.emailOrPhone'),
                   controller: _contact,
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: _contactKeyboard,
                   onChanged: (_) => setState(() {}),
                   textInputAction: TextInputAction.next,
                 ),
@@ -134,14 +159,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   busy: _busy,
                 ),
                 const SizedBox(height: AppSpace.s3),
-                Row(
+                // The two secondary actions wrap rather than overflow: their
+                // labels are long in both languages, and a phone is narrower
+                // than the pair side by side.
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: AppSpace.s3,
+                  runSpacing: AppSpace.s2,
                   children: [
                     QuietButton(
+                      fillWidth: false,
                       label: strings.t('auth.signUp'),
                       onPressed: () => context.push('/signup'),
                     ),
-                    const Spacer(),
                     QuietButton(
+                      fillWidth: false,
                       label: strings.t('auth.forgotPassword'),
                       onPressed: () => context.push('/password-reset'),
                     ),
@@ -151,7 +183,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: AppSpace.s3),
                   QuietButton(
                     label: 'Design preview (offline)',
-                    icon: Icon(Icons.palette_outlined, size: 20, color: AppColors.adminAccent),
+                    icon: Icon(Icons.palette_rounded, size: 20, color: AppColors.adminAccent),
                     onPressed: () async {
                       await ref.read(sessionProvider).enterPreview();
                     },

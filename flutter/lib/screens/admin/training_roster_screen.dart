@@ -27,7 +27,7 @@ class TrainingRosterScreen extends ConsumerWidget {
           try {
             return await ref.read(repositoryProvider).page('training/roster', cursor: cursor);
           } on HelixError catch (e) {
-            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
           }
         },
         itemBuilder: (context, row) {

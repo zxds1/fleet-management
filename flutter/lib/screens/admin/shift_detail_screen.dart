@@ -8,12 +8,19 @@ import '../../design/components/buttons.dart';
 import '../../design/components/card.dart';
 import '../../design/components/field.dart';
 import '../../design/components/screen.dart';
+import '../../design/components/sheet_host.dart';
 import '../../design/components/text.dart';
 import '../../design/components/status_badge.dart';
 import '../../design/tokens.dart';
 import '../common.dart';
+import 'admin_support.dart';
 
 /// Shift detail: verify / flag-with-reason / force-close — all gated.
+///
+/// The review endpoint is `POST /shifts/:id/verify`, whose body is
+/// `{action, flag_reason, corrected_end_odometer_km}`. A VERIFY never carries
+/// a reason; a FLAG always carries one. Force-close is a different endpoint
+/// with its own `reason` field.
 class ShiftDetailScreen extends ConsumerStatefulWidget {
   const ShiftDetailScreen({super.key, required this.shiftId});
 
@@ -24,8 +31,14 @@ class ShiftDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
-  final _reason = TextEditingController();
+  final _correctedOdometer = TextEditingController();
   bool _busy = false;
+
+  @override
+  void dispose() {
+    _correctedOdometer.dispose();
+    super.dispose();
+  }
 
   Future<void> _act(Future<void> Function() action) async {
     setState(() => _busy = true);
@@ -33,6 +46,7 @@ class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
       await action();
       if (!mounted) return;
       ref.invalidate(_shiftProvider(widget.shiftId));
+      bumpAdminRevision(ref, 'shifts');
     } on HelixError catch (e) {
       if (mounted) showHelixError(context, e);
     } finally {
@@ -40,17 +54,62 @@ class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
     }
   }
 
+  Future<void> _verify() async {
+    if (!adminCan(ref, 'shift:verify')) return;
+    await _act(() => ref.read(repositoryProvider).verifyShift(widget.shiftId, {'action': 'VERIFY'}));
+  }
+
+  Future<void> _flag() async {
+    if (!adminCan(ref, 'shift:verify')) return;
+    final strings = context.s;
+    final reason = await SheetHost.show<String>(
+      context: context,
+      title: strings.t('shifts.flagReason'),
+      child: AdminReasonForm(
+        label: strings.t('shifts.flagReason'),
+        submitLabel: strings.t('admin.flag'),
+      ),
+    );
+    if (reason == null || reason.trim().isEmpty) return;
+    final corrected = double.tryParse(_correctedOdometer.text.trim());
+    await _act(
+      () => ref.read(repositoryProvider).verifyShift(widget.shiftId, {
+        'action': 'FLAG',
+        'flag_reason': reason.trim(),
+        'corrected_end_odometer_km': corrected,
+      }),
+    );
+  }
+
+  Future<void> _forceClose() async {
+    if (!adminCan(ref, 'shift:force_close')) return;
+    final strings = context.s;
+    final reason = await SheetHost.show<String>(
+      context: context,
+      title: strings.t('shifts.forceClose'),
+      child: AdminReasonForm(
+        label: strings.t('shifts.flagReason'),
+        submitLabel: strings.t('shifts.forceClose'),
+      ),
+    );
+    if (reason == null || reason.trim().isEmpty) return;
+    await _act(
+      () => ref.read(repositoryProvider).forceCloseShift(widget.shiftId, reason: reason.trim()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = context.s;
-    final repo = ref.watch(repositoryProvider);
     final canVerify = ref.watch(sessionProvider).permissions.contains('shift:verify');
     final canForceClose = ref.watch(sessionProvider).permissions.contains('shift:force_close');
     final async = ref.watch(_shiftProvider(widget.shiftId));
     return Scaffold(
       appBar: AppBar(
         title: HelixText(strings.t('shifts.title'), style: TypeScale.title(AppColors.text)),
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.frostChrome,
+        iconTheme: IconThemeData(color: AppColors.text),
+        foregroundColor: AppColors.text,
       ),
       body: Screen(
         refresh: () async => ref.invalidate(_shiftProvider(widget.shiftId)),
@@ -74,10 +133,21 @@ class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
               HelixCard(
                 child: Column(
                   children: [
-                    KeyValueRow(label: strings.t('shifts.clockIn'), value: Fmt.dateTime(DateTime.tryParse(row['clock_in_at']?.toString() ?? ''))),
-                    KeyValueRow(label: strings.t('shifts.clockOut'), value: Fmt.dateTime(DateTime.tryParse(row['clock_out_at']?.toString() ?? ''))),
+                    KeyValueRow(
+                      label: strings.t('shifts.clockIn'),
+                      value: Fmt.dateTime(Fmt.parseTimestamp(row['clock_in_at']?.toString())),
+                    ),
+                    KeyValueRow(
+                      label: strings.t('shifts.clockOut'),
+                      value: Fmt.dateTime(Fmt.parseTimestamp(row['clock_out_at']?.toString())),
+                    ),
                     KeyValueRow(label: strings.t('shifts.distance'), value: '${row['total_distance_km'] ?? '—'}'),
-                    KeyValueRow(label: strings.t('shifts.duration'), value: Fmt.countdown(Duration(seconds: (row['clock_out_at'] != null && row['clock_in_at'] != null) ? DateTime.parse(row['clock_out_at'].toString()).difference(DateTime.parse(row['clock_in_at'].toString())).inSeconds : 0))),
+                    KeyValueRow(
+                      label: strings.t('shifts.duration'),
+                      value: Fmt.countdown(
+                        Duration(seconds: _durationSeconds(row)),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -92,27 +162,33 @@ class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: AppSpace.s4),
-              Field(label: strings.t('shifts.flagReason'), controller: _reason, maxLines: 2),
-              const SizedBox(height: AppSpace.s4),
               if (canVerify) ...[
+                const SizedBox(height: AppSpace.s4),
+                Field(
+                  label: strings.t('shift.odometer'),
+                  controller: _correctedOdometer,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: AppSpace.s4),
                 StrandButton(
                   label: strings.t('admin.verify'),
                   shell: Shell.admin,
                   busy: _busy,
-                  onPressed: () => _act(() => repo.verifyShift(widget.shiftId, {'action': 'VERIFY', 'reason': _reason.text.trim().isEmpty ? null : _reason.text.trim()})),
+                  onPressed: _busy ? null : _verify,
                 ),
                 const SizedBox(height: AppSpace.s2),
                 QuietButton(
                   label: strings.t('admin.flag'),
-                  onPressed: () => _act(() => repo.verifyShift(widget.shiftId, {'action': 'FLAG', 'reason': _reason.text.trim()})),
+                  busy: _busy,
+                  onPressed: _busy ? null : _flag,
                 ),
               ],
               if (canForceClose) ...[
                 const SizedBox(height: AppSpace.s2),
                 QuietButton(
                   label: strings.t('shifts.forceClose'),
-                  onPressed: () => _act(() => repo.forceCloseShift(widget.shiftId, reason: _reason.text.trim().isEmpty ? null : _reason.text.trim())),
+                  busy: _busy,
+                  onPressed: _busy ? null : _forceClose,
                 ),
               ],
             ],
@@ -120,6 +196,13 @@ class _ShiftDetailScreenState extends ConsumerState<ShiftDetailScreen> {
         ),
       ),
     );
+  }
+
+  static int _durationSeconds(Map<String, dynamic> row) {
+    final start = Fmt.parseTimestamp(row['clock_in_at']?.toString());
+    final end = Fmt.parseTimestamp(row['clock_out_at']?.toString());
+    if (start == null || end == null) return 0;
+    return end.difference(start).inSeconds;
   }
 }
 

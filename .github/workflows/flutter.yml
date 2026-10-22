@@ -2,7 +2,7 @@ name: Flutter app
 
 on:
   push:
-    branches: [main]
+    branches: [main, final-app]
     paths:
       - "flutter/**"
       - ".github/workflows/flutter.yml"
@@ -16,6 +16,16 @@ concurrency:
   group: flutter-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  # The release build fails closed without this: a release with no pin
+  # material would connect to the API over public roots.
+  RELEASE_PINS: ${{ secrets.HELIX_PINNED_CERT_SHA256 }}
+
 jobs:
   verify:
     name: Analyze, test and build
@@ -26,6 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # AGP 8.12 needs JDK 17. The runner's default JDK moves, and a newer
+      # JDK fails the build with an unhelpful Gradle error.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -35,13 +53,15 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        run: flutter analyze --fatal-infos
 
       - name: Test
         run: flutter test
 
       - name: Build Android (debug APK)
-        run: flutter build apk --debug
+        run: |
+          flutter build apk --debug \
+            --dart-define=MAP_TILE_URL="${{ secrets.HELIX_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' }}"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -57,7 +77,91 @@ jobs:
           {
             echo "### Flutter app" >> "$GITHUB_STEP_SUMMARY"
             echo "- analyze: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
-            echo "- artifact: \`helix-android-apk\` (debug APK, unsigned)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- artifact: \`helix-android-apk\` (debug APK)" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Design preview (offline): log in with the **Design preview (offline)** button on the login screen." >> "$GITHUB_STEP_SUMMARY"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Signed release bundle
+    # A release bundle is produced from the integration branch and from tags.
+    needs: verify
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter
+    env:
+      # The tile source. The OpenStreetMap public tiles are the default and
+      # need no key; a deployment with its own provider sets this.
+      HELIX_MAP_TILE_URL: ${{ secrets.HELIX_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Fail closed without the release secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for secret in HELIX_KEYSTORE_BASE64 HELIX_KEYSTORE_PASSWORD HELIX_KEY_ALIAS HELIX_KEY_PASSWORD HELIX_PINNED_CERT_SHA256 HELIX_API_CA_PEM; do
+            if [ -z "${!secret:-}" ]; then
+              echo "::error::missing secret $secret — a release build refuses to run without it"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+
+      - name: Assemble the signing material
+        # The keystore never enters the repository: it is written to the
+        # runner's temporary directory and referenced by path.
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/helix-signing"
+          printf '%s' "$HELIX_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/helix-signing/helix-release.p12"
+          cat > "$RUNNER_TEMP/helix-signing/key.properties" <<EOF
+          storeFile=helix-release.p12
+          storePassword=$HELIX_KEYSTORE_PASSWORD
+          keyAlias=$HELIX_KEY_ALIAS
+          keyPassword=$HELIX_KEY_PASSWORD
+          EOF
+          echo "HELIX_KEYSTORE_PROPERTIES=$RUNNER_TEMP/helix-signing/key.properties" >> "$GITHUB_ENV"
+
+      - name: Install the pinned CA
+        # The client trusts this certificate and nothing else.
+        run: |
+          set -euo pipefail
+          mkdir -p assets/pins
+          printf '%s' "$HELIX_API_CA_PEM" > assets/pins/api-ca.pem
+
+      - name: Build the signed bundle
+        run: |
+          flutter build appbundle --release \
+            --dart-define=PINNED_CERT_SHA256="$HELIX_PINNED_CERT_SHA256" \
+            --dart-define=REQUIRE_PINNING=true \
+            --dart-define=MAP_TILE_URL="$HELIX_MAP_TILE_URL"
+
+      - name: Verify the signature
+        run: |
+          set -euo pipefail
+          keytool -printcert -jarfile build/app/outputs/bundle/release/app-release.aab \
+            | grep -F "$HELIX_RELEASE_CERT_SHA256"
+
+      - name: Upload the release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-android-release-bundle
+          path: flutter/build/app/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30

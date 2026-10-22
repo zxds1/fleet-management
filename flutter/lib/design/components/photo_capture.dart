@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 import 'buttons.dart';
 import 'text.dart';
@@ -13,12 +15,14 @@ class PhotoCapture extends StatefulWidget {
     required this.onCaptured,
     required this.label,
     this.captured,
+    this.shell = Shell.driver,
   });
 
   final List<CameraDescription> cameras;
   final void Function(XFile file) onCaptured;
   final String label;
   final XFile? captured;
+  final Shell shell;
 
   @override
   State<PhotoCapture> createState() => _PhotoCaptureState();
@@ -40,15 +44,26 @@ class _PhotoCaptureState extends State<PhotoCapture> {
       setState(() => _failed = true);
       return;
     }
-    final controller = CameraController(widget.cameras.first, ResolutionPreset.medium);
+    final permission = await Permission.camera.request();
+    if (!permission.isGranted) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+      return;
+    }
+    final controller = CameraController(widget.cameras.first, ResolutionPreset.high);
     try {
       await controller.initialize();
-      if (!mounted) return;
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
       setState(() {
         _controller = controller;
         _ready = true;
+        _failed = false;
       });
     } catch (_) {
+      await controller.dispose();
       if (!mounted) return;
       setState(() => _failed = true);
     }
@@ -62,8 +77,8 @@ class _PhotoCaptureState extends State<PhotoCapture> {
       widget.onCaptured(file);
       if (!mounted) return;
       setState(() => _ready = false);
-      await controller.dispose();
       _controller = null;
+      await controller.dispose();
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
@@ -72,24 +87,17 @@ class _PhotoCaptureState extends State<PhotoCapture> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = Strings.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         HelixText(widget.label, style: TypeScale.caption(AppColors.textSecondary)),
         const SizedBox(height: AppSpace.s2),
         if (!_ready)
-          Container(
-            height: AppTarget.touchPhone,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceSunk,
-              borderRadius: BorderRadius.circular(AppRadius.control),
-              border: Border.all(color: AppColors.line),
-            ),
-            child: QuietButton(
-              label: _failed ? 'Camera unavailable' : 'Take photo',
-              onPressed: _failed ? null : _openCamera,
-              icon: Icon(Icons.photo_camera_outlined, size: 20, color: AppColors.textSecondary),
-            ),
+          QuietButton(
+            label: _failed ? strings.t('camera.unavailable') : strings.t('camera.takePhoto'),
+            onPressed: _failed ? null : _openCamera,
+            icon: Icon(Icons.photo_camera_rounded, size: 20, color: AppColors.textSecondary),
           ),
         if (_ready && _controller != null)
           Column(
@@ -97,12 +105,19 @@ class _PhotoCaptureState extends State<PhotoCapture> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.card),
                 child: AspectRatio(
-                  aspectRatio: 1,
-                  child: CameraPreview(_controller!),
+                  aspectRatio: 3 / 4,
+                  child: Semantics(
+                    label: strings.t('camera.preview'),
+                    child: CameraPreview(_controller!),
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpace.s2),
-              StrandButton(label: 'Capture', shell: Shell.driver, onPressed: _shoot),
+              StrandButton(
+                label: strings.t('camera.capture'),
+                shell: widget.shell,
+                onPressed: _shoot,
+              ),
             ],
           ),
         if (widget.captured != null)
@@ -110,9 +125,12 @@ class _PhotoCaptureState extends State<PhotoCapture> {
             padding: const EdgeInsets.only(top: AppSpace.s2),
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline, color: AppColors.statusOk, size: 18),
+                Icon(Icons.check_circle_rounded, color: AppColors.statusOk, size: 18),
                 const SizedBox(width: AppSpace.s2),
-                HelixText('Captured', style: TypeScale.caption(AppColors.statusOk)),
+                HelixText(
+                  strings.t('camera.captured'),
+                  style: TypeScale.caption(AppColors.statusOk),
+                ),
               ],
             ),
           ),

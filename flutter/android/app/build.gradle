@@ -13,15 +13,40 @@ if (localPropertiesFile.exists()) {
 def flutterVersionCode = localProperties.getProperty('flutterVersionCode')?.toInteger() ?: 1
 def flutterVersionName = localProperties.getProperty('flutterVersionName') ?: '1.0.0'
 
+// Release signing material never lives in the repo. HELIX_KEYSTORE_PROPERTIES points at a
+// key.properties file supplied by CI; otherwise android/key.properties is read from disk
+// (it is git-ignored). Relative storeFile paths resolve against the key.properties folder.
+def keyPropertiesPath = System.getenv('HELIX_KEYSTORE_PROPERTIES')
+def keyPropertiesFile = keyPropertiesPath
+        ? rootProject.file(keyPropertiesPath)
+        : rootProject.file('key.properties')
 def keyProperties = new Properties()
-def keyPropertiesFile = rootProject.file('key.properties')
 if (keyPropertiesFile.exists()) {
     keyPropertiesFile.withInputStream { is -> keyProperties.load(is) }
+}
+def releaseKeystoreReady = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+        .every { keyProperties.containsKey(it) }
+
+// A release build without signing material must fail loudly instead of falling back to
+// the public AOSP debug key.
+def appProject = project
+def releaseBuildRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+if (releaseBuildRequested && !releaseKeystoreReady) {
+    throw new GradleException("Missing android/key.properties — release signing is not configured")
+}
+gradle.taskGraph.whenReady { graph ->
+    def releaseTask = graph.allTasks.any {
+        it.project == appProject && it.name.toLowerCase().contains('release')
+    }
+    if (releaseTask && !releaseKeystoreReady) {
+        throw new GradleException("Missing android/key.properties — release signing is not configured")
+    }
 }
 
 android {
     namespace 'com.helix.helix'
     compileSdk 36
+    ndkVersion '28.2.13676358'
 
     compileOptions {
         coreLibraryDesugaringEnabled true
@@ -45,23 +70,26 @@ android {
         versionName flutterVersionName
     }
     signingConfigs {
-        release {
-            if (keyProperties.containsKey('storeFile')) {
-                storeFile file(keyProperties['storeFile'])
+        if (releaseKeystoreReady) {
+            release {
+                def storeFilePath = keyProperties['storeFile']
+                storeFile new File(storeFilePath).isAbsolute()
+                        ? new File(storeFilePath)
+                        : new File(keyPropertiesFile.parentFile, storeFilePath)
                 storePassword keyProperties['storePassword']
                 keyAlias keyProperties['keyAlias']
                 keyPassword keyProperties['keyPassword']
-            } else {
-                storeFile file('debug.keystore')
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
             }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            if (releaseKeystoreReady) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

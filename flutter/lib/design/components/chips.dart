@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import '../../i18n/strings.dart';
 import '../tokens.dart';
 import 'text.dart';
 
 /// Caption chips marking cached data / queued writes.
 class OfflineTag extends StatelessWidget {
-  const OfflineTag({super.key, this.label = 'Offline copy'});
-  final String label;
+  const OfflineTag({super.key, this.label});
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -16,14 +17,17 @@ class OfflineTag extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.control - 4),
         border: Border.all(color: AppColors.line),
       ),
-      child: HelixText(label, style: TypeScale.caption(AppColors.textSecondary)),
+      child: HelixText(
+        label ?? Strings.of(context).t('state.offlineCopy'),
+        style: TypeScale.caption(AppColors.textSecondary),
+      ),
     );
   }
 }
 
 class PendingChip extends StatelessWidget {
-  const PendingChip({super.key, this.label = 'Pending'});
-  final String label;
+  const PendingChip({super.key, this.label});
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +37,10 @@ class PendingChip extends StatelessWidget {
         color: AppColors.accentQuiet,
         borderRadius: BorderRadius.circular(AppRadius.control - 4),
       ),
-      child: HelixText(label, style: TypeScale.caption(AppColors.accentText)),
+      child: HelixText(
+        label ?? Strings.of(context).t('state.pending'),
+        style: TypeScale.caption(AppColors.accentText),
+      ),
     );
   }
 }

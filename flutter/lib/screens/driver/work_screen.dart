@@ -23,22 +23,18 @@ class WorkScreen extends StatelessWidget {
           const SizedBox(height: AppSpace.s5),
 
           // ── primary: the two daily tasks ──
-          SizedBox.expand(
-            child: StrandButton(
-              label: strings.t('nav.refuel'),
-              icon: const Icon(Icons.local_gas_station_outlined, size: 20),
-              shell: Shell.driver,
-              onPressed: () => context.push('/driver/refuel'),
-            ),
+          StrandButton(
+            label: strings.t('nav.refuel'),
+            icon: const Icon(Icons.local_gas_station_rounded, size: 20),
+            shell: Shell.driver,
+            onPressed: () => context.push('/driver/refuel'),
           ),
           const SizedBox(height: AppSpace.s3),
-          SizedBox.expand(
-            child: StrandButton(
-              label: strings.t('nav.inspect'),
-              icon: const Icon(Icons.fact_check_outlined, size: 20),
-              shell: Shell.driver,
-              onPressed: () => context.push('/driver/inspect'),
-            ),
+          StrandButton(
+            label: strings.t('nav.inspect'),
+            icon: const Icon(Icons.fact_check_rounded, size: 20),
+            shell: Shell.driver,
+            onPressed: () => context.push('/driver/inspect'),
           ),
 
           // ── secondary: vehicle tasks ──
@@ -49,9 +45,9 @@ class WorkScreen extends StatelessWidget {
               children: [
                 HelixText(strings.t('nav.more'), style: TypeScale.lead(AppColors.text)),
                 const SizedBox(height: AppSpace.s3),
-                _HubRow(label: strings.t('swap.title'), icon: Icons.local_shipping_outlined, route: '/driver/trailer-swap'),
+                _HubRow(label: strings.t('swap.title'), icon: Icons.local_shipping_rounded, route: '/driver/trailer-swap'),
                 Divider(height: 1, color: AppColors.line),
-                _HubRow(label: strings.t('vehicle.title'), icon: Icons.directions_bus_outlined, route: '/driver/my-vehicle'),
+                _HubRow(label: strings.t('vehicle.title'), icon: Icons.directions_bus_rounded, route: '/driver/my-vehicle'),
               ],
             ),
           ),
@@ -74,7 +70,7 @@ class _HubRow extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, size: 20, color: AppColors.textSecondary),
       title: HelixText(label, style: TypeScale.body(AppColors.text)),
-      trailing: Icon(Icons.chevron_right, size: 20, color: AppColors.textSecondary),
+      trailing: Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.textSecondary),
       onTap: () => context.push(route),
     );
   }

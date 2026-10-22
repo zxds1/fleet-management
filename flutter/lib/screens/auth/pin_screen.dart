@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/policy.dart';
+import '../../core/session.dart';
 import '../../design/components/text.dart';
 import '../../design/tokens.dart';
 import '../common.dart';
@@ -28,17 +29,33 @@ class _PinScreenState extends ConsumerState<PinScreen> {
   }
 
   Future<void> _verify() async {
+    final strings = context.s;
     final session = ref.read(sessionProvider);
-    final ok = await session.verifyPin(_pin.join());
+    final result = await session.verifyPin(_pin.join());
     if (!mounted) return;
-    if (ok) {
-      await session.completePinUnlock();
-      return;
+    switch (result.outcome) {
+      case PinOutcome.ok:
+        await session.completePinUnlock();
+        return;
+      case PinOutcome.locked:
+        setState(() {
+          _pin.clear();
+          _announcement = strings.t('pin.locked');
+        });
+        return;
+      case PinOutcome.wiped:
+        setState(() {
+          _pin.clear();
+          _announcement = strings.t('pin.wiped');
+        });
+        return;
+      case PinOutcome.wrong:
+        setState(() {
+          _pin.clear();
+          _announcement =
+              '${strings.t('pin.wrong')} · ${strings.t('pin.attempts', {'n': '${result.remainingAttempts ?? 0}'})}';
+        });
     }
-    setState(() {
-      _pin.clear();
-      _announcement = 'Wrong PIN';
-    });
   }
 
   @override
@@ -70,9 +87,14 @@ class _PinScreenState extends ConsumerState<PinScreen> {
                 ],
               ),
               const SizedBox(height: AppSpace.s4),
-              HelixText(
-                _announcement ?? strings.t('pin.attempts', {'n': '${Policy.pinLockoutAttempts}'}),
-                style: TypeScale.caption(AppColors.textSecondary),
+              Semantics(
+                liveRegion: true,
+                child: HelixText(
+                  _announcement ?? strings.t('pin.attempts', {'n': '${Policy.pinLockoutAttempts}'}),
+                  style: TypeScale.caption(
+                    _announcement == null ? AppColors.textSecondary : AppColors.statusDanger,
+                  ),
+                ),
               ),
               const SizedBox(height: AppSpace.s5),
               for (var row = 0; row < 4; row++)

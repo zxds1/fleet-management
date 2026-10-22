@@ -62,27 +62,29 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final visual = _visuals[state]!;
-    return Semantics(
-      label: visual.labelKey.split('.').last,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: dense ? AppSpace.s2 : AppSpace.s3,
-          vertical: dense ? AppSpace.s1 : AppSpace.s2,
-        ),
-        constraints: const BoxConstraints(minHeight: AppTarget.chipPhone),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceSunk,
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          border: Border.all(color: AppColors.line),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(visual.glyph, style: TypeScale.mono(visual.color)),
-            const SizedBox(width: AppSpace.s2),
-            HelixText(Strings.of(context).t(visual.labelKey), style: TypeScale.caption(visual.color)),
-          ],
-        ),
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: dense ? AppSpace.s2 : AppSpace.s3,
+        vertical: dense ? AppSpace.s1 : AppSpace.s2,
+      ),
+      constraints: const BoxConstraints(minHeight: AppTarget.badge),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSunk,
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ExcludeSemantics(
+            child: HelixText.chrome(visual.glyph, style: TypeScale.numeral(visual.color)),
+          ),
+          const SizedBox(width: AppSpace.s2),
+          HelixText(
+            Strings.of(context).t(visual.labelKey),
+            style: TypeScale.caption(visual.color),
+          ),
+        ],
       ),
     );
   }
@@ -98,20 +100,32 @@ class HelixChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.s3, vertical: AppSpace.s2),
-      constraints: const BoxConstraints(minHeight: AppTarget.chipPhone),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSunk,
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(color: AppColors.line),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.s3, vertical: AppSpace.s2),
+        constraints: const BoxConstraints(minHeight: AppTarget.badge),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceSunk,
+          borderRadius: BorderRadius.circular(AppRadius.full),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (glyph != null) ...[Text(glyph!, style: TypeScale.mono(color ?? AppColors.textSecondary)), const SizedBox(width: AppSpace.s2)],
+            if (glyph != null) ...[
+              ExcludeSemantics(
+                child: HelixText.chrome(
+                  glyph!,
+                  style: TypeScale.numeral(color ?? AppColors.textSecondary),
+                ),
+              ),
+              const SizedBox(width: AppSpace.s2),
+            ],
             HelixText(label, style: TypeScale.caption(color ?? AppColors.textSecondary)),
-        ],
+          ],
+        ),
       ),
     );
   }

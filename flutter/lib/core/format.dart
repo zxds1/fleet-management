@@ -30,10 +30,55 @@ class Fmt {
   static String km(num? v) => v == null ? '—' : '${_whole.format(v)} km';
   static String celsius(num? v) => v == null ? '—' : '${_money.format(v)} °C';
 
-  /// Accepts "45,5" and "45.5"; returns null when not a number.
+  /// Accepts "45,5", "45.5" and "1,000"; returns null when not a number.
+  ///
+  /// A comma is a thousands separator when the string also carries a decimal
+  /// point, or when it is the only separator and exactly three digits follow
+  /// it ("1,000" is one thousand, "45,5" is forty-five and a half).
   static double? parseDecimal(String input) {
-    final normalized = input.trim().replaceAll(' ', '').replaceAll(',', '.');
+    final cleaned = input.trim().replaceAll(' ', '');
+    if (cleaned.isEmpty) return null;
+    final hasComma = cleaned.contains(',');
+    final hasDot = cleaned.contains('.');
+    final String normalized;
+    if (hasComma && hasDot) {
+      normalized = cleaned.replaceAll(',', '');
+    } else if (hasComma && _isThousandsGroup(cleaned)) {
+      normalized = cleaned.replaceAll(',', '');
+    } else {
+      normalized = cleaned.replaceAll(',', '.');
+    }
     return double.tryParse(normalized);
+  }
+
+  static bool _isThousandsGroup(String value) {
+    final parts = value.split(',');
+    if (parts.length < 2) return false;
+    if (!RegExp(r'^\d{3}$').hasMatch(parts.last)) return false;
+    return parts
+        .sublist(0, parts.length - 1)
+        .every((p) => RegExp(r'^\d{1,3}$').hasMatch(p));
+  }
+
+  /// Parses a server timestamp. A naive string (no offset) is UTC — reading it
+  /// as local time would shift every server clock by the device offset.
+  static DateTime? parseTimestamp(String? raw) {
+    if (raw == null) return null;
+    final text = raw.trim();
+    if (text.isEmpty) return null;
+    final parsed = DateTime.tryParse(text);
+    if (parsed == null) return null;
+    if (parsed.isUtc) return parsed;
+    return DateTime.utc(
+      parsed.year,
+      parsed.month,
+      parsed.day,
+      parsed.hour,
+      parsed.minute,
+      parsed.second,
+      parsed.millisecond,
+      parsed.microsecond,
+    );
   }
 
   static int? parseWhole(String input) {

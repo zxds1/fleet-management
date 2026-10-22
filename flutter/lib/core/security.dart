@@ -17,15 +17,17 @@ SecurityVerdict securityVerdict({
   required bool hooked,
   required bool debuggerAttached,
   required bool releaseBuild,
-  List<String> pins = Config.sslPins,
-  bool requirePinning = Config.requirePinning,
+  List<String>? pins,
+  bool? requirePinning,
 }) {
+  final effectivePins = pins ?? Config.sslPins;
+  final effectiveRequirePinning = requirePinning ?? Config.requirePinning;
   if (releaseBuild && rooted) return SecurityVerdict(secure: false, reason: SecurityReason.rooted);
   if (releaseBuild && hooked) return SecurityVerdict(secure: false, reason: SecurityReason.hooked);
   if (releaseBuild && debuggerAttached) {
     return SecurityVerdict(secure: false, reason: SecurityReason.debugger);
   }
-  if (requirePinning && pins.length < 2) {
+  if (effectiveRequirePinning && effectivePins.length < 2) {
     return SecurityVerdict(secure: false, reason: SecurityReason.pinningMissing);
   }
   return SecurityVerdict(secure: true);

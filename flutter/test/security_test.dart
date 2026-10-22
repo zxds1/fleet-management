@@ -11,7 +11,29 @@ void main() {
   });
 
   test('debug builds tolerate root but pinning still fails closed', () {
-    expect(securityVerdict(rooted: true, hooked: true, debuggerAttached: true, releaseBuild: false).secure, isTrue);
+    expect(
+      securityVerdict(
+        rooted: true,
+        hooked: true,
+        debuggerAttached: true,
+        releaseBuild: false,
+        requirePinning: false,
+      ).secure,
+      isTrue,
+      reason: 'a debug build tolerates a rooted device',
+    );
+    expect(
+      securityVerdict(
+        rooted: false,
+        hooked: false,
+        debuggerAttached: false,
+        releaseBuild: false,
+        requirePinning: true,
+        pins: const [],
+      ).secure,
+      isFalse,
+      reason: 'pinning fails closed even in a debug build when it is required',
+    );
     expect(
       securityVerdict(rooted: false, hooked: false, debuggerAttached: false, releaseBuild: true, requirePinning: true, pins: ['one-hash']).secure,
       isFalse,

@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../core/kv_store.dart';
 import '../core/session.dart';
 import '../core/clerk_service.dart';
 import '../core/clerk_config.dart';
@@ -13,6 +16,8 @@ import '../core/media.dart';
 import '../core/connectivity.dart';
 import '../core/location.dart';
 import '../core/offline/drain_scheduler.dart';
+import '../core/secure_store.dart';
+import '../core/kv_store.dart';
 
 /// Composition root: wires SessionService → ClerkService → ApiClient →
 /// OfflineQueue → MediaService. Holds the shared service instances so screens
@@ -26,6 +31,8 @@ class AppContainer {
     required this.connectivity,
     required this.phoneTracker,
     required this.scheduler,
+    required this.prefs,
+    required this.drainedController,
   });
 
   /// Session state machine (auth, PIN, consent, shell).
@@ -49,17 +56,56 @@ class AppContainer {
   /// Queue drain scheduler with backoff + jitter.
   final DrainScheduler scheduler;
 
-  static Future<AppContainer> create(SharedPreferences prefs) async {
-    final store = MemoryKeyValueStore();
+  /// Preferences (locale + shell choice).
+  final SharedPreferences prefs;
+
+  /// Emits the paths of writes that drained successfully so the app can
+  /// invalidate exactly the providers that read them.
+  final StreamController<List<String>> drainedController;
+  Stream<List<String>> get drained => drainedController.stream;
+
+  /// Builds a container from already-constructed services, for tests that
+  /// need the real graph without the platform plugins (path provider,
+  /// secure storage, connectivity) that [create] wires up.
+  @visibleForTesting
+  factory AppContainer.forTest({
+    required ApiClient api,
+    required OfflineQueue queue,
+    required MediaService media,
+    required ConnectivityService connectivity,
+    required PhoneTracker phoneTracker,
+    required DrainScheduler scheduler,
+    required SharedPreferences prefs,
+  }) {
+    return AppContainer._(
+      session: SessionService(store: MemoryKeyValueStore()),
+      api: api,
+      queue: queue,
+      media: media,
+      connectivity: connectivity,
+      phoneTracker: phoneTracker,
+      scheduler: scheduler,
+      prefs: prefs,
+      drainedController: StreamController<List<String>>.broadcast(),
+    );
+  }
+
+  static Future<AppContainer> create(
+    SharedPreferences prefs, {
+    SecurityContext? trustContext,
+  }) async {
+    final store = SecureStore.instance;
     final clerkConfig = ClerkConfig.fromEnv();
     final clerk = ClerkService(config: clerkConfig);
 
     final session = SessionService(store: store, clerk: clerk);
+    session.attachPrefs(prefs);
 
     final api = ApiClient(
       accessToken: () async => session.accessToken,
       refreshTokens: () => session.refreshIfNeeded(),
       onAuthLost: () => session.signOut(),
+      trustContext: trustContext,
     );
 
     session.attachApi(api);
@@ -69,36 +115,54 @@ class AppContainer {
 
     final mediaService = MediaService(api: api);
 
+    final connectivity = ConnectivityService();
+    await connectivity.init();
+
+    final drained = StreamController<List<String>>.broadcast();
+
     final queue = OfflineQueue(
       store: queueStore,
       api: api,
       uploadStaged: (upload) => mediaService.uploadStaged(upload),
-      onDone: (_) {},
+      onDone: (paths) {
+        if (paths.isEmpty) return;
+        drained.add(paths);
+      },
       refreshIfNeeded: () => session.refreshIfNeeded(),
-      isOnline: () => Future.value(true),
+      isOnline: () async => connectivity.isOnline,
     );
 
-    Future<void> drainClosure() => queue.drain();
-    final connectivity = ConnectivityService();
-    final phoneTracker = PhoneTracker(api: api);
     final scheduler = DrainScheduler(
-      drain: drainClosure,
+      drain: () => queue.drain(),
       arm: (_) {},
     );
 
-    return AppContainer._(
+    session.isOnlineProbe = () async => connectivity.isOnline;
+
+    final container = AppContainer._(
       session: session,
       api: api,
       queue: queue,
       media: mediaService,
       connectivity: connectivity,
-      phoneTracker: phoneTracker,
+      phoneTracker: PhoneTracker(api: api),
       scheduler: scheduler,
+      prefs: prefs,
+      drainedController: drained,
     );
+
+    // A reconnect is the moment the offline promise has to be kept.
+    connectivity.changes.listen((online) {
+      if (online) scheduler.kick();
+    });
+
+    return container;
   }
 
   static Future<Database> _openDatabase() async {
-    final dir = await getApplicationDocumentsDirectory();
+    // Application support, not documents: the outbox holds driver PII and
+    // must not be user-visible or swept into an iCloud backup.
+    final dir = await getApplicationSupportDirectory();
     final path = '${dir.path}/queue.db';
     return await openDatabase(path, version: 1);
   }

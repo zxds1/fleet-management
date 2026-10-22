@@ -6,23 +6,13 @@ import '../../design/components/text.dart';
 import '../../design/tokens.dart';
 import '../common.dart';
 
-/// Device integrity block: reason copy + forced sign-out (auto on mount).
-class BlockedScreen extends ConsumerStatefulWidget {
+/// Device integrity block: reason copy + a sign-out the driver chooses. The
+/// reason must stay readable — signing out on mount hides it.
+class BlockedScreen extends ConsumerWidget {
   const BlockedScreen({super.key});
 
   @override
-  ConsumerState<BlockedScreen> createState() => _BlockedScreenState();
-}
-
-class _BlockedScreenState extends ConsumerState<BlockedScreen> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(sessionProvider).signOut());
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final strings = context.s;
     final reason = ref.read(sessionProvider).securityReason;
     return Scaffold(

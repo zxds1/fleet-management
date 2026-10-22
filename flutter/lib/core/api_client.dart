@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart' show IOHttpClientAdapter;
 import 'config.dart';
+import 'pinning.dart';
 import 'errors.dart';
 import 'design_preview.dart';
 import 'ids.dart';
@@ -19,8 +22,17 @@ class ApiClient {
     required this._refreshTokens,
     required this._onAuthLost,
     Dio? dio,
+    SecurityContext? trustContext,
   }) : _dio = dio ?? Dio() {
-    if (dio == null) _dio.options.baseUrl = _normalizeBase(Config.apiBaseUrl);
+    if (dio == null) {
+      _dio.options.baseUrl = _normalizeBase(Config.apiBaseUrl);
+      // Certificate pinning is installed on every connection the client makes.
+      _dio.httpClientAdapter = PinnedHttpClientAdapter(
+        pins: Config.sslPins.toSet(),
+        failClosed: Config.requirePinning,
+        trustContext: trustContext,
+      );
+    }
     _dio.options
       ..connectTimeout = const Duration(seconds: 15)
       ..receiveTimeout = const Duration(seconds: 30)
@@ -51,9 +63,19 @@ class ApiClient {
     Map<String, dynamic>? query,
     String? idempotencyKey,
     bool idempotent = true,
+    bool retryOnUnauthorized = true,
     required T Function(Object? body) parse,
   }) =>
-      _send(method, path, body: body, query: query, parse: parse, idempotencyKey: idempotencyKey, idempotent: idempotent);
+      _send(
+        method,
+        path,
+        body: body,
+        query: query,
+        parse: parse,
+        idempotencyKey: idempotencyKey,
+        idempotent: idempotent,
+        retryOnUnauthorized: retryOnUnauthorized,
+      );
 
   Future<T> delete<T>(String path, {Map<String, dynamic>? query, required T Function(Object? body) parse}) =>
       write('DELETE', path, query: query, parse: parse);
@@ -65,13 +87,16 @@ class ApiClient {
     Map<String, dynamic>? query,
     String? idempotencyKey,
     bool idempotent = true,
+    bool retryOnUnauthorized = true,
     required T Function(Object? body) parse,
   }) async {
     final isWrite = method != 'GET' && method != 'HEAD';
     final key = isWrite && idempotent ? (idempotencyKey ?? newUuid()) : null;
     final response = await _attempt(method, path, body: body, query: query, key: key);
 
-    if (response.statusCode == 401) {
+    // The refresh request is the recovery path; it cannot recover itself, and
+    // retrying it would re-enter the refresh and deadlock.
+    if (response.statusCode == 401 && retryOnUnauthorized) {
       final refreshed = await _refreshTokens();
       if (!refreshed) {
         _onAuthLost();

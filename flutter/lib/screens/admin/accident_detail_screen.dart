@@ -115,7 +115,7 @@ class _AccidentDetailScreenState extends ConsumerState<AccidentDetailScreen> {
                 const SizedBox(height: AppSpace.s4),
                 QuietButton(
                   label: strings.t('admin.telemetry'),
-                  icon: Icon(Icons.link, size: 20, color: AppColors.textSecondary),
+                  icon: Icon(Icons.link_rounded, size: 20, color: AppColors.textSecondary),
                   onPressed: _verifyTelemetry,
                 ),
                 if (_telemetry != null) ...[

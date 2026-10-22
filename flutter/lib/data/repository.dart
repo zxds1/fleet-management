@@ -1,5 +1,6 @@
 import '../core/api_client.dart';
 import '../core/errors.dart';
+import '../core/ids.dart';
 import '../core/policy.dart';
 import '../design/components/paged_list.dart';
 
@@ -27,9 +28,16 @@ class Repository {
     );
   }
 
+  /// A cursor-enveloped list. The server answers `{data, next_cursor,
+  /// has_more}` — a bare array is still accepted for the few routes that
+  /// answer one.
   Future<List<Map<String, dynamic>>> rawList(String path, {Map<String, dynamic> query = const {}}) async {
     final body = await _api.get<dynamic>(path, query: query, parse: (b) => b);
     if (body is List) return body.cast<Map<String, dynamic>>();
+    if (body is Map<String, dynamic>) {
+      final data = body['data'];
+      if (data is List) return data.cast<Map<String, dynamic>>();
+    }
     return const [];
   }
 
@@ -118,26 +126,33 @@ class Repository {
       _api.write('POST', 'accidents', body: body, parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> accidentMedia(String accidentId, Map<String, dynamic> body) =>
-      _api.write('POST', 'accidents/$accidentId/media', body: body, parse: (b) => b as Map<String, dynamic>);
+      _api.write('POST', 'accidents/${_requireUuid(accidentId)}/media', body: body, parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> accident(String accidentId) =>
-      _api.get('accidents/$accidentId', parse: (b) => b as Map<String, dynamic>);
+      _api.get('accidents/${_requireUuid(accidentId)}', parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> acknowledgeAccident(String accidentId) =>
-      _api.write('POST', 'accidents/$accidentId/acknowledge', body: const {}, parse: (b) => b as Map<String, dynamic>);
+      _api.write('POST', 'accidents/${_requireUuid(accidentId)}/acknowledge', body: const {}, parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> verifyTelemetry(String accidentId) =>
-      _api.get('accidents/$accidentId/telemetry/verify', parse: (b) => b as Map<String, dynamic>);
+      _api.get('accidents/${_requireUuid(accidentId)}/telemetry/verify', parse: (b) => b as Map<String, dynamic>);
 
+  /// The caller's own accidents.
+  ///
+  /// The route validates the query with `CursorQuerySchema`, which strips
+  /// `own_scope`: there is no tenant-wide accident list on the API yet, so an
+  /// admin calling this sees only their own accidents. A fleet-wide list needs
+  /// a backend route (an admin accidents endpoint) before the app can offer
+  /// one.
   Future<CursorPage<Map<String, dynamic>>> accidents({required bool ownScope, String? cursor}) =>
-      page('accidents/me', cursor: cursor, query: {'own_scope': ownScope});
+      page('accidents/me', cursor: cursor);
 
   // ── notifications / anomalies / docs ──
   Future<Map<String, dynamic>> notificationCount() =>
       _api.get('notifications/count', parse: (b) => b as Map<String, dynamic>);
 
   Future<void> markRead(String id) =>
-      _api.write('POST', 'notifications/$id/read', body: const {}, parse: (b) => b);
+      _api.write('POST', 'notifications/${_requireUuid(id)}/read', body: const {}, parse: (b) => b);
 
   Future<void> markAllRead() => _api.write('POST', 'notifications/read-all', body: const {}, parse: (b) => b);
 
@@ -174,8 +189,10 @@ class Repository {
   Future<Map<String, dynamic>> inspectionDetail(String inspectionId) =>
       _api.get('inspections/$inspectionId', parse: (b) => b as Map<String, dynamic>);
 
+  /// The OCR review of ONE purchase (the driver may correct it before an admin
+  /// verifies). The reconciliation inbox is a different thing.
   Future<Map<String, dynamic>> fuelPurchase(String purchaseId) =>
-      _api.get('fuel/reconciliation-inbox', query: {'verified': 'false'}, parse: (b) => b as Map<String, dynamic>);
+      _api.get('fuel/purchase/${_requireUuid(purchaseId)}/ocr', parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> forceCloseShift(String shiftId, {String? reason}) => _api.write(
         'POST',
@@ -192,19 +209,19 @@ class Repository {
 
   Future<void> userAction(String path, String userId, {String? reason}) => _api.write(
         'POST',
-        path.replaceAll(':id', userId),
+        path.replaceAll(':id', _requireUuid(userId)),
         body: {'reason': ?reason},
         parse: (b) => b,
       );
 
   Future<Map<String, dynamic>> vehicle(String id) =>
-      _api.get('vehicles/$id', parse: (b) => b as Map<String, dynamic>);
+      _api.get('vehicles/${_requireUuid(id)}', parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> createVehicle(Map<String, dynamic> body) =>
       _api.write('POST', 'vehicles', body: body, parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> updateVehicle(String id, Map<String, dynamic> body) =>
-      _api.write('PATCH', 'vehicles/$id', body: body, parse: (b) => b as Map<String, dynamic>);
+      _api.write('PATCH', 'vehicles/${_requireUuid(id)}', body: body, parse: (b) => b as Map<String, dynamic>);
 
   Future<Map<String, dynamic>> reportVehicleIssue(String vehicleId, Map<String, dynamic> body) =>
       _api.write('POST', 'vehicles/$vehicleId/issues', body: body, parse: (b) => b as Map<String, dynamic>);
@@ -289,8 +306,14 @@ class Repository {
   Future<Map<String, dynamic>> registerDevice(Map<String, dynamic> body) =>
       _api.write('POST', 'auth/devices', body: body, parse: (b) => b as Map<String, dynamic>);
 
-  Future<Map<String, dynamic>> setPin() =>
-      _api.write('POST', 'auth/devices/pin', body: const {}, parse: (b) => b as Map<String, dynamic>);
+  /// An id interpolated into a request path must be a UUID — anything else is
+  /// a malformed request, never a path segment.
+  String _requireUuid(String value) {
+    if (!isUuid(value)) {
+      throw HelixError(code: 'VALIDATION_ERROR', status: 400);
+    }
+    return value;
+  }
 
   Future<Map<String, dynamic>> signup(Map<String, dynamic> body) =>
       _api.write('POST', 'auth/signup', body: body, parse: (b) => b as Map<String, dynamic>);

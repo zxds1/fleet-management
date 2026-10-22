@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/errors.dart';
 import '../../core/extensions.dart';
+import '../../core/media.dart';
 import '../../core/offline/queue.dart';
 import '../../core/offline/queue_store.dart';
 import '../../design/components/buttons.dart';
@@ -16,8 +17,8 @@ import '../../design/components/sheet_host.dart';
 import '../../design/components/skeleton.dart';
 import '../../design/components/text.dart';
 import '../../design/tokens.dart';
+import '../../data/providers.dart';
 import '../common.dart';
-import 'home_state.dart';
 
 /// Template-driven DVIR: PASS/FAIL/NA per item (numeric within server bounds),
 /// FAIL needs note + photo, defects-reviewed toggle, signature.
@@ -66,69 +67,96 @@ class _InspectScreenState extends ConsumerState<InspectScreen> {
         ],
       ),
     );
-    if (picked != null) setState(() => _templateId = picked);
+    if (picked != null) {
+      _ensureControllers(templates);
+      setState(() => _templateId = picked);
+    }
+  }
+
+  /// One controller per item, created when the template is chosen — never
+  /// while building.
+  void _ensureControllers(List<Map<String, dynamic>> templates) {
+    for (final template in templates) {
+      final items = (template['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+      for (final item in items) {
+        final id = item['template_item_id'] as String;
+        _numeric.putIfAbsent(id, TextEditingController.new);
+        _notes.putIfAbsent(id, TextEditingController.new);
+      }
+    }
+  }
+
+  /// A numeric reading outside the server's bounds is a failed check whatever
+  /// the driver ticked.
+  String? _numericError(Map<String, dynamic> item) {
+    if (item['input_type'] != 'NUMERIC') return null;
+    final id = item['template_item_id'] as String;
+    final raw = _numeric[id]?.text.trim() ?? '';
+    if (raw.isEmpty) return null;
+    final parsed = double.tryParse(raw);
+    if (parsed == null) return context.s.t('forms.badNumber');
+    final min = item['min_value'] as num?;
+    final max = item['max_value'] as num?;
+    if ((min != null && parsed < min) || (max != null && parsed > max)) {
+      return context.s.t('forms.outOfRange', {'min': '${min ?? ''}', 'max': '${max ?? ''}'});
+    }
+    return null;
   }
 
   List<String> _missing(Map<String, dynamic> template) {
+    final strings = context.s;
     final missing = <String>[];
     final items = (template['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     for (final item in items) {
       final id = item['template_item_id'] as String;
       final result = _results[id];
-      if (item['is_required'] == true && result == null) missing.add(item['label_en']?.toString() ?? id);
+      final label = item['label_en']?.toString() ?? id;
+      if (item['is_required'] == true && result == null) missing.add(label);
       if (result == 'FAIL') {
         final note = _notes[id]?.text.trim() ?? '';
-        if (note.isEmpty || _photos[id] == null) missing.add('${item['label_en']} photo+note');
-        final numeric = item['input_type'] == 'NUMERIC';
-        if (numeric) {
-          final value = item['min_value'] != null && item['max_value'] != null;
-          final parsed = double.tryParse(_numeric[id]?.text ?? '');
-          if (value && (parsed == null || parsed < (item['min_value'] as num) || parsed > (item['max_value'] as num))) {
-            missing.add('${item['label_en']} range');
-          }
-        }
+        if (note.isEmpty || _photos[id] == null) missing.add('$label · ${strings.t('forms.notes')} + ${strings.t('forms.itemPhoto')}');
       }
+      if (_numericError(item) != null) missing.add(label);
     }
-    if (!_defectsReviewed) missing.add('Defects reviewed');
-    if (_signature.text.trim().isEmpty) missing.add('Signature');
+    if (!_defectsReviewed) missing.add(strings.t('forms.defectsReviewed'));
+    if (_signature.text.trim().isEmpty) missing.add(strings.t('forms.signature'));
     return missing;
   }
 
   Future<void> _submit(Map<String, dynamic> template) async {
-    final strings = context.s;
-    final shift = await ref.read(activeShiftProvider.future);
-    if (shift == null) return;
+    if (_busy) return;
     setState(() => _busy = true);
+    final strings = context.s;
     try {
+      final shift = await ref.read(activeShiftProvider.future);
+      if (shift == null) return;
       final media = ref.read(mediaProvider);
       final items = <Map<String, dynamic>>[];
       final uploads = <StagedUpload>[];
       final templateItems = (template['items'] as List).cast<Map<String, dynamic>>();
       for (final item in templateItems) {
         final id = item['template_item_id'] as String;
-        var result = _results[id];
+        // An unanswered item is NOT_APPLICABLE, never a null result.
+        final result = _results[id] ?? 'NOT_APPLICABLE';
         final note = _notes[id]?.text.trim();
         var photoId = 'media://defect';
         if (result == 'FAIL') {
           final staged = await media.stageCapture(
             await _photos[id]!.readAsBytes(),
-            slot: 'media://defect_$id',
-            ownerKind: 'INSPECTION_ITEM',
-            retentionClass: 'INSPECTION',
+            slot: MediaService.defectSlot(id),
+            ownerKind: MediaService.ownerInspection,
+            retentionClass: MediaService.retentionInspection,
           );
           if (staged != null) {
             uploads.add(staged);
             photoId = staged.slot;
           }
         }
-        if (item['input_type'] == 'NUMERIC' && (_numeric[id]?.text.isNotEmpty ?? false)) {
-          result ??= 'PASS';
-        }
+        final numericValue = double.tryParse(_numeric[id]?.text.trim() ?? '');
         items.add({
           'template_item_id': id,
           'result': result,
-          if (item['input_type'] == 'NUMERIC' && (_numeric[id]?.text.isNotEmpty ?? false))
-            'numeric_value': double.tryParse(_numeric[id]!.text),
+          'numeric_value': ?numericValue,
           if (note != null && note.isNotEmpty) 'notes': note,
           if (result == 'FAIL') 'photo_media_object_id': photoId,
         });
@@ -156,7 +184,7 @@ class _InspectScreenState extends ConsumerState<InspectScreen> {
       }
     } on HelixError catch (e) {
       if (!mounted) return;
-      _formKey.currentState?.showError(strings.error(e.code));
+      _formKey.currentState?.showError(strings.t(e.catalogue.i18nKey));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -184,7 +212,7 @@ class _InspectScreenState extends ConsumerState<InspectScreen> {
                 loading: () => Skeleton(height: 56),
                 error: (e, _) => inlineError(context, e),
                 data: (templates) => OutlinedButton.icon(
-                  icon: Icon(Icons.checklist, color: AppColors.textSecondary),
+                  icon: Icon(Icons.checklist_rounded, color: AppColors.textSecondary),
                   label: HelixText(
                     template?['label']?.toString() ?? strings.t('forms.template'),
                     style: TypeScale.body(AppColors.text),
@@ -198,8 +226,9 @@ class _InspectScreenState extends ConsumerState<InspectScreen> {
                   _ItemCard(
                     item: item,
                     result: _results[item['template_item_id'] as String],
-                    numericController: _numeric.putIfAbsent(item['template_item_id'] as String, TextEditingController.new),
-                    noteController: _notes.putIfAbsent(item['template_item_id'] as String, TextEditingController.new),
+                    numericController: _numeric[item['template_item_id'] as String],
+                    noteController: _notes[item['template_item_id'] as String],
+                    numericError: _numericError(item),
                     photo: _photos[item['template_item_id'] as String],
                     onResult: (r) => setState(() => _results[item['template_item_id'] as String] = r),
                     onPhoto: (file) => setState(() => _photos[item['template_item_id'] as String] = file),
@@ -247,13 +276,15 @@ class _ItemCard extends ConsumerWidget {
     required this.photo,
     required this.onResult,
     required this.onPhoto,
+    this.numericError,
     this.cameras = const [],
   });
 
   final Map<String, dynamic> item;
   final String? result;
-  final TextEditingController numericController;
-  final TextEditingController noteController;
+  final TextEditingController? numericController;
+  final TextEditingController? noteController;
+  final String? numericError;
   final XFile? photo;
   final ValueChanged<String> onResult;
   final ValueChanged<XFile> onPhoto;
@@ -306,6 +337,7 @@ class _ItemCard extends ConsumerWidget {
               label: '${item['unit'] ?? ''} ${item['min_value'] ?? ''}–${item['max_value'] ?? ''}',
               controller: numericController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              errorText: numericError,
             ),
           ],
           if (result == 'FAIL') ...[
@@ -324,4 +356,3 @@ class _ItemCard extends ConsumerWidget {
     );
   }
 }
-

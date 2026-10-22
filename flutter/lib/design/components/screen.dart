@@ -24,12 +24,28 @@ class Screen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = SafeArea(
+    // The page owns its surface: a screen must be usable on its own, not only
+    // inside the shell's Scaffold. Material also gives Material widgets inside
+    // it (ListTile, TextField, the ink of a ripple) the ancestor they need.
+    final content = Material(
+      type: MaterialType.transparency,
+      child: SafeArea(
       top: false,
       bottom: bottomInset,
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: padding ? AppSpace.gutterPhone : 0),
-        child: child,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (offlineCopy) ...[
+              const OfflineTag(),
+              const SizedBox(height: AppSpace.s3),
+            ],
+            Flexible(child: child),
+          ],
+        ),
+      ),
       ),
     );
     if (!scroll) return ColoredBox(color: AppColors.bg, child: content);
@@ -69,13 +85,7 @@ class ScreenColumn extends StatelessWidget {
       offlineCopy: offlineCopy,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (offlineCopy) ...[
-            const OfflineTag(),
-            const SizedBox(height: AppSpace.s3),
-          ],
-          ...children,
-        ],
+        children: children,
       ),
     );
   }

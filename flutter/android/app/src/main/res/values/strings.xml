@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The map is drawn by flutter_map over raster tiles, so the Google Maps
+      SDK is not on the device and there is no API key to inject.
+    -->
+</resources>

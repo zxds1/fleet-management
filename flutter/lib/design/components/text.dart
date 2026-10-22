@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import '../tokens.dart';
 
-/// All app text goes through here — the 1.3× scale clamp and the type scale are
-/// enforced in one place (guard-carried from the Expo design system).
+/// All app text goes through here — the type scale and the text-scale clamp are
+/// enforced in one place.
+///
+/// Body copy honours the platform text-size setting up to
+/// [AppType.maxTextScale] (200%, the WCAG 1.4.4 ceiling). Copy that lives in a
+/// fixed-height control (button, tab bar, segmented control, badge) uses
+/// [HelixText.chrome], which clamps to [AppType.maxChromeTextScale] so the
+/// control cannot overflow.
 class HelixText extends StatelessWidget {
   const HelixText(
     this.text, {
@@ -12,7 +18,19 @@ class HelixText extends StatelessWidget {
     this.overflow,
     this.semanticsLabel,
     this.textAlign,
+    this.maxScale,
   });
+
+  /// Chrome copy: fixed-height containers.
+  const HelixText.chrome(
+    this.text, {
+    super.key,
+    this.style,
+    this.maxLines,
+    this.overflow,
+    this.semanticsLabel,
+    this.textAlign,
+  }) : maxScale = AppType.maxChromeTextScale;
 
   final String text;
   final TextStyle? style;
@@ -20,9 +38,11 @@ class HelixText extends StatelessWidget {
   final TextOverflow? overflow;
   final String? semanticsLabel;
   final TextAlign? textAlign;
+  final double? maxScale;
 
   @override
   Widget build(BuildContext context) {
+    final ceiling = maxScale ?? AppType.maxTextScale;
     return Semantics(
       label: semanticsLabel,
       child: Text(
@@ -33,7 +53,7 @@ class HelixText extends StatelessWidget {
         textAlign: textAlign,
         textScaler: MediaQuery.textScalerOf(context).clamp(
           minScaleFactor: 1.0,
-          maxScaleFactor: AppType.maxTextScale,
+          maxScaleFactor: ceiling,
         ),
       ),
     );
@@ -50,6 +70,7 @@ class TypeScale {
         fontWeight: FontWeight.w700,
         fontSize: AppType.displayPhone,
         height: 1.1,
+        letterSpacing: -0.015,
         color: c,
       );
   static TextStyle title(Color c) => TextStyle(
@@ -57,6 +78,7 @@ class TypeScale {
         fontWeight: FontWeight.w700,
         fontSize: AppType.titlePhone,
         height: 1.15,
+        letterSpacing: -0.01,
         color: c,
       );
   static TextStyle lead(Color c) => TextStyle(
@@ -102,4 +124,8 @@ class TypeScale {
         color: c,
         fontFeatures: const [FontFeature.tabularFigures()],
       );
+
+  /// Numerals inside chrome (badge counts, gauge readouts). Sized off the
+  /// scale's caption step rather than an ad-hoc size.
+  static TextStyle numeral(Color c) => mono(c, size: AppType.captionPhone);
 }

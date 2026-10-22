@@ -63,7 +63,7 @@ class _VehicleIssuesScreenState extends ConsumerState<VehicleIssuesScreen> {
           try {
             return await ref.read(repositoryProvider).page('vehicles/${widget.vehicleId}/issues', cursor: cursor);
           } on HelixError catch (e) {
-            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
           }
         },
         itemBuilder: (context, row) => HelixCard(
@@ -128,7 +128,7 @@ class _VehicleIssuesScreenState extends ConsumerState<VehicleIssuesScreen> {
             ),
           );
         },
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_rounded),
       ),
     );
   }

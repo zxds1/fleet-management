@@ -29,7 +29,7 @@ class AdminAccidentsScreen extends ConsumerWidget {
           try {
             return await ref.read(repositoryProvider).accidents(ownScope: false, cursor: cursor);
           } on HelixError catch (e) {
-            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+            throw HelixErrorLike(strings.error(e.code), actionLabel: strings.t(e.catalogue.i18nKey));
           }
         },
         itemBuilder: (context, row) {
@@ -45,7 +45,7 @@ class AdminAccidentsScreen extends ConsumerWidget {
             ),
             trailing: row['acknowledged_at'] != null || !canAck
                 ? null
-                : Icon(Icons.circle, size: 10, color: AppColors.statusDanger),
+                : Icon(Icons.circle_rounded, size: 10, color: AppColors.statusDanger),
             onTap: () => context.push('/admin/accidents/${row['accident_id']}'),
           );
         },

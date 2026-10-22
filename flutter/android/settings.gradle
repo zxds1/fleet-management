@@ -4,10 +4,20 @@ pluginManagement {
         google()
         mavenCentral()
     }
-    def flutterRoot = System.getenv('FLUTTER_ROOT')
-            ?: System.getenv('HOME') + '/flutter'
-            ?: '/opt/flutter'
-    includeBuild "$flutterRoot/packages/flutter_tools/gradle"
+    // The Flutter SDK comes from local.properties (written by the Flutter tool) and
+    // falls back to FLUTTER_ROOT for CI images that only export the environment
+    // variable.
+    def flutterSdkPath = {
+        def properties = new Properties()
+        def localPropertiesFile = file('local.properties')
+        if (localPropertiesFile.exists()) {
+            localPropertiesFile.withInputStream { is -> properties.load(is) }
+        }
+        def sdkPath = properties.getProperty('flutter.sdk') ?: System.getenv('FLUTTER_ROOT')
+        assert sdkPath != null, 'flutter.sdk not set in local.properties and FLUTTER_ROOT is not set'
+        return sdkPath
+    }()
+    includeBuild "$flutterSdkPath/packages/flutter_tools/gradle"
 }
 
 plugins {

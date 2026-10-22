@@ -20,6 +20,13 @@ dependencies:
   dio: ^5.7.0
   socket_io_client: ^3.0.2
 
+  # maps. flutter_map is pure Dart and needs no API key: the OpenStreetMap
+  # tiles work out of the box, and a keyed tile provider can be swapped in at
+  # build time with MAP_TILE_URL. The Google Maps SDK this replaced hard-
+  # required a key and rendered a blank grey tile without one.
+  flutter_map: ^8.3.2
+  latlong2: ^0.9.1
+
   # storage
   sqflite: ^2.3.3+2
   flutter_secure_storage: ^9.2.4
@@ -27,7 +34,6 @@ dependencies:
   path_provider: ^2.1.5
 
   # device
-  google_maps_flutter: ^2.9.0
   camera: ^0.11.0+2
   geolocator: ^13.0.2
   flutter_local_notifications: ^18.0.1
@@ -43,6 +49,8 @@ dependencies:
   image: ^4.5.2
   uuid: ^4.5.1
   crypto: ^3.0.6
+  cryptography: ^2.9.0
+  cryptography_flutter: ^2.3.4
 
   intl: any
   path: any
@@ -56,6 +64,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/pins/
+    - assets/brand/
 
   fonts:
     - family: Barlow

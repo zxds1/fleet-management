@@ -13,14 +13,20 @@ import '../../design/components/text.dart';
 import '../../design/tokens.dart';
 import '../common.dart';
 
-Future<void> markReadSafely(WidgetRef ref, String id) async {
+/// Marks one notification read. The row is acknowledged on the server
+/// (the status becomes DELIVERED); the caller keeps the dot in step.
+Future<bool> markReadSafely(WidgetRef ref, String id) async {
   try {
     await ref.read(repositoryProvider).markRead(id);
-  } catch (_) {}
+    return true;
+  } on HelixError catch (e) {
+    if (ref.context.mounted) showHelixError(ref.context, e);
+    return false;
+  }
 }
 
 /// Inbox: Notifications / Flags / Documents. Mark-read only with
-/// `notification:manage`; exact unread count drives the admin badge.
+/// `notification:read`; exact unread count drives the admin badge.
 class InboxScreen extends ConsumerStatefulWidget {
   const InboxScreen({super.key, this.initial});
 
@@ -31,7 +37,27 @@ class InboxScreen extends ConsumerStatefulWidget {
 }
 
 class _InboxScreenState extends ConsumerState<InboxScreen> {
-  late String _segment = widget.initial ?? 'notifications';
+  static const List<String> _segments = ['notifications', 'flags', 'docs'];
+  String _segment = 'notifications';
+  bool _initialised = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialised) return;
+    _initialised = true;
+    // The deep link carries the tab: /driver/inbox?initial=notifications
+    String? fromRoute;
+    try {
+      fromRoute = GoRouterState.of(context).uri.queryParameters['initial'];
+    } catch (_) {
+      fromRoute = null; // rendered outside the router
+    }
+    final candidate = fromRoute ?? widget.initial;
+    if (candidate != null && _segments.contains(candidate)) {
+      _segment = candidate;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -66,50 +92,88 @@ class _InboxScreenState extends ConsumerState<InboxScreen> {
   }
 }
 
-class _NotificationsList extends ConsumerWidget {
+/// The statuses the backend treats as read (packages/shared/src/notifications.ts).
+const Set<String> _readStatuses = {'DELIVERED', 'SUPPRESSED_DND'};
+
+class _NotificationsList extends ConsumerStatefulWidget {
   const _NotificationsList();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_NotificationsList> createState() => _NotificationsListState();
+}
+
+class _NotificationsListState extends ConsumerState<_NotificationsList> {
+  /// The rows acknowledged in this session — the server flips them to
+  /// DELIVERED, and the list must show that immediately.
+  final Set<String> _acknowledged = {};
+
+  bool _isUnread(Map<String, dynamic> row) {
+    final id = row['id']?.toString();
+    if (id != null && _acknowledged.contains(id)) return false;
+    final status = row['status']?.toString() ?? '';
+    return !_readStatuses.contains(status);
+  }
+
+  Future<void> _markRead(Map<String, dynamic> row) async {
+    final id = row['id']?.toString();
+    if (id == null) return;
+    final ok = await markReadSafely(ref, id);
+    if (!ok || !mounted) return;
+    setState(() => _acknowledged.add(id));
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final strings = context.s;
     return PagedList<Map<String, dynamic>>(
+      offlineCopy: true,
       emptyMessage: strings.t('notifications.empty'),
       loadMore: (cursor) async {
         try {
           return await ref.read(repositoryProvider).page('notifications', cursor: cursor);
         } on HelixError catch (e) {
-          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+          throw HelixErrorLike(
+            strings.t(e.catalogue.i18nKey),
+            actionLabel: strings.t(e.catalogue.action.labelKey),
+          );
         }
       },
       itemBuilder: (context, row) {
-        final unread = row['status'] == 'QUEUED' || row['status'] == 'SENT';
+        final unread = _isUnread(row);
         final payload = row['payload'];
         final link = targetFromNotification(payload is Map<String, dynamic> ? payload : const {});
-        final canManage = ref.watch(sessionProvider).permissions.contains('notification:manage');
+        final canManage = ref.watch(sessionProvider).permissions.contains('notification:read');
         return SwipeActionRow(
           actions: canManage && unread
               ? [
                   SwipeAction(
                     label: strings.t('inbox.markRead'),
-                    icon: Icons.mark_email_read,
+                    icon: Icons.mark_email_read_rounded,
                     color: AppColors.accent,
-                    onPressed: () async => await markReadSafely(ref, row['id'] as String),
+                    onPressed: () async => await _markRead(row),
                   ),
                 ]
               : [],
           child: ListTile(
-            leading: unread ? Icon(Icons.circle, size: 10, color: AppColors.accentText) : null,
+            leading: unread ? Icon(Icons.circle_rounded, size: 10, color: AppColors.accentText) : null,
             title: HelixText(row['title']?.toString() ?? '', style: TypeScale.bodyStrong(AppColors.text)),
             subtitle: HelixText(
-              '${row['body'] ?? ''} · ${Fmt.time(DateTime.tryParse(row['created_at']?.toString() ?? ''))}',
+              '${row['body'] ?? ''} · ${Fmt.time(Fmt.parseTimestamp(row['created_at']?.toString()))}',
               style: TypeScale.caption(AppColors.textSecondary),
             ),
+            trailing: canManage && unread
+                ? IconButton(
+                    tooltip: strings.t('inbox.markRead'),
+                    icon: Icon(Icons.mark_email_read_rounded, color: AppColors.textSecondary),
+                    onPressed: () async => await _markRead(row),
+                  )
+                : null,
             onTap: () async {
               if (canManage) {
-                await markReadSafely(ref, row['id'] as String);
+                await _markRead(row);
               }
               if (link != null && context.mounted) {
-                context.go(routeForDeepLink(link, ref.read(sessionProvider)) ?? '/driver/inbox');
+                context.push(routeForDeepLink(link, ref.read(sessionProvider)) ?? '/driver/inbox');
               }
             },
           ),
@@ -118,6 +182,7 @@ class _NotificationsList extends ConsumerWidget {
     );
   }
 }
+
 class _FlagsList extends ConsumerWidget {
   const _FlagsList();
 
@@ -125,12 +190,16 @@ class _FlagsList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = context.s;
     return PagedList<Map<String, dynamic>>(
+      offlineCopy: true,
       emptyMessage: strings.t('anomalies.empty'),
       loadMore: (cursor) async {
         try {
           return await ref.read(repositoryProvider).page('anomalies', cursor: cursor);
         } on HelixError catch (e) {
-          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+          throw HelixErrorLike(
+            strings.t(e.catalogue.i18nKey),
+            actionLabel: strings.t(e.catalogue.action.labelKey),
+          );
         }
       },
       itemBuilder: (context, row) => ListTile(
@@ -139,7 +208,7 @@ class _FlagsList extends ConsumerWidget {
           '${row['domain'] ?? ''} · ${row['severity'] ?? ''}',
           style: TypeScale.caption(AppColors.textSecondary),
         ),
-        trailing: Icon(Icons.chevron_right, color: AppColors.textSecondary),
+        trailing: Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
         onTap: () => context.push('/anomaly/${row['id']}'),
       ),
     );
@@ -153,6 +222,7 @@ class _DocsList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = context.s;
     return PagedList<Map<String, dynamic>>(
+      offlineCopy: true,
       emptyMessage: strings.t('docs.empty'),
       loadMore: (cursor) async {
         try {
@@ -160,7 +230,10 @@ class _DocsList extends ConsumerWidget {
               .read(repositoryProvider)
               .page('documents/expiring', cursor: cursor, query: {'within_days': 30});
         } on HelixError catch (e) {
-          throw HelixErrorLike(strings.error(e.code), actionLabel: strings.actionLabel(e.catalogue.action.name));
+          throw HelixErrorLike(
+            strings.t(e.catalogue.i18nKey),
+            actionLabel: strings.t(e.catalogue.action.labelKey),
+          );
         }
       },
       itemBuilder: (context, row) {
