@@ -41,6 +41,11 @@ CMD ["npm", "run", "dev:api"]
 # without the root package's own dependencies (build tooling only at the root).
 FROM node:20-bookworm-slim AS prod-deps
 WORKDIR /app
+# bookworm security updates live in a separate suite; add it so apt-get
+# upgrade lands patched versions of OS packages (libgnutls30, libcap2, ...).
+RUN echo "deb http://deb.debian.org/debian bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY packages/api/package.json     ./packages/api/package.json
 COPY packages/shared/package.json  ./packages/shared/package.json
@@ -55,8 +60,12 @@ ENV NODE_ENV=production
 ENV PORT=4000
 WORKDIR /app
 # postgresql-client is the psql binary used by the schema-migration Job.
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+# bookworm-security (see prod-deps) so installed OS packages carry the latest
+# security patches before trivy scans the image.
+RUN echo "deb http://deb.debian.org/debian bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-build /app/packages/api/dist    ./packages/api/dist
 COPY --from=prod-build /app/packages/shared/dist ./packages/shared/dist
