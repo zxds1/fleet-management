@@ -41,6 +41,7 @@ CMD ["npm", "run", "dev:api"]
 # Production dependency tree: workspace packages only, no devDependencies, and
 # without the root package's own dependencies (build tooling only at the root).
 FROM node:20-bookworm-slim AS prod-deps
+ENV NODE_ENV=development
 WORKDIR /app
 # bookworm security updates live in a separate suite; add it so apt-get
 # upgrade lands patched versions of OS packages (libgnutls30, libcap2, ...).
