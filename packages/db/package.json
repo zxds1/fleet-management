@@ -26,6 +26,14 @@
     "@types/pg": "^8.11.0",
     "jest": "^30.5.2",
     "ts-jest": "^29.4.15",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "brace-expansion": "2.1.5",
+    "cross-spawn": "7.0.5",
+    "glob": "10.5.0",
+    "ip-address": "10.3.1",
+    "minimatch": "9.0.7",
+    "pacote": "21.5.1",
+    "sigstore": "4.1.1",
+    "tar": "7.5.21"
   }
 }
