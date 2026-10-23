@@ -558,3 +558,96 @@ spec:
           volumes:
             - name: tmp
               emptyDir: {}
+
+---
+# Network policies (C5.3): default-deny segmentation so a compromise of one
+# workload cannot reach the others. Postgres lives outside the cluster (RDS,
+# DATABASE_URL), so it is reached over 0.0.0.0/0:5432; DNS is 53.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-api
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: fleet-api } }
+  policyTypes: [Ingress, Egress]
+  ingress: [] # nothing in-cluster calls the API
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ port: 6379, protocol: TCP }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5432, protocol: TCP }, { port: 443, protocol: TCP }, { port: 53, protocol: TCP }, { port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-worker
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: fleet-worker } }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ port: 6379, protocol: TCP }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5432, protocol: TCP }, { port: 443, protocol: TCP }, { port: 53, protocol: TCP }, { port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-traccar
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: traccar } }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ port: 6379, protocol: TCP }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5432, protocol: TCP }, { port: 53, protocol: TCP }, { port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-db-migrate
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: db-migrate } }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5432, protocol: TCP }, { port: 53, protocol: TCP }, { port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-partition-maint
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: partition-maint } }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5432, protocol: TCP }, { port: 53, protocol: TCP }, { port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netpol-redis
+  namespace: fleet
+spec:
+  podSelector: { matchLabels: { app: redis } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - { podSelector: { matchLabels: { app: fleet-api } } }
+        - { podSelector: { matchLabels: { app: fleet-worker } } }
+        - { podSelector: { matchLabels: { app: traccar } } }
+        - { podSelector: { matchLabels: { app: db-migrate } } }
+        - { podSelector: { matchLabels: { app: partition-maint } } }
+      ports: [{ port: 6379, protocol: TCP }]
+  egress: [] # Redis never initiates connections
