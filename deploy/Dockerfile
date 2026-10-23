@@ -12,9 +12,11 @@
 
 FROM node:20-bookworm AS base
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
+# Upgrade the base image packages so the build starts from patched versions
+# (bookworm point releases fix CVEs faster than the node image is republished).
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 # Every workspace's package.json must exist BEFORE `npm ci`: with the workspaces
 # glob only matching existing packages, a missing packages/*/package.json makes
