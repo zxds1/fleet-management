@@ -56,11 +56,11 @@ COPY packages/db/package.json      ./packages/db/package.json
 COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
 RUN npm ci && \
-    # Upgrade npm globally: trivy scans npm's own internal node_modules
-    # (usr/local/lib/node_modules/npm/node_modules/), which contain old
-    # versions of brace-expansion, cross-spawn, glob, minimatch, tar, etc.
-    # Upgrading npm replaces those bundled copies with patched versions.
-    npm install -g npm@12 && \
+    # Remove npm's own bundled dependencies: trivy scans them
+    # (usr/local/lib/node_modules/npm/node_modules/) and they contain old
+    # vulnerable versions of brace-expansion, cross-spawn, glob, minimatch,
+    # tar, etc. The prod image doesn't need npm at runtime.
+    rm -rf /usr/local/lib/node_modules/npm/node_modules && \
     npm cache clean --force
 
 FROM node:20-bookworm-slim AS prod
@@ -83,7 +83,11 @@ COPY --from=prod-build /app/packages/ws/dist     ./packages/ws/dist
 COPY db/schema ./db/schema
 COPY db/seed ./db/seed
 COPY db/migrate.sh ./db/migrate.sh
-RUN chmod +x ./db/migrate.sh && chown -R node:node /app
+RUN chmod +x ./db/migrate.sh && chown -R node:node /app && \
+    # The prod image starts from node:20-bookworm-slim which ships npm with
+    # its own bundled (old, vulnerable) dependencies. Remove them: the runtime
+    # image doesn't need npm, and trivy would otherwise flag them.
+    rm -rf /usr/local/lib/node_modules/npm/node_modules
 USER node
 EXPOSE 4000
 # The image serves the API on $PORT and the worker on $HEALTH_PORT; both answer
