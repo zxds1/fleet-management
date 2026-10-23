@@ -47,6 +47,7 @@ WORKDIR /app
 # upgrade lands patched versions of OS packages (libgnutls30, libcap2, ...).
 RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y --no-install-recommends python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY packages/api/package.json     ./packages/api/package.json
@@ -54,7 +55,19 @@ COPY packages/shared/package.json  ./packages/shared/package.json
 COPY packages/db/package.json      ./packages/db/package.json
 COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
-RUN NODE_ENV=development npm ci && \
+RUN npm ci && \
+    # Force transitive deps at versions fixing trivy CRITICALs at root level.
+    # `npm ci` can leave some nested copies below the patched version, so
+    # install explicitly at root; npm dedupes workspace copies to root.
+    npm install --no-save \
+        brace-expansion@2.1.5 \
+        cross-spawn@7.0.5 \
+        glob@10.5.0 \
+        ip-address@10.3.1 \
+        minimatch@9.0.7 \
+        pacote@21.5.1 \
+        sigstore@4.1.1 \
+        tar@7.5.21 && \
     npm cache clean --force
 
 FROM node:20-bookworm-slim AS prod
