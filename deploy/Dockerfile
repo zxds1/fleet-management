@@ -13,8 +13,9 @@
 FROM node:20-bookworm AS base
 WORKDIR /app
 # Upgrade the base image packages so the build starts from patched versions
-# (bookworm point releases fix CVEs faster than the node image is republished).
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
+# (bookworm security updates live in a separate suite).
+RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
@@ -43,7 +44,7 @@ FROM node:20-bookworm-slim AS prod-deps
 WORKDIR /app
 # bookworm security updates live in a separate suite; add it so apt-get
 # upgrade lands patched versions of OS packages (libgnutls30, libcap2, ...).
-RUN echo "deb http://deb.debian.org/debian bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
+RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
@@ -62,7 +63,7 @@ WORKDIR /app
 # postgresql-client is the psql binary used by the schema-migration Job.
 # bookworm-security (see prod-deps) so installed OS packages carry the latest
 # security patches before trivy scans the image.
-RUN echo "deb http://deb.debian.org/debian bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
+RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends postgresql-client && \
     rm -rf /var/lib/apt/lists/*
