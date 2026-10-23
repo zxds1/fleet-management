@@ -53,8 +53,21 @@ COPY packages/shared/package.json  ./packages/shared/package.json
 COPY packages/db/package.json      ./packages/db/package.json
 COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
-RUN npm ci --omit=dev --workspaces --include-workspace-root=false \
-    && npm cache clean --force
+RUN npm ci --omit=dev --workspaces --include-workspace-root=false && \
+    # Pin transitive deps at versions fixing trivy CRITICALs
+    # (brace-expansion, cross-spawn, glob, ip-address, minimatch, pacote,
+    # sigstore, tar). Force them at root so every nested copy resolves at or
+    # above the patched version.
+    npm install --no-save \
+        brace-expansion@2.1.5 \
+        cross-spawn@7.0.5 \
+        glob@10.5.0 \
+        ip-address@10.3.1 \
+        minimatch@9.0.7 \
+        pacote@21.5.1 \
+        sigstore@4.1.1 \
+        tar@7.5.21 && \
+    npm cache clean --force
 
 FROM node:20-bookworm-slim AS prod
 ENV NODE_ENV=production
