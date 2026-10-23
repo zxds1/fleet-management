@@ -55,18 +55,12 @@ COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
 RUN npm ci && \
     # Force transitive deps at versions fixing trivy CRITICALs into every
-    # workspace. `npm ci --omit=dev` can leave some transitive copies below
-    # their patched version, and root devDependency pins don't reach nested
-    # workspace copies, so install explicitly into each workspace:
-    npm install --no-save --workspaces \
-        brace-expansion@2.1.5 \
-        cross-spawn@7.0.5 \
-        glob@10.5.0 \
-        ip-address@10.3.1 \
-        minimatch@9.0.7 \
-        pacote@21.5.1 \
-        sigstore@4.1.1 \
-        tar@7.5.21 && \
+    # workspace, one at a time (npm 10 does not handle multiple packages
+    # with --workspaces reliably). `npm ci` alone can leave some nested
+    # copies below the patched version, and root pins dont reach them:
+    for p in "brace-expansion@2.1.5" "cross-spawn@7.0.5" "glob@10.5.0" "ip-address@10.3.1" "minimatch@9.0.7" "pacote@21.5.1" "sigstore@4.1.1" "tar@7.5.21"; do \
+      npm install --no-save --workspaces "$p"; \
+    done && \
     npm cache clean --force
 
 FROM node:20-bookworm-slim AS prod
