@@ -56,18 +56,11 @@ COPY packages/db/package.json      ./packages/db/package.json
 COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
 RUN npm ci && \
-    # Force transitive deps at versions fixing trivy CRITICALs at root level.
-    # `npm ci` can leave some nested copies below the patched version, so
-    # install explicitly at root; npm dedupes workspace copies to root.
-    npm install --no-save \
-        brace-expansion@2.1.5 \
-        cross-spawn@7.0.5 \
-        glob@10.5.0 \
-        ip-address@10.3.1 \
-        minimatch@9.0.7 \
-        pacote@21.5.1 \
-        sigstore@4.1.1 \
-        tar@7.5.21 && \
+    # Upgrade npm globally: trivy scans npm's own internal node_modules
+    # (usr/local/lib/node_modules/npm/node_modules/), which contain old
+    # versions of brace-expansion, cross-spawn, glob, minimatch, tar, etc.
+    # Upgrading npm replaces those bundled copies with patched versions.
+    npm install -g npm@12 && \
     npm cache clean --force
 
 FROM node:20-bookworm-slim AS prod
