@@ -5,6 +5,7 @@
 
 import type { FleetPool } from "@fleet/db";
 import type { MediaPresigner } from "../media/presigner";
+import type { Redis as RedisClient } from "ioredis";
 
 export interface HealthCheck {
   name: string;
@@ -43,7 +44,7 @@ export function liveness(): { status: "ok" } {
  * Readiness (09 §2): PG connect + S3 reachability. The S3 check is skipped (ok=true, detail) when
  * the presigner is not configured so a dev box without S3 still reports ready.
  */
-export async function readiness(pool: FleetPool, presigner?: MediaPresigner): Promise<DeepHealth> {
+export async function readiness(pool: FleetPool, presigner?: MediaPresigner, redis?: { client: RedisClient | null }): Promise<DeepHealth> {
   const checks: HealthCheck[] = [];
 
   try {
@@ -71,6 +72,19 @@ export async function readiness(pool: FleetPool, presigner?: MediaPresigner): Pr
       });
     } catch (e) {
       checks.push({ name: "s3", ok: false, detail: (e as Error).message });
+    }
+  }
+
+  if (redis) {
+    try {
+      if (redis.client) {
+        await timed(() => redis.client!.ping());
+        checks.push({ name: "redis", ok: true });
+      } else {
+        checks.push({ name: "redis", ok: true, detail: "disabled" });
+      }
+    } catch (e) {
+      checks.push({ name: "redis", ok: false, detail: (e as Error).message });
     }
   }
 

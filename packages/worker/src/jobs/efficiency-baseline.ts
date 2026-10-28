@@ -26,13 +26,13 @@ export class EfficiencyBaselineJob {
 
       const res = await tx.client.query(
         `UPDATE app.fuel_efficiency_records e
-         SET baseline_l_per_100km = COALESCE(b.vehicle_base, $3),
+         SET baseline_l_per_100km = COALESCE(b.vehicle_base, $1),
              baseline_scope = CASE WHEN b.vehicle_base IS NOT NULL THEN 'VEHICLE' ELSE 'FLEET' END,
              deviation_percent = CASE WHEN COALESCE(b.vehicle_base, $3) > 0
-               THEN ((e.l_per_100km - COALESCE(b.vehicle_base, $3)) / COALESCE(b.vehicle_base, $3)) * 100 ELSE NULL END
+               THEN ((e.l_per_100km - COALESCE(b.vehicle_base, $1)) / COALESCE(b.vehicle_base, $1)) * 100 ELSE NULL END
          FROM (
            SELECT DISTINCT ON (r.vehicle_id) r.vehicle_id,
-             CASE WHEN count(r2.id) OVER (PARTITION BY r.vehicle_id) >= $4
+             CASE WHEN count(r2.id) OVER (PARTITION BY r.vehicle_id) >= $2
                THEN avg(r2.l_per_100km) OVER (PARTITION BY r.vehicle_id) ELSE NULL END AS vehicle_base
            FROM app.fuel_efficiency_records r
            LEFT JOIN app.fuel_efficiency_records r2

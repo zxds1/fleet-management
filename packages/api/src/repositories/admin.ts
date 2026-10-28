@@ -39,8 +39,10 @@ export interface ListDriversOptions {
 }
 
 export class AdminRepository extends BaseRepository<UserRow> {
-  constructor(client: DbClient) {
+  private readonly piiKey: string;
+  constructor(client: DbClient, piiKey?: string) {
     super(client, "app.users");
+    this.piiKey = piiKey ?? "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }
 
   async listDrivers(opts: ListDriversOptions): Promise<DriverRosterRow[]> {
@@ -66,7 +68,9 @@ export class AdminRepository extends BaseRepository<UserRow> {
     }
 
     const sql = `
-      SELECT u.*, dr.status AS driver_status, COALESCE(
+      SELECT u.*, pgp_sym_decrypt(u.email_encrypted, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=') AS email,
+             pgp_sym_decrypt(u.phone_encrypted, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=') AS phone,
+             dr.status AS driver_status, COALESCE(
         (SELECT jsonb_agg(d.* ORDER BY d.created_at DESC)
            FROM app.driver_devices d
           WHERE d.user_id = u.id AND d.revoked_at IS NULL), '[]') AS devices
@@ -88,6 +92,8 @@ export class AdminRepository extends BaseRepository<UserRow> {
   async getDriver(userId: string): Promise<DriverDetailRow | null> {
     const res = await this.client.query<DriverDetailRow>(
       `SELECT u.*,
+              pgp_sym_decrypt(u.email_encrypted, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=') AS email,
+              pgp_sym_decrypt(u.phone_encrypted, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=') AS phone,
               COALESCE(
                 (SELECT jsonb_agg(d.* ORDER BY d.created_at DESC)
                    FROM app.driver_devices d
@@ -138,8 +144,12 @@ export class AdminRepository extends BaseRepository<UserRow> {
       sets.push(`full_name = $${params.length}`);
     }
     if (input.phone !== undefined) {
-      params.push(input.phone);
-      sets.push(`phone = $${params.length}`);
+      if (input.phone !== null) {
+        params.push(input.phone, this.piiKey);
+        sets.push(`phone_encrypted = pgp_sym_encrypt($${params.length - 1}::text, $${params.length})`);
+      } else {
+        sets.push(`phone_encrypted = NULL`);
+      }
     }
     if (input.locale !== undefined) {
       params.push(input.locale);
@@ -148,8 +158,14 @@ export class AdminRepository extends BaseRepository<UserRow> {
     // Nothing to change: return the current row rather than emitting `SET` with an empty list.
     if (sets.length === 0) {
       const current = await this.client.query<UserRow>(
-        `SELECT * FROM app.users WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
-        [userId],
+        `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+                last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+                mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+                pgp_sym_decrypt(email_encrypted, $2) AS email,
+                pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+                email_encrypted, phone_encrypted, encryption_key_version
+           FROM app.users WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+        [userId, this.piiKey],
       );
       return current.rows[0] ?? null;
     }
@@ -164,8 +180,18 @@ export class AdminRepository extends BaseRepository<UserRow> {
   }
 
   async findLiveByEmail(email: string): Promise<UserRow | null> {    const res = await this.client.query<UserRow>(
-      `SELECT * FROM app.users WHERE email = $1 AND deleted_at IS NULL LIMIT 1`,
-      [email],
+      `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+              last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+              mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+              pgp_sym_decrypt(email_encrypted, $2) AS email,
+              pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+              email_encrypted, phone_encrypted, encryption_key_version
+         FROM app.users
+        WHERE email_encrypted IS NOT NULL
+          AND pgp_sym_decrypt(email_encrypted, $2) = $1
+          AND deleted_at IS NULL
+        LIMIT 1`,
+      [email, this.piiKey],
     );
     return res.rows[0] ?? null;
   }
@@ -173,8 +199,14 @@ export class AdminRepository extends BaseRepository<UserRow> {
   /** One live user by id — backs `GET /admin/users/me` (the caller's own profile). */
   async findLiveById(userId: string): Promise<UserRow | null> {
     const res = await this.client.query<UserRow>(
-      `SELECT * FROM app.users WHERE id = $1::uuid AND deleted_at IS NULL LIMIT 1`,
-      [userId],
+      `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+              last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+              mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+              pgp_sym_decrypt(email_encrypted, $2) AS email,
+              pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+              email_encrypted, phone_encrypted, encryption_key_version
+         FROM app.users WHERE id = $1::uuid AND deleted_at IS NULL LIMIT 1`,
+      [userId, this.piiKey],
     );
     return res.rows[0] ?? null;
   }
@@ -182,10 +214,17 @@ export class AdminRepository extends BaseRepository<UserRow> {
   /** Inserts the user and its role grants; caller runs this inside the request transaction (D8). */
   async createDriver(input: CreateDriverInput): Promise<UserRow> {
     const res = await this.client.query<UserRow>(
-      `INSERT INTO app.users (email, password_hash, full_name, phone, is_active)
-       VALUES ($1, $2, $3, $4, false)
-       RETURNING *`,
-      [input.email, input.passwordHash, input.fullName, input.phone ?? null],
+      `INSERT INTO app.users (password_hash, full_name, is_active,
+                               email_encrypted, phone_encrypted, encryption_key_version)
+       VALUES ($1, $2, false,
+               pgp_sym_encrypt($3::text, $4), pgp_sym_encrypt($5::text, $4), 1)
+       RETURNING id, password_hash, full_name, is_active, failed_login_count, locked_until,
+                 last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+                 mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+                 pgp_sym_decrypt(email_encrypted, $4) AS email,
+                 pgp_sym_decrypt(phone_encrypted, $4) AS phone,
+                 email_encrypted, phone_encrypted, encryption_key_version`,
+      [input.passwordHash, input.fullName, input.email, this.piiKey, input.phone ?? null],
     );
     const user = res.rows[0] as UserRow;
 

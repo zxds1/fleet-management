@@ -103,6 +103,10 @@ export class MfaService {
     if (!user || !user.mfa_enabled) {
       return err(new Unauthenticated("MFA not configured for this account"));
     }
+    if (user.is_active === false) return err(new Unauthenticated("Account is not active"));
+    if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+      return err(new Unauthenticated("Account temporarily locked. Try again later."));
+    }
 
     // Recovery code path (consumed on success).
     if (await this.recovery.consume(userId, sha256Hex(code.toUpperCase()))) {

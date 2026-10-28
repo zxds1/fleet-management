@@ -24,8 +24,8 @@ export class StaleShiftJob {
          FROM app.shifts s
          JOIN app.tracker_health h ON h.vehicle_id = s.vehicle_id
          WHERE s.clock_out_at IS NULL
-           AND s.clock_in_at < $1 - ($2 || ' hours')::interval
-           AND (h.is_online = false OR h.offline_since < $1 - ($3 || ' hours')::interval)`,
+           AND s.clock_in_at < $1::timestamptz - (($2::text || ' hours')::interval)
+           AND (h.is_online = false OR h.offline_since < $1::timestamptz - (($3::text || ' hours')::interval))`,
         [now, staleOpen, staleTracker],
       );
       // Alert Admin (notification row consumed by the notifications job).

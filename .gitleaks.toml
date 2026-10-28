@@ -40,7 +40,6 @@ paths = [
     '''packages/mobile/src/screens/admin/.*\.tsx''',
     '''packages/mobile/app\.json''',
     '''packages/mobile/src/core/__tests__/.*\.ts''',
-    '''packages/api/src/.*\.ts''',
     '''packages/api/test/.*\.ts''',
     '''packages/worker/src/.*\.ts''',
     '''packages/worker/test/.*\.ts''',

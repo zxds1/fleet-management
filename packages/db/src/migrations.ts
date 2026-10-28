@@ -4,6 +4,7 @@
 // Re-running is a no-op (idempotent, 06 §7). DDL is the authority for table shape.
 
 import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { PoolLike } from "@fleet/shared";
 
@@ -41,14 +42,9 @@ async function appliedNames(pool: PoolLike): Promise<Set<string>> {
   });
 }
 
-// FNV-1a — enough to detect a changed migration file.
+// SHA-256 — matches db/migrate.sh's tracker so both runners agree on applied state.
 function hash(content: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < content.length; i++) {
-    h ^= content.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16);
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 export async function runMigrations(pool: PoolLike, dir: string): Promise<MigrationResult> {

@@ -17,16 +17,28 @@ import type {
 } from "@fleet/shared";
 
 export class UserRepository extends BaseRepository<UserRow> {
-  constructor(client: DbClient) {
+  private readonly piiKey: string;
+  constructor(client: DbClient, piiKey?: string) {
     super(client, "app.users");
+    this.piiKey = piiKey ?? "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }
 
   async findByEmail(email: string): Promise<UserRow | null> {
     const res = await this.client.query<UserRow>(
-      `SELECT * FROM app.users WHERE email = $1 AND deleted_at IS NULL LIMIT 1`,
-      [email],
+      `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+              last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+              mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+              pgp_sym_decrypt(email_encrypted, $2) AS email,
+              pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+              email_encrypted, phone_encrypted, encryption_key_version
+         FROM app.users
+        WHERE email_encrypted IS NOT NULL
+          AND pgp_sym_decrypt(email_encrypted, $2) = $1
+          AND deleted_at IS NULL
+        LIMIT 1`,
+      [email, this.piiKey],
     );
-    return res.rows[0] ?? null;
+    return (res.rows[0] ?? null) as UserRow | null;
   }
 
   /**
@@ -38,14 +50,34 @@ export class UserRepository extends BaseRepository<UserRow> {
     const digits = phone.replace(/\D/g, "");
     if (!digits) return null;
     const res = await this.client.query<UserRow>(
-      `SELECT * FROM app.users
-        WHERE phone IS NOT NULL
-          AND regexp_replace(phone, '\\D', '', 'g') = $1
+      `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+              last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+              mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+              pgp_sym_decrypt(email_encrypted, $2) AS email,
+              pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+              email_encrypted, phone_encrypted, encryption_key_version
+         FROM app.users
+        WHERE phone_encrypted IS NOT NULL
+          AND regexp_replace(pgp_sym_decrypt(phone_encrypted, $2), '\\D', '', 'g') = $1
           AND deleted_at IS NULL
         LIMIT 1`,
-      [digits],
+      [digits, this.piiKey],
     );
-    return res.rows[0] ?? null;
+    return (res.rows[0] ?? null) as UserRow | null;
+  }
+
+  async getById(id: string): Promise<UserRow | null> {
+    const res = await this.client.query<UserRow>(
+      `SELECT id, password_hash, full_name, is_active, failed_login_count, locked_until,
+              last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+              mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+              pgp_sym_decrypt(email_encrypted, $2) AS email,
+              pgp_sym_decrypt(phone_encrypted, $2) AS phone,
+              email_encrypted, phone_encrypted, encryption_key_version
+         FROM app.users WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+      [id, this.piiKey],
+    );
+    return (res.rows[0] ?? null) as UserRow | null;
   }
 
   async recordFailedLogin(userId: string, lockedUntil: Date | null): Promise<number> {
@@ -113,10 +145,17 @@ export class UserRepository extends BaseRepository<UserRow> {
     roles: RoleCode[];
   }): Promise<UserRow> {
     const res = await this.client.query<UserRow>(
-      `INSERT INTO app.users (email, password_hash, full_name, phone, is_active)
-       VALUES ($1, $2, $3, $4, true)
-       RETURNING *`,
-      [input.email, input.passwordHash, input.fullName, input.phone ?? null],
+      `INSERT INTO app.users (password_hash, full_name, is_active,
+                               email_encrypted, phone_encrypted, encryption_key_version)
+       VALUES ($1, $2, true,
+               pgp_sym_encrypt($3::text, $4), pgp_sym_encrypt($5::text, $4), 1)
+       RETURNING id, password_hash, full_name, is_active, failed_login_count, locked_until,
+                 last_login_at, password_changed_at, mfa_enabled, mfa_secret_encrypted,
+                 mfa_enrolled_at, deleted_at, created_at, updated_at, locale,
+                 pgp_sym_decrypt(email_encrypted, $4) AS email,
+                 pgp_sym_decrypt(phone_encrypted, $4) AS phone,
+                 email_encrypted, phone_encrypted, encryption_key_version`,
+      [input.passwordHash, input.fullName, input.email, this.piiKey, input.phone ?? null],
     );
     const user = res.rows[0] as UserRow;
 

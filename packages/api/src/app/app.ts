@@ -74,7 +74,7 @@ export function createApp(container: Container): Express {
   app.get(
     "/readyz",
     asyncHandler(async (_req: Request, res: Response) => {
-      const result = await readiness(container.pool, container.infra.presigner);
+      const result = await readiness(container.pool, container.infra.presigner, container.infra.redis);
       res.status(result.status === "ok" ? 200 : 503).json(result);
     }),
   );

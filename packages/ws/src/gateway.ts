@@ -307,7 +307,7 @@ function scopeDriverId(payload: unknown): string | undefined {
 function subscribeBus(bus: EventBus, channel: string, handler: (payload: unknown) => void): () => void {
   void bus.subscribe(channel, handler);
   return () => {
-    /* the bus itself is closed by the caller (index.ts) */
+    void bus.unsubscribe(channel, handler);
   };
 }
 

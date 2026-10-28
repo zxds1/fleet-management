@@ -3,7 +3,7 @@
 // client-branchable member; the catalogue is frozen in 08-error-state-model.md §1.
 
 import type { NextFunction, Request, Response } from "express";
-import { AppError, ServiceUnavailable, TransactionError, logger, reportError, computeFingerprint } from "@fleet/shared";
+import { AppError, ServiceUnavailable, TransactionError, logger, reportError, computeFingerprint, redactString } from "@fleet/shared";
 
 export const PROBLEM_CONTENT_TYPE = "application/problem+json";
 
@@ -54,7 +54,7 @@ export function problemHandler(persistErrorEvent?: PersistErrorEvent) {
             tenant_id: req.principal?.tenantId ?? null,
             geography: null,
             severity,
-            message: problem.detail ?? appError.message ?? null,
+            message: problem.detail ? redactString(problem.detail) : null,
             fingerprint,
           });
         } catch (e) {
@@ -89,6 +89,7 @@ export function problemHandler(persistErrorEvent?: PersistErrorEvent) {
     }
 
     if (res.headersSent) return;
+    res.setHeader("x-error-code", problem.error_code);
     res.status(problem.status).type(PROBLEM_CONTENT_TYPE).json(stripUndefined(problem));
   };
 }

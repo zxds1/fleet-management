@@ -98,7 +98,7 @@ export class IngestConsumer {
   private async poll(): Promise<void> {
     if (!this.running || !this.deps.redis) return;
     try {
-      const res = (await this.deps.redis.xreadgroup("GROUP", this.groupName, this.consumerName, "COUNT", this.batchSize, "BLOCK", this.blockMs, "STREAMS", this.stream, this.lastId)) as any;
+      const res = (await this.deps.redis.xreadgroup("GROUP", this.groupName, this.consumerName, "COUNT", this.batchSize, "BLOCK", this.blockMs, "STREAMS", this.stream, ">")) as any;
       if (!res) return;
       for (const [streamName, entries] of res) {
         for (const [id, fields] of entries as [string, string[]][]) {
@@ -210,7 +210,12 @@ export class IngestConsumer {
 
   private async clearRetries(key: string): Promise<void> {
     const redis = this.deps.redis;
-    if (redis) await redis.del(key);
+    if (!redis) return;
+    try {
+      await (redis as { del?: (k: string) => Promise<unknown> }).del?.(key);
+    } catch {
+      /* best effort */
+    }
   }
 
   private async deadLetter(streamId: string, payload: unknown, errorMessage: string, errorCode: string): Promise<void> {
@@ -349,13 +354,23 @@ export class IngestConsumer {
 
   // Hooks so tests can inject fake repos without a live pool.
   protected async contextFor(vehicleId: string, at: Date): Promise<RetentionContextData> {
-    const repo = new TelemetryRepository(await this.client());
-    return repo.getRetentionContext(vehicleId, at);
+    const client = await this.client();
+    try {
+      const repo = new TelemetryRepository(client);
+      return repo.getRetentionContext(vehicleId, at);
+    } finally {
+      (client as { release?: () => void }).release?.();
+    }
   }
 
   protected async shiftIdFor(vehicleId: string, at: Date): Promise<string | null> {
-    const repo = new TelemetryRepository(await this.client());
-    return repo.getShiftIdForWindow(vehicleId, at);
+    const client = await this.client();
+    try {
+      const repo = new TelemetryRepository(client);
+      return repo.getShiftIdForWindow(vehicleId, at);
+    } finally {
+      (client as { release?: () => void }).release?.();
+    }
   }
 
   private async client() {

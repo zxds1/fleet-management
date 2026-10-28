@@ -571,7 +571,9 @@ metadata:
 spec:
   podSelector: { matchLabels: { app: fleet-api } }
   policyTypes: [Ingress, Egress]
-  ingress: [] # nothing in-cluster calls the API
+  ingress:
+    - from: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 4000, protocol: TCP }]
   egress:
     - to: [{ podSelector: { matchLabels: { app: redis } } }]
       ports: [{ port: 6379, protocol: TCP }]
@@ -601,7 +603,9 @@ metadata:
 spec:
   podSelector: { matchLabels: { app: traccar } }
   policyTypes: [Ingress, Egress]
-  ingress: []
+  ingress:
+    - from: [{ ipBlock: { cidr: 0.0.0.0/0 } }]
+      ports: [{ port: 5005, protocol: TCP }]
   egress:
     - to: [{ podSelector: { matchLabels: { app: redis } } }]
       ports: [{ port: 6379, protocol: TCP }]

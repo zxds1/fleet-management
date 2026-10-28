@@ -67,7 +67,11 @@ export class AuthService {
     await this.users.recordSuccessfulLogin(user.id);
 
     const identity = await this.resolve(user.id);
-    if (user.mfa_enabled) {
+    const resolved = await this.permissions.resolve(user.id);
+    if (resolved.requiresMfa && !user.mfa_enabled) {
+      return err(new Unauthenticated("MFA enrollment required for this account"));
+    }
+    if (user.mfa_enabled || resolved.requiresMfa) {
       const challengeToken = this.tokens.issueMfaChallenge({ userId: user.id });
       const sent = await this.mfa.sendCode(user.id);
       if (!sent.ok) return err(sent.error);

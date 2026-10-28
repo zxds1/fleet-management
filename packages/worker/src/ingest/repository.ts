@@ -103,8 +103,8 @@ export class TelemetryRepository {
        ) VALUES (
          $1,$2,$3,
          ST_SetSRID(ST_MakePoint($4,$5),4326)::geography,
-         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
-       )`,
+         $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+       ) ON CONFLICT (traccar_position_id, recorded_at) DO NOTHING`,
       [
         row.vehicleId,
         row.shiftId,

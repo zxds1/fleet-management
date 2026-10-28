@@ -4,6 +4,7 @@
 // tiny HTTP server so k8s can restart/roll based on it.
 
 import { createServer, type Server } from "http";
+import { appMetrics } from "@fleet/shared";
 import type { PoolLike } from "@fleet/shared";
 import type { RedisBundle } from "./config/redis";
 
@@ -13,13 +14,18 @@ export interface HealthBundle {
 }
 
 export function startHealthServer(port: number, pool: PoolLike, redis: RedisBundle): HealthBundle {
-  const server = createServer(async (_req, res) => {
-    if (_req.url === "/healthz") {
+  const server = createServer(async (req, res) => {
+    if (req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
-    if (_req.url === "/readyz") {
+    if (req.url === "/metrics") {
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8" });
+      res.end(await appMetrics.render());
+      return;
+    }
+    if (req.url === "/readyz") {
       const checks: Record<string, boolean> = {};
       try {
         const client = await pool.connect();
@@ -32,7 +38,17 @@ export function startHealthServer(port: number, pool: PoolLike, redis: RedisBund
       } catch {
         checks.postgres = false;
       }
-      checks.redis = redis.client !== null;
+      checks.redis = false;
+      if (redis.client) {
+        try {
+          await redis.client.ping();
+          checks.redis = true;
+        } catch {
+          checks.redis = false;
+        }
+      } else {
+        checks.redis = true;
+      }
       const ok = Object.values(checks).every(Boolean);
       res.writeHead(ok ? 200 : 503, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: ok ? "ready" : "degraded", checks }));

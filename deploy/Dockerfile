@@ -16,7 +16,6 @@ WORKDIR /app
 # (bookworm security updates live in a separate suite).
 RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
-    apt-get install -y --no-install-recommends python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 # Every workspace's package.json must exist BEFORE `npm ci`: with the workspaces
@@ -41,13 +40,10 @@ CMD ["npm", "run", "dev:api"]
 # Production dependency tree: workspace packages only, no devDependencies, and
 # without the root package's own dependencies (build tooling only at the root).
 FROM node:20-bookworm-slim AS prod-deps
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 WORKDIR /app
-# bookworm security updates live in a separate suite; add it so apt-get
-# upgrade lands patched versions of OS packages (libgnutls30, libcap2, ...).
 RUN echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/bookworm-security.list && \
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends && \
-    apt-get install -y --no-install-recommends python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY packages/api/package.json     ./packages/api/package.json
@@ -55,7 +51,7 @@ COPY packages/shared/package.json  ./packages/shared/package.json
 COPY packages/db/package.json      ./packages/db/package.json
 COPY packages/worker/package.json  ./packages/worker/package.json
 COPY packages/ws/package.json      ./packages/ws/package.json
-RUN npm ci && \
+RUN npm ci --omit=dev && \
     # Remove npm entirely: trivy scans npm's internal node_modules
     # (usr/local/lib/node_modules/npm/node_modules/) which contain old
     # vulnerable versions of brace-expansion, cross-spawn, glob, minimatch,

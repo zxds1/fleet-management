@@ -64,6 +64,45 @@ export class PrivacyService {
     private readonly exportBucket: string,
   ) {}
 
+  /**
+   * Crypto-shredding: irreversibly destroy a user's encrypted PII.
+   */
+  async cryptoShredUser(userId: string): Promise<Result<void>> {
+    const client = this.privacy.dbClient;
+    try {
+      await client.query(
+        `UPDATE app.users
+            SET email_encrypted = NULL,
+                phone_encrypted = NULL,
+                encryption_key_version = NULL,
+                updated_at = now()
+          WHERE id = $1`,
+        [userId],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return err(new Forbidden("crypto-shred failed"));
+    }
+  }
+
+  async cryptoShredTenant(tenantId: string): Promise<Result<void>> {
+    const client = this.privacy.dbClient;
+    try {
+      await client.query(
+        `UPDATE app.users
+            SET email_encrypted = NULL,
+                phone_encrypted = NULL,
+                encryption_key_version = NULL,
+                updated_at = now()
+          WHERE id IN (SELECT user_id FROM app.user_tenants WHERE tenant_id = $1)`,
+        [tenantId],
+      );
+      return ok(undefined);
+    } catch (e) {
+      return err(new Forbidden("tenant crypto-shred failed"));
+    }
+  }
+
   // ── Export request ───────────────────────────────────────────────────────────
 
   /**

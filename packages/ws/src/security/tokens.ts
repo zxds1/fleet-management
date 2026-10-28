@@ -40,10 +40,17 @@ export function verifyAccessToken(token: string, env: Env): AccessTokenClaims {
   let lastError: unknown;
   for (const candidate of tried) {
     try {
-      return jwt.verify(token, candidate.secret, {
+      const claims = jwt.verify(token, candidate.secret, {
         algorithms: ["HS256"],
         issuer: env.JWT_ISSUER,
-      }) as AccessTokenClaims;
+      }) as AccessTokenClaims & { scope?: string };
+      if (claims.scope === "mfa" || !claims.sid) {
+        throw new Unauthenticated("Invalid access token");
+      }
+      if (!Array.isArray(claims.roles) || !Array.isArray(claims.permissions)) {
+        throw new Unauthenticated("Invalid access token");
+      }
+      return claims as AccessTokenClaims;
     } catch (e) {
       lastError = e;
     }

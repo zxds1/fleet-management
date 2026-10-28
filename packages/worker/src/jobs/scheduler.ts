@@ -5,6 +5,7 @@
 import { logger, metrics, reportError, workerDeadLetteredTotalM } from "@fleet/shared";
 import { DeadLetterRepository } from "@fleet/db";
 import type { PoolLike, ConfigClient, EventPublisher } from "@fleet/shared";
+import type { Redis } from "ioredis";
 import type { Env } from "../config/env";
 import type { VisionAdapter } from "./ocr";
 import type { CsvParser } from "./reconciliation";
@@ -144,19 +145,40 @@ export function buildSchedule(
 
 export class JobScheduler {
   private timers: ReturnType<typeof setInterval>[] = [];
-  constructor(private readonly jobs: ScheduledJob[], private readonly pool: PoolLike) {}
+  constructor(private readonly jobs: ScheduledJob[], private readonly pool: PoolLike, private readonly redis: Redis | null = null) {}
+
+  private async acquireLock(name: string): Promise<boolean> {
+    if (!this.redis) return true;
+    try {
+      const acquired = await this.redis.setnx(`worker:job:lock:${name}`, "1");
+      if (acquired === 1) {
+        await this.redis.expire(`worker:job:lock:${name}`, 60).catch(() => undefined);
+      }
+      return acquired === 1;
+    } catch {
+      return true;
+    }
+  }
 
   start(): void {
     for (const job of this.jobs) {
       logger.info("scheduling job", { name: job.name, intervalMs: job.intervalMs });
       const handle = (e: unknown) => this.onJobFailure(job, e);
+      const runIfLeader = async () => {
+        const ok = await this.acquireLock(job.name);
+        if (!ok) return;
+        try {
+          await job.run();
+        } finally {
+          if (this.redis) await this.redis.del(`worker:job:lock:${job.name}`).catch(() => undefined);
+        }
+      };
       const t = setInterval(() => {
-        job.run().catch(handle);
+        runIfLeader().catch(handle);
       }, job.intervalMs);
       if (typeof (t as { unref?: () => void }).unref === "function") (t as { unref: () => void }).unref();
       this.timers.push(t);
-      // Kick the first run shortly after boot.
-      setTimeout(() => job.run().catch(handle), 1000);
+      setTimeout(() => runIfLeader().catch(handle), 1000);
     }
   }
 

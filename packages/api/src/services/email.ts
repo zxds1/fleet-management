@@ -35,7 +35,15 @@ export interface EmailService {
 
 /** Dev/test implementation: prints the invitation to stdout. Swap for a real transport in prod. */
 export class ConsoleEmailService implements EmailService {
+  private readonly allowSecrets: boolean;
+  constructor(allowSecrets = true) {
+    this.allowSecrets = allowSecrets;
+  }
   async sendInvitation(input: InvitationEmailInput): Promise<void> {
+    if (!this.allowSecrets) {
+      logger.warn("email: console transport disabled in production; invitation not delivered", { to: input.to });
+      return;
+    }
     const expires = input.expiresAt.toISOString();
     // eslint-disable-next-line no-console
       console.info(
@@ -48,6 +56,10 @@ export class ConsoleEmailService implements EmailService {
   }
 
   async sendPasswordResetCode(input: PasswordResetEmailInput): Promise<void> {
+    if (!this.allowSecrets) {
+      logger.warn("email: console transport disabled in production; reset code not delivered", { to: input.to });
+      return;
+    }
     const expires = input.expiresAt.toISOString();
     // eslint-disable-next-line no-console
     console.info(

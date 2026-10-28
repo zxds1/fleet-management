@@ -46,7 +46,7 @@ export function buildContainer(environment: Env = loadEnv()): Container {
     config,
     store: redis.sessions,
     presigner,
-    email: environment.RESEND_API_KEY ? new ResendEmailService(environment) : new ConsoleEmailService(),
+    email: environment.RESEND_API_KEY ? new ResendEmailService(environment) : new ConsoleEmailService(environment.NODE_ENV !== "production"),
     redis,
     /** Idle-timeout touch (A1.6): bump last_seen_at on the session row (fire-and-forget from auth). */
     touchSession: async (userId: string, sessionId: string): Promise<void> => {

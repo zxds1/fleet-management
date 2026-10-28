@@ -82,7 +82,17 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
       } catch {
         checks.postgres = false;
       }
-      checks.redis = redis.client !== null;
+      checks.redis = false;
+      if (redis.client) {
+        try {
+          await redis.client.ping();
+          checks.redis = true;
+        } catch {
+          checks.redis = false;
+        }
+      } else {
+        checks.redis = true;
+      }
       const ok = Object.values(checks).every(Boolean);
       res.writeHead(ok ? 200 : 503, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: ok ? "ready" : "degraded", checks }));
@@ -111,6 +121,14 @@ export async function bootstrap(environment: Env = loadEnv()): Promise<WsProcess
 
 async function main(): Promise<void> {
   const env = loadEnv();
+  const mustEnforce = env.NODE_ENV === "production";
+  const insecureJwt = env.JWT_SECRET === "dev-only-insecure-jwt-secret-change-me";
+  if (mustEnforce && (insecureJwt || !env.JWT_SECRET)) {
+    throw new Error(
+      "Refusing to boot: JWT_SECRET uses the insecure dev default or is unset. " +
+        "Set a real secret via the platform secret store before running in production.",
+    );
+  }
   initErrorReporter({
     SENTRY_DSN: env.SENTRY_DSN,
     SENTRY_ENVIRONMENT: env.SENTRY_ENVIRONMENT,

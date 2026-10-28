@@ -33,12 +33,12 @@ export class RetentionJob {
         `SELECT telemetry.fn_drop_expired_location_partitions($1, $2) AS dropped`,
         [rawDays, wet],
       );
-      const media = await tx.client.query<{ id: string; bucket: string; key: string }>(
-        `SELECT id, bucket, key FROM app.fn_media_due_for_deletion(1000)`,
+      const media = await tx.client.query<{ id: string; bucket: string; object_key: string }>(
+        `SELECT id, bucket, object_key FROM app.fn_media_due_for_deletion(1000)`,
       );
       if (wet && this.presigner) {
         for (const m of media.rows) {
-          await this.presigner.deleteObject(m.bucket, m.key);
+          await this.presigner.deleteObject(m.bucket, m.object_key);
           mediaDeleted++;
         }
       } else if ((media.rowCount ?? 0) > 0) {

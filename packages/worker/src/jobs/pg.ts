@@ -212,8 +212,7 @@ export class PgFuelAnomalyRepository implements FuelAnomalyRepository {
   }
 
   async markProcessed(purchaseId: string): Promise<void> {
-    await transaction(this.pool, async (tx) =>
-      tx.client.query(`UPDATE app.fuel_purchases SET ocr_status = CASE WHEN ocr_status='PENDING' THEN 'PROCESSED' ELSE ocr_status END WHERE id=$1`, [purchaseId]),
-    );
+    // No-op: fuel_purchase_anomalies are deduplicated via ON CONFLICT.
+    void purchaseId;
   }
 }

@@ -39,6 +39,9 @@ const EnvSchema = z.object({
   // AES-GCM data key for users.mfa_secret_encrypted (02 §3). 32 bytes, base64.
   MFA_ENCRYPTION_KEY: z.string().default(Buffer.alloc(32, 7).toString("base64")),
 
+  // Symmetric key for PII column encryption (app.pii_encryption_key_v1 GUC). 32 bytes, base64.
+  PII_ENCRYPTION_KEY: z.string().default(Buffer.alloc(32, 7).toString("base64")),
+
   // D5 — private buckets, 60 s presigned PUT, separate Object-Locked accident bucket.
   AWS_REGION: z.string().default("af-south-1"),
   S3_MEDIA_BUCKET: z.string().default("fleet-media-local"),

@@ -171,12 +171,12 @@ export class AnalyticsService {
     }
 
     const userRes = await this.client.query<{ id: string; email: string | null; full_name: string | null }>(
-      `SELECT u.id, u.email, u.full_name
+      `SELECT u.id, pgp_sym_decrypt(u.email_encrypted, $3) AS email, u.full_name
          FROM app.users u
          JOIN app.user_tenants ut ON ut.user_id = u.id AND ut.tenant_id = $1
         WHERE u.id = $2 AND u.deleted_at IS NULL
         LIMIT 1`,
-      [caller.tenant_id, targetUserId],
+      [caller.tenant_id, targetUserId, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="],
     );
     const user = userRes.rows[0];
     if (!user) return err(new NotFound("User not found in this tenant"));
@@ -401,14 +401,14 @@ export class AnalyticsService {
       vehicle_id: string | null;
       driver_id: string | null;
     }>(
-      `SELECT u.id AS user_id, u.email, u.full_name, ma.vehicle_id, ma.driver_id
+      `SELECT u.id AS user_id, pgp_sym_decrypt(u.email_encrypted, $2) AS email, u.full_name, ma.vehicle_id, ma.driver_id
           FROM app.users u
           JOIN app.user_tenants ut ON ut.user_id = u.id AND ut.tenant_id = $1
           JOIN app.user_roles ur ON ur.user_id = u.id AND ur.role_code = 'FLEET_MANAGER'
           LEFT JOIN app.manager_assignments ma ON ma.user_id = u.id AND ma.tenant_id = $1
          WHERE u.deleted_at IS NULL
-         ORDER BY u.email ASC`,
-      [scope.tenant_id],
+         ORDER BY pgp_sym_decrypt(u.email_encrypted, $2) ASC`,
+      [scope.tenant_id, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="],
     );
 
     // Group the denormalised rows back into per-manager assignment lists.

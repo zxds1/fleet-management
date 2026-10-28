@@ -11,6 +11,7 @@ export type EventHandler = (payload: unknown) => void;
 export interface EventBus {
   publish(channel: string, payload: unknown): Promise<void>;
   subscribe(channel: string, handler: EventHandler): Promise<void>;
+  unsubscribe(channel: string, handler: EventHandler): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -40,6 +41,13 @@ export class MemoryEventBus implements EventBus {
     this.handlers.set(channel, set);
   }
 
+  async unsubscribe(channel: string, handler: EventHandler): Promise<void> {
+    const set = this.handlers.get(channel);
+    if (!set) return;
+    set.delete(handler);
+    if (set.size === 0) this.handlers.delete(channel);
+  }
+
   async close(): Promise<void> {
     this.handlers.clear();
   }
@@ -47,17 +55,28 @@ export class MemoryEventBus implements EventBus {
 
 export class RedisEventBus implements EventBus {
   private readonly sub: Redis;
+  private readonly pub: Redis;
   private readonly handlers = new Map<string, Set<EventHandler>>();
   private closed = false;
 
   constructor(private readonly url: string) {
+    const tlsOpts = url.startsWith("rediss://") ? { tls: { rejectUnauthorized: true } } : undefined;
     this.sub = new Redis(url, {
       lazyConnect: false,
       maxRetriesPerRequest: 2,
       enableOfflineQueue: false,
       retryStrategy: (times) => Math.min(times * 200, 5_000),
+      ...tlsOpts,
+    });
+    this.pub = new Redis(url, {
+      lazyConnect: false,
+      maxRetriesPerRequest: 2,
+      enableOfflineQueue: false,
+      retryStrategy: (times) => Math.min(times * 200, 5_000),
+      ...tlsOpts,
     });
     this.sub.on("error", (err) => logger.warn("eventbus redis error", { message: err.message }));
+    this.pub.on("error", (err) => logger.warn("eventbus redis pub error", { message: err.message }));
     this.sub.on("message", (channel, message) => {
       let payload: unknown = message;
       try {
@@ -79,7 +98,7 @@ export class RedisEventBus implements EventBus {
     if (this.closed) return;
     const body = typeof payload === "string" ? payload : JSON.stringify(payload);
     try {
-      await this.sub.publish(channel, body);
+      await this.pub.publish(channel, body);
     } catch (e) {
       logger.warn("eventbus publish failed", { message: (e as Error).message });
     }
@@ -98,12 +117,35 @@ export class RedisEventBus implements EventBus {
     }
   }
 
+  async unsubscribe(channel: string, handler: EventHandler): Promise<void> {
+    const set = this.handlers.get(channel);
+    if (!set) return;
+    set.delete(handler);
+    if (set.size > 0) {
+      this.handlers.set(channel, set);
+      return;
+    }
+    this.handlers.delete(channel);
+    if (!this.closed) {
+      try {
+        await this.sub.unsubscribe(channel);
+      } catch (e) {
+        logger.warn("eventbus unsubscribe failed", { message: (e as Error).message });
+      }
+    }
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     try {
       await this.sub.quit();
     } catch {
       this.sub.disconnect();
+    }
+    try {
+      await this.pub.quit();
+    } catch {
+      this.pub.disconnect();
     }
   }
 }

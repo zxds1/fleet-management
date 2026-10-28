@@ -11,6 +11,7 @@ const SELECT_DUE = `
   SELECT *
   FROM app.outbox_events
   WHERE published_at IS NULL AND available_at <= now()
+  AND dead_lettered_at IS NULL
   ORDER BY (CASE priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END), id
   LIMIT $1`;
 
@@ -74,7 +75,7 @@ export class PgOutboxRelay implements OutboxRelay {
           const dead = attempts >= (this.opts.maxAttempts ?? 5);
           await client.query(MARK_FAILED, [attempts, (e as Error).message, dead, ev.id]);
           logger.error("outbox handler failed", { service_name: "db", event_type: ev.event_type, attempts, dead, error: (e as Error).message });
-          errorsTotalM().inc({ error_code: "OUTBOX_HANDLER_FAILED" });
+          errorsTotalM().inc({ error_code: "OUTBOX_HANDLER_FAILED", route: "outbox" });
           if (dead) workerDeadLetteredTotalM().inc({ job: ev.event_type, stream: "outbox" });
         }
       }

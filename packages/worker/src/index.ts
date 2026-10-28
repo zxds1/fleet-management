@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   registerHandlers(relay, relayInfra);
   relay.start();
 
-  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, vision, infra.publisher, presigner), infra.pool);
+  const scheduler = new JobScheduler(buildSchedule(infra.pool, infra.config, e, vision, infra.publisher, presigner), infra.pool, infra.redis.client);
   scheduler.start();
 
   await new Promise<void>(() => {});

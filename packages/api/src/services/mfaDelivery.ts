@@ -4,6 +4,12 @@
 // its credentials are absent so the caller (login) can surface a clear "could not send code" error.
 
 import { logger } from "@fleet/shared";
+
+/** Masks a delivery destination so PII is not written to logs. */
+function redactDestination(value: string): string {
+  if (value.length <= 4) return "***";
+  return value.slice(0, 2) + "***" + value.slice(-2);
+}
 import type { Env } from "../config/env";
 
 export interface MfaDeliveryService {
@@ -41,7 +47,7 @@ export class ResendMfaDeliveryService implements MfaDeliveryService {
         throw new Error(`Resend email delivery failed with status ${res.status}`);
       }
     } catch (e) {
-      logger.error("mfa email delivery failed", { to, message: (e as Error).message });
+      logger.error("mfa email delivery failed", { to: redactDestination(to), message: (e as Error).message });
       throw e;
     } finally {
       clearTimeout(timer);
@@ -74,7 +80,7 @@ export class ResendMfaDeliveryService implements MfaDeliveryService {
         throw new Error(`Africa's Talking SMS delivery failed with status ${res.status}`);
       }
     } catch (e) {
-      logger.error("mfa sms delivery failed", { to, message: (e as Error).message });
+      logger.error("mfa sms delivery failed", { to: redactDestination(to), message: (e as Error).message });
       throw e;
     } finally {
       clearTimeout(timer);

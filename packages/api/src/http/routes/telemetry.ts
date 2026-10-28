@@ -31,7 +31,7 @@ export function createTelemetryRouter(deps: TelemetryRouterDeps): Router {
   router.post(
     "/webhook",
     safeJson(),
-    webhookAuth(deps.env.WEBHOOK_SECRET, deps.env.SECURITY_ENFORCE === "always"),
+    webhookAuth(deps.env.WEBHOOK_SECRET, deps.env.SECURITY_ENFORCE === "always" || deps.env.SECURITY_ENFORCE === "production"),
     asyncHandler(async (req, res) => {
       const parsed = TraccarWebhookSchema.safeParse(req.body);
       if (!parsed.success) {
