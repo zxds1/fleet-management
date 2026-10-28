@@ -16,6 +16,7 @@ import '../core/location.dart';
 import '../core/offline/drain_scheduler.dart';
 import '../core/secure_store.dart';
 import '../core/kv_store.dart';
+import '../core/realtime.dart';
 
 /// Composition root: wires SessionService → ApiClient →
 /// OfflineQueue → MediaService. Holds the shared service instances so screens
@@ -31,6 +32,7 @@ class AppContainer {
     required this.scheduler,
     required this.prefs,
     required this.drainedController,
+    required this.realtime,
   });
 
   /// Session state machine (auth, PIN, consent, shell).
@@ -60,6 +62,7 @@ class AppContainer {
   /// Emits the paths of writes that drained successfully so the app can
   /// invalidate exactly the providers that read them.
   final StreamController<List<String>> drainedController;
+  final RealtimeService realtime;
   Stream<List<String>> get drained => drainedController.stream;
 
   /// Builds a container from already-constructed services, for tests that
@@ -85,6 +88,10 @@ class AppContainer {
       scheduler: scheduler,
       prefs: prefs,
       drainedController: StreamController<List<String>>.broadcast(),
+      realtime: RealtimeService(
+        tokenProvider: () async => null,
+        onEvent: (_, _) {},
+      ),
     );
   }
 
@@ -115,6 +122,11 @@ class AppContainer {
 
     final drained = StreamController<List<String>>.broadcast();
 
+    final realtime = RealtimeService(
+      tokenProvider: () async => session.accessToken,
+      onEvent: (event, _) => drained.add([event]),
+    );
+
     final queue = OfflineQueue(
       store: queueStore,
       api: api,
@@ -144,12 +156,16 @@ class AppContainer {
       scheduler: scheduler,
       prefs: prefs,
       drainedController: drained,
+      realtime: realtime,
     );
 
     // A reconnect is the moment the offline promise has to be kept.
     connectivity.changes.listen((online) {
       if (online) scheduler.kick();
     });
+
+    // Realtime socket: listens for server-pushed invalidations.
+    unawaited(realtime.connect());
 
     return container;
   }

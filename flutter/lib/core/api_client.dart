@@ -25,7 +25,8 @@ class ApiClient {
     SecurityContext? trustContext,
   }) : _dio = dio ?? Dio() {
     if (dio == null) {
-      _dio.options.baseUrl = _normalizeBase(Config.apiBaseUrl);
+      final base = Config.demoOverrideUrl ?? Config.apiBaseUrl;
+      _dio.options.baseUrl = _normalizeBase(base);
       // Certificate pinning is installed on every connection the client makes.
       _dio.httpClientAdapter = PinnedHttpClientAdapter(
         pins: Config.sslPins.toSet(),

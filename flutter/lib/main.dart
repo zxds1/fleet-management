@@ -7,6 +7,7 @@ import 'app/app.dart';
 import 'app/container.dart';
 import 'app/providers.dart';
 import 'core/config.dart';
+import 'core/demo_backend.dart';
 import 'core/pinning.dart';
 import 'core/security.dart';
 import 'core/security_probe.dart';
@@ -15,6 +16,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance();
+
+  if (Config.demoMode && !kIsWeb) {
+    final backend = MockBackend();
+    await backend.start();
+    Config.demoOverrideUrl = '${backend.host}/api/v1';
+  }
 
   // The API's CA certificate, bundled so the client trusts it and nothing
   // else. Absent in a development build, where the system roots are fine.

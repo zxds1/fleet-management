@@ -6,10 +6,10 @@ import 'config.dart';
 /// Principal, so there is no subscribe event. Events invalidate query keys;
 /// payloads are never written into caches.
 class RealtimeService {
-  RealtimeService({required this._token, required this._onEvent});
+  RealtimeService({required this.tokenProvider, required this.onEvent});
 
-  final String _token;
-  final void Function(String, dynamic) _onEvent;
+  final Future<String?> Function() tokenProvider;
+  final void Function(String, dynamic) onEvent;
   io.Socket? _socket;
   final Map<String, DateTime> _lastInvalidate = {};
   bool _connected = false;
@@ -25,21 +25,21 @@ class RealtimeService {
     'driver:accident',
   ];
 
-  void connect() {
+  Future<void> connect() async {
     _socket?.dispose();
+    final token = await tokenProvider();
     final socket = io.io(
       Config.wsUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
-          .setAuth({'token': _token})
+          .setAuth({'token': token ?? ''})
           .build(),
     );
     socket.onConnect((_) {
       _connected = true;
-      // snapshot-on-connect: fire every key immediately
       for (final event in events) {
-        _onEvent(event, const {'snapshot': true});
+        onEvent(event, const {'snapshot': true});
       }
     });
     socket.onDisconnect((_) => _connected = false);
@@ -49,10 +49,10 @@ class RealtimeService {
         final now = DateTime.now();
         final last = _lastInvalidate[event];
         if (last != null && now.difference(last) < Policy.realtimeThrottle) {
-          return; // throttled: the snapshot on reconnect covers the gap
+          return;
         }
         _lastInvalidate[event] = now;
-        _onEvent(event, payload);
+        onEvent(event, payload);
       });
     }
     socket.connect();

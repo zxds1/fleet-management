@@ -4,14 +4,18 @@ import 'pinning.dart';
 /// API on :4000 (docker-compose), WS gateway on :8081 (run separately).
 class Config {
   Config._();
-  static const String apiBaseUrl = String.fromEnvironment(
+  static const String _defaultApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:4000/api/v1',
   );
-  static const String wsUrl = String.fromEnvironment(
+  static const String apiBaseUrl = _defaultApiBaseUrl;
+  /// Mutable override used by demo mode to point at the in-process mock backend.
+  static String? demoOverrideUrl;
+  static const String _defaultWsUrl = String.fromEnvironment(
     'WS_URL',
     defaultValue: 'ws://localhost:8081',
   );
+  static const String wsUrl = _defaultWsUrl;
   static const String adminContactUrl = String.fromEnvironment(
     'ADMIN_CONTACT_URL',
     defaultValue: 'tel:+254700000000',
@@ -52,7 +56,7 @@ class Config {
   static const String pinnedCaAsset =
       String.fromEnvironment('PINNED_CA_ASSET', defaultValue: 'assets/pins/api-ca.pem');
 
-  static const String appName = 'Helix';
+  static const bool demoMode = bool.fromEnvironment('DEMO_MODE', defaultValue: false);
   static const String urlScheme = 'helix';
   static const String consentVersion = '2026.1'; // must match the server's CONSENT_REQUIRED_VERSION
 }
